@@ -3,37 +3,60 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import { readdir } from 'fs/promises';
 import path from 'path';
+import dotenv from 'dotenv'
+import { Worker } from 'worker_threads';
 import bs58 from 'bs58';
 import * as web3 from '@solana/web3.js';
 import { getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
+import { readFileSync } from 'fs';
+import { exit } from 'process';
+import type { BotConfig, WorkerConfig } from './types.ts';
 
-interface BotConfig {
-    thread_cnt: number;
-    buy_interval: number;
-    spend_limit: number;
-    return_pubkey: string;
-    mcap_threshold: number;
-    token_name: string;
-    token_ticker: string;
+interface WorkerPromise {
+    worker: Worker;
+    promise: Promise<void>;
 }
 
+// bot setup
+dotenv.config();
+const keysDir = './keys';
+const workerPath = './dist/worker.js';
+let workers = new Array<WorkerPromise>();
+
 // web3 setup
-const connection = new web3.Connection('https://blissful-nameless-sun.solana-mainnet.quiknode.pro/dcd81a3ffa503ee7afa54e59693f83a619204fd4/', 'confirmed');
-const programID = new web3.PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-const metaplexProgramID = new web3.PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+const connection = new web3.Connection(process.env.RPC || '', 'confirmed');
+const programID = new web3.PublicKey(process.env.PROGRAM_ID || '');
+const metaplexProgramID = new web3.PublicKey(process.env.METAPLEX_PROGRAM_ID || '');
 let subscriptionID: number | undefined;
 let mint: web3.PublicKey | undefined;
 
 // bot setuo
 let config: BotConfig;
 
+function filter_keys(files: string[]): string[] {
+    return files.filter(file => path.extname(file) === '.json' && /key[0-9]+/.test(path.basename(file)));
+}
+
 async function count_keys(): Promise<number> {
     try {
-        const files = await readdir('./keys');
-        return files.filter(file => path.extname(file) === '.json').length;
+        const files = await readdir(keysDir);
+        return filter_keys(files).length;
     } catch (err) {
         console.error('Error reading keys directory:', err);
         return 0;
+    }
+}
+
+async function get_keys(): Promise<Uint8Array[]> {
+    try {
+        const files = await readdir(keysDir);
+        return filter_keys(files).map(file => {
+            const content = readFileSync(path.join(keysDir, file), 'utf8');
+            return new Uint8Array(JSON.parse(content));
+        });
+    } catch (err) {
+        console.error('Error reading keys directory:', err);
+        return [];
     }
 }
 
@@ -134,9 +157,9 @@ function wait_drop_sub() {
         if (logs && logs.includes('Program log: Instruction: MintTo')) {
             try {
                 const tx = await connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
-                if (!tx || !tx.meta || !tx.transaction.message) return;
+                if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
 
-                const inner_instructions = tx.meta?.innerInstructions;
+                const inner_instructions = tx.meta.innerInstructions;
                 if (!inner_instructions) return;
 
                 for (const inner of inner_instructions) {
@@ -146,18 +169,27 @@ function wait_drop_sub() {
                         const partial = instruction as web3.PartiallyDecodedInstruction;
                         const [meta, bytes_read] = decode_metaplex_instr(partial.data);
                         if (bytes_read <= 0) continue;
-                        if (meta.data.name === config.token_name && meta.data.symbol.includes(config.token_ticker))
-                            mint = partial.accounts[1];
+                        if (meta.data.name === config.token_name && meta.data.symbol.includes(config.token_ticker)) {
+                            if (tx.meta.postTokenBalances[0].mint) {
+                                mint = new web3.PublicKey(tx.meta.postTokenBalances[0].mint);
+                            } else {
+                                mint = partial.accounts[1];
+                            }
+                        }
                     }
                 }
                 const signers = tx.transaction.message.accountKeys.filter(key => key.signer);
-                if (signers.some(({ pubkey }) => mint && pubkey.equals(mint)))
+                if (signers.some(({ pubkey }) => mint !== undefined && pubkey.equals(mint)))
                     await wait_drop_unsub();
             } catch (err) {
                 console.error('Error fetching the parsed transaction:', err);
             }
         }
     }, 'confirmed',);
+    if (subscriptionID === undefined) {
+        console.error('Error subscribing to logs.');
+        exit(1);
+    }
 }
 
 async function wait_drop_unsub() {
@@ -165,6 +197,43 @@ async function wait_drop_unsub() {
         connection.removeOnLogsListener(subscriptionID)
             .then(() => subscriptionID = undefined)
             .catch(err => console.error('Error unsubscribing from logs:', err));
+    }
+}
+
+async function start_workers() {
+    const secrets = await get_keys();
+    if (secrets.length === 0) {
+        console.error('No keys available.');
+        exit(1);
+    }
+    console.log('Starting the workers...');
+    for (let i = 0; i < config.thread_cnt; i++) {
+        const data: WorkerConfig = {
+            secret: secrets[i],
+            id: i + 1,
+            config: config
+        };
+        const worker = new Worker(workerPath, { workerData: data });
+        const promise = new Promise<void>((resolve, reject) => {
+            worker.on('message', (msg) => console.log('Message from worker:', msg));
+            worker.on('error', (err) => { console.error('Worker error:', err); reject() });
+            worker.on('exit', (code) => {
+                if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
+                else resolve();
+            }
+            );
+        });
+        workers.push({ worker: worker, promise: promise });
+    }
+}
+
+async function wait_for_workers() {
+    let promises = workers.map(w => w.promise);
+    try {
+        await Promise.all(promises);
+        console.log('All workers have finished executing.');
+    } catch (error) {
+        console.error('One of the workers encountered an error:', error);
     }
 }
 
@@ -184,26 +253,29 @@ async function start() {
     };
 
     console.log('Starting the bot...');
-    wait_drop_sub();
-    if (mint) console.log('Token detected:', mint.toString());
+    await start_workers();
+    // wait_drop_sub();
+    // if (mint) console.log('Token detected:', mint.toString());
+    setTimeout(() => {
+        workers.forEach(({ worker }) => worker.postMessage({ command: 'buy', mint: mint }));
+    }, 3000);
+    await wait_for_workers();
 }
 
+
+//------------------------------------------------------------
+// main
 const program = new Command();
-
 console.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
-
 program
     .version('1.0.0')
     .description('Solana Buy Bot CLI');
-
 program
     .command('start')
     .alias('s')
     .description('Start the bot')
     .action(start);
-
 program.parse(process.argv);
-
 if (!process.argv.slice(2).length) {
     program.outputHelp();
 }
