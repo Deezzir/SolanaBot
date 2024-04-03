@@ -5,6 +5,7 @@ import type { Interface } from 'readline';
 declare global {
     var keysDir: string;
     var workerPath: string;
+    var featchMintApiURL: string;
     var rl: Interface;
 
     var connection: Connection;

@@ -3,8 +3,26 @@ import { Worker } from 'worker_threads';
 import bs58 from 'bs58';
 import * as web3 from '@solana/web3.js';
 import { getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
-import { exit } from 'process';
 import * as common from './common.js';
+
+export async function fetch_mint(mint: string): Promise<Object> {
+    return fetch(`${global.featchMintApiURL}/${mint}`)
+        .then(response => response.json())
+        .then(data => {
+            return data;
+        })
+        .catch(err => common.log_error(`[ERROR] Failed fetching the mint: ${err}`));
+}
+
+export function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
+    workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
+}
+
+export async function worker_update_mint(workers: common.WorkerPromise[], mint: string) {
+    const mint_meta = await fetch_mint(mint);
+    if (mint_meta)
+        worker_post_message(workers, 'mint', mint_meta);
+}
 
 export async function get_config(): Promise<common.BotConfig> {
     let answers: common.BotConfig;
@@ -15,22 +33,29 @@ export async function get_config(): Promise<common.BotConfig> {
                 type: 'input',
                 name: 'thread_cnt',
                 message: `Enter the number of bots to run(${keys_cnt} accounts available):`,
-                validate: value => common.validate_number(value, 0, keys_cnt) ? true : `Please enter a valid number greater than 0 and less or equal to ${keys_cnt}.`,
-                filter: value => common.validate_number(value, 0, keys_cnt) ? parseInt(value, 10) : value
+                validate: value => common.validate_int(value, 0, keys_cnt) ? true : `Please enter a valid number greater than 0 and less or equal to ${keys_cnt}.`,
+                filter: value => common.validate_int(value, 0, keys_cnt) ? parseInt(value, 10) : value
             },
             {
                 type: 'input',
                 name: 'buy_interval',
                 message: 'Enter the interval between each buy in seconds:',
-                validate: value => common.validate_number(value, 0) ? true : 'Please enter a valid number greater than 0.',
-                filter: value => common.validate_number(value, 0) ? parseInt(value, 10) : value
+                validate: value => common.validate_int(value, 0) ? true : 'Please enter a valid number greater than 0.',
+                filter: value => common.validate_int(value, 0) ? parseInt(value, 10) : value
             },
             {
                 type: 'input',
                 name: 'spend_limit',
                 message: 'Enter the limit of Solana that each bot can spend:',
-                validate: value => common.validate_number(value, 0) ? true : 'Please enter a valid number greater than 0.',
-                filter: value => common.validate_number(value, 0) ? parseInt(value, 10) : value
+                validate: value => common.validate_float(value, 0.0) ? true : 'Please enter a valid number greater than 0.',
+                filter: value => common.validate_float(value, 0.0) ? parseFloat(value) : value
+            },
+            {
+                type: 'input',
+                name: 'start_buy',
+                message: 'Enter the start Solana amount that the bot will buy the token for:',
+                validate: value => common.validate_float(value, 0.0) ? true : 'Please enter a valid number greater than 0.',
+                filter: value => common.validate_float(value, 0.0) ? parseFloat(value) : value
             },
             {
                 type: 'input',
@@ -42,8 +67,8 @@ export async function get_config(): Promise<common.BotConfig> {
                 type: 'input',
                 name: 'mcap_threshold',
                 message: 'Enter the threshold market cap:',
-                validate: value => common.validate_number(value, 0) ? true : 'Please enter a valid number greater than 0.',
-                filter: value => common.validate_number(value, 0) ? parseInt(value, 10) : value
+                validate: value => common.validate_int(value, 0) ? true : 'Please enter a valid number greater than 0.',
+                filter: value => common.validate_int(value, 0) ? parseInt(value, 10) : value
             },
             {
                 type: 'input',
@@ -123,7 +148,7 @@ export function wait_drop_sub(token_name: string, token_ticker: string, mint: we
     }, 'confirmed',);
     if (subscriptionID === undefined) {
         common.log_error('[ERROR] Failed to subscribe to logs.');
-        exit(1);
+        global.rl.close();
     }
 }
 
@@ -136,10 +161,15 @@ async function wait_drop_unsub() {
 }
 
 export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[]) {
-    const secrets = await common.get_keys();
+    const secrets: Uint8Array[] = [];
+    const ok = await common.get_keys(secrets, config.thread_cnt);
     if (secrets.length === 0) {
         common.log_error('[ERROR] No keys available.');
-        exit(1);
+        global.rl.close();
+    }
+    if (!ok) {
+        common.log_error('[ERROR] First, topup the specified accounts.');
+        global.rl.close();
     }
     common.log('[Main Worker] Starting the workers...');
     for (let i = 0; i < config.thread_cnt; i++) {
