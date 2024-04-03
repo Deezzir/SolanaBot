@@ -1,21 +1,21 @@
 import { parentPort, workerData } from 'worker_threads'
 import * as web3 from '@solana/web3.js';
-import type { WorkerConfig } from './types.ts';
+import * as common from './common.js';
 
-const config = workerData as WorkerConfig;
+const config = workerData as common.WorkerConfig;
 const keypair = web3.Keypair.fromSecretKey(config.secret);
-console.log(`Worker ${workerData.id} started, adress: ${keypair.publicKey.toString()}`);
+parentPort?.postMessage(`[Worker ${workerData.id}] Started, adress: ${keypair.publicKey.toString()}`);
 
-parentPort?.once('message', async (msg) => {
+parentPort?.on('message', async (msg) => {
     if (msg.command === 'buy') {
-        console.log(`Worker ${workerData.id} started buying the token with mint: ${msg.mint}`);
+        parentPort?.postMessage(`[Worker ${workerData.id}] Started buying the token with mint: ${msg.mint}`);
         setTimeout(() => {
-            parentPort?.postMessage(`Worker ${workerData.id} completed its task.`);
+            parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);
-        }, 1000000);
+        }, 3000);
     }
     if (msg.command === 'stop') {
-        console.log(`Worker ${workerData.id} started selling the token with mint: ${msg.mint}`);
+        parentPort?.postMessage(`[Worker ${workerData.id}] Started selling the token with mint: ${msg.mint}`);
         process.exit(0);
     }
 });
