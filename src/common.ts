@@ -245,12 +245,21 @@ async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean
 }
 
 function get_token_amount_raw(amount: number, token: TokenMeta): number {
-    return Math.floor(amount * token.total_supply / token.market_cap);
+    return Math.round(amount * token.total_supply / token.market_cap);
 }
 
-function calc_slippage(sol_amount: number, slippage: number): number {
+function get_solana_amount_raw(amount: number, token: TokenMeta): number {
+    return Math.round(amount * token.market_cap / token.total_supply);
+}
+
+function calc_slippage_up(sol_amount: number, slippage: number): number {
     const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return lamports * (1 + slippage) + lamports * (1 + slippage) / 100;
+    return Math.round(lamports * (1 + slippage) + lamports * (1 + slippage) / 100);
+}
+
+function calc_slippage_down(sol_amount: number, slippage: number): number {
+    const lamports = sol_amount * LAMPORTS_PER_SOL;
+    return Math.round(lamports * (1 - slippage));
 }
 
 function buy_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
@@ -258,7 +267,16 @@ function buy_data(sol_amount: number, token_amount: number, slippage: number): B
     const token_amount_buf = Buffer.alloc(8);
     token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
     const slippage_buf = Buffer.alloc(8);
-    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage(sol_amount, slippage)), 0);
+    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_up(sol_amount, slippage)), 0);
+    return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
+}
+
+function sell_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
+    const instruction_buf = Buffer.from('33e685a4017f83ad', 'hex');
+    const token_amount_buf = Buffer.alloc(8);
+    token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
+    const slippage_buf = Buffer.alloc(8);
+    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_down(sol_amount, slippage)), 0);
     return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
 }
 
@@ -268,7 +286,7 @@ export async function get_token_balance(pubkey: PublicKey, mint: PublicKey): Pro
     return account_info.value || 0;
 }
 
-export async function send_tokens(tokens: number, sender: Signer, receiver: PublicKey, owner: PublicKey, priority: boolean = false, retries: number = 0): Promise<string> {
+export async function send_tokens(token_amount: number, sender: Signer, receiver: PublicKey, owner: PublicKey, priority: boolean = false, retries: number = 0): Promise<string> {
     const max_retries = 5;
     const retry_delay = 1000;
 
@@ -294,13 +312,13 @@ export async function send_tokens(tokens: number, sender: Signer, receiver: Publ
             sender.publicKey,
             receiver,
             owner,
-            tokens
+            token_amount
         ));
         return await sendAndConfirmTransaction(global.connection, tx, [sender]);
     } catch (err) {
         if (retries <= max_retries - 1) {
             await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return send_tokens(tokens, sender, receiver, owner, priority, retries + 1);
+            return send_tokens(token_amount, sender, receiver, owner, priority, retries + 1);
         } else {
             throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
         }
@@ -324,7 +342,7 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function buy_token(sol_amount: number, slippage: number, buyer: Signer, mint_meta: TokenMeta, priority: boolean = false, retries: number = 0): Promise<string> {
+export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: TokenMeta, slippage: number = 0.05, priority: boolean = false, retries: number = 0): Promise<string> {
     const max_retries = 5;
     const retry_delay = 1000;
 
@@ -386,7 +404,65 @@ export async function buy_token(sol_amount: number, slippage: number, buyer: Sig
     } catch (err) {
         if (retries <= max_retries - 1) {
             await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return buy_token(sol_amount, slippage, buyer, mint_meta, priority, retries + 1);
+            return buy_token(sol_amount, buyer, mint_meta, slippage, priority, retries + 1);
+        } else {
+            throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
+        }
+    }
+}
+
+export async function sell_token(token_amount: number, seller: Signer, mint_meta: TokenMeta, slippage: number = 0.05, priority: boolean = false, retries: number = 0): Promise<string> {
+    const max_retries = 5;
+    const retry_delay = 1000;
+
+    const mint = new PublicKey(mint_meta.mint);
+    const bonding_curve = new PublicKey(mint_meta.bonding_curve);
+    const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
+
+    const sol_amount = get_solana_amount_raw(token_amount, mint_meta);
+    const instruction_data = sell_data(sol_amount, token_amount, slippage);
+
+    try {
+        const assoc_address = await calc_assoc_token_addr(seller.publicKey, mint);
+
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+        const tx = new Transaction({
+            feePayer: seller.publicKey,
+            blockhash: blockhash,
+            lastValidBlockHeight: lastValidBlockHeight,
+            signatures: [],
+        });
+        if (priority) {
+            const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
+                units: 1000000,
+            });
+            const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
+                microLamports: 100000,
+            });
+            tx.add(modify_cu);
+            tx.add(priority_fee);
+        }
+        tx.add(new TransactionInstruction({
+            keys: [
+                { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
+                { pubkey: ACCOUNT_1, isSigner: false, isWritable: true },
+                { pubkey: mint, isSigner: false, isWritable: false },
+                { pubkey: bonding_curve, isSigner: false, isWritable: true },
+                { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
+                { pubkey: assoc_address, isSigner: false, isWritable: true },
+                { pubkey: seller.publicKey, isSigner: true, isWritable: true },
+                { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+                { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            ],
+            programId: TRADE_PROGRAM_ID,
+            data: instruction_data,
+        }));
+        return await sendAndConfirmTransaction(global.connection, tx, [seller]);
+    } catch (err) {
+        if (retries <= max_retries - 1) {
+            await new Promise(resolve => setTimeout(resolve, retry_delay));
+            return sell_token(token_amount, seller, mint_meta, slippage, priority, retries + 1);
         } else {
             throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
         }
