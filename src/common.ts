@@ -147,6 +147,9 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
             else
                 log_error('Invalid mint public key.');
             break;
+        default:
+            log_error('Invalid key.');
+            break;
     }
 }
 

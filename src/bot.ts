@@ -209,7 +209,7 @@ async function main() {
                         break;
                     case 'collect':
                         worker_post_message(workers, 'collect');
-                        collect_token(config.mint, new PublicKey(config.return_pubkey));
+                        collect_token(config.mint, config.return_pubkey);
                         break;
                     case 'sell':
                         worker_post_message(workers, 'sell');
