@@ -70,6 +70,14 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 filter: input => new PublicKey(input)
             },
             {
+                type: 'list',
+                name: 'action',
+                message: 'Choose the action to perform after MC reached:',
+                choices: common.ActionStrings,
+                default: common.ActionStrings[0],
+                filter: input => common.ActionStrings.indexOf(input) as common.Action
+            },
+            {
                 type: 'input',
                 name: 'mcap_threshold',
                 message: 'Enter the threshold market cap:',
@@ -89,7 +97,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
         ]);
 
         await common.clear_lines_up(Object.keys(answers).length);
-        console.table(answers);
+        console.table(common.BotConfigDisplay(answers));
         const confirm = await inquirer.prompt([
             {
                 type: 'confirm',

@@ -23,12 +23,29 @@ export interface BotConfig {
     buy_interval: number;
     spend_limit: number;
     start_buy: number;
-    return_pubkey: PublicKey;
     mcap_threshold: number;
+    action: Action;
     token_name: string;
     token_ticker: string;
+    return_pubkey: PublicKey;
     mint: PublicKey;
 }
+
+export function BotConfigDisplay(config: BotConfig) {
+    return {
+        ...config,
+        action: ActionStrings[config.action],
+        return_pubkey: config.return_pubkey.toString(),
+        mint: config.mint.toString()
+    };
+}
+
+export enum Action {
+    Sell = 0,
+    Collect = 1,
+}
+
+export const ActionStrings = ['Sell', 'Collect'];
 
 export interface WorkerConfig {
     secret: Uint8Array;
@@ -69,6 +86,68 @@ export interface TokenMeta {
     market_id: string | null;
     inverted: boolean | null;
     usd_market_cap: number;
+}
+
+export function update_bot_config(config: BotConfig, key: string, value: string) {
+    switch (key) {
+        case 'thread_cnt':
+            if (validate_int(value, 1))
+                config.thread_cnt = parseInt(value, 10);
+            else
+                log_error('Invalid thread count.');
+            break;
+        case 'buy_interval':
+            if (validate_int(value, 1))
+                config.buy_interval = parseInt(value, 10);
+            else
+                log_error('Invalid buy interval.');
+            break;
+        case 'spend_limit':
+            if (validate_float(value, 0.001))
+                config.spend_limit = parseFloat(value);
+            else
+                log_error('Invalid spend limit.');
+            break;
+        case 'start_buy':
+            if (validate_float(value, 0.001))
+                config.start_buy = parseFloat(value);
+            else
+                log_error('Invalid start buy.');
+            break;
+        case 'return_pubkey':
+            if (is_valid_pubkey(value))
+                config.return_pubkey = new PublicKey(value);
+            else
+                log_error('Invalid return public key.');
+            break;
+        case 'mcap_threshold':
+            if (validate_int(value, 5000))
+                config.mcap_threshold = parseInt(value, 10);
+            else
+                log_error('Invalid market cap threshold.');
+            break;
+        case 'action':
+            value = value.toLowerCase();
+            if (value === 'sell')
+                config.action = Action.Sell;
+            else if (value === 'collect')
+                config.action = Action.Collect;
+            else
+                log_error('Invalid action.');
+            break;
+        case 'token_name':
+            config.token_name = value;
+            break;
+        case 'token_ticker':
+            config.token_ticker = value;
+            break;
+        case 'mint':
+            if (is_valid_pubkey(value))
+                config.mint = new PublicKey(value);
+            else
+                log_error('Invalid mint public key.');
+            break;
+    }
 }
 
 export function log(message: string): void {

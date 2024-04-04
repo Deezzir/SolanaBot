@@ -3,7 +3,7 @@ import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'comma
 import { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { readdir } from 'fs/promises';
 import * as common from './common.js';
-import { start_workers, wait_for_workers, worker_post_message, worker_update_mint } from './start.js';
+import { get_config, start_workers, wait_for_workers, worker_post_message, worker_update_mint } from './start.js';
 import dotenv from 'dotenv'
 import { existsSync, fstat, readFileSync } from 'fs';
 import * as readline from 'readline';
@@ -132,10 +132,6 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
 }
 
 async function start() {
-    // const config = await get_config();
-    // clear_lines_up(1);
-    // if (!config) return;
-
     config = {
         thread_cnt: 2,
         buy_interval: 15,
@@ -143,6 +139,7 @@ async function start() {
         start_buy: 0.002,
         return_pubkey: new PublicKey('Br92m2KTeo4mUKGF4dkdPPRipzhM9rAtxZMbwGvKyNd1'),
         mcap_threshold: 50000,
+        action: common.Action.Sell,
         token_name: 'CAT TIME',
         token_ticker: 'CT',
         mint: new PublicKey('8wYD3muJov9EkE9TZssPQrGZggUWMP2GZ14RfjV1E37c')
@@ -187,31 +184,44 @@ async function main() {
         .alias('s')
         .description('Start the bot')
         .action(async () => {
+            // config = await get_config(KEYS_CNT);
+            // common.clear_lines_up(1);
+            // if (!config) return;
+
             global.rl = readline.createInterface({
                 input: process.stdin,
                 output: process.stdout
             });
-            global.rl.setPrompt('Command (stop/config)> ');
+            global.rl.setPrompt('Command (stop/config/collect/sell/set)> ');
             global.rl.prompt(true);
 
             global.rl.on('line', async (line) => {
                 readline.moveCursor(process.stdout, 0, -1);
                 readline.clearLine(process.stdout, 0);
-                switch (line.trim()) {
+                switch (line.trim().split(' ')[0]) {
                     case 'stop':
                         if (workers.length > 0)
                             worker_post_message(workers, 'stop');
                         break;
                     case 'config':
                         if (config !== undefined)
-                            console.table(config);
+                            console.table(common.BotConfigDisplay(config));
                         break;
                     case 'collect':
                         worker_post_message(workers, 'collect');
-                        collect_token(config.mint, config.return_pubkey);
+                        collect_token(config.mint, new PublicKey(config.return_pubkey));
                         break;
                     case 'sell':
                         worker_post_message(workers, 'sell');
+                        break;
+                    case 'set':
+                        const args = line.trim().split(' ');
+                        if (args.length < 3) {
+                            common.log('Invalid command. Example: set action buy');
+                            break;
+                        }
+                        const [, key, value] = args;
+                        common.update_bot_config(config, key, value);
                         break;
                     default:
                         common.log(`Unknown command: ${line.trim()}`);
