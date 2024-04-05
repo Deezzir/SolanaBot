@@ -12,27 +12,51 @@ var keypair: Keypair;
 var mint_meta: common.TokenMeta;
 var finished = false;
 var spent = 0;
+var current_buy = 0;
+var second_buy = false;
 var start_sell = false;
 
 function sleep(seconds: number) {
     return new Promise(resolve => setTimeout(resolve, seconds * 1000));
 }
 
+const buy = async () => {
+    parentPort?.postMessage(`[Worker ${workerData.id}] Buying the token...`);
+    const std = current_buy * 0.1;
+    const amount = common.normal_random(config.inputs.start_buy, std);
+    try {
+        const signature = await trade.buy_token(amount, keypair, mint_meta, SLIPPAGE, true);
+        spent += amount;
+        if (second_buy) {
+            current_buy = current_buy / 2;
+            second_buy = false;
+        } else {
+            second_buy = true;
+        }
+        parentPort?.postMessage(`[Worker ${workerData.id}] Bought ${amount.toFixed(2)} SOL of the token '${mint_meta.symbol}'. Signature: ${signature}`);
+    } catch (e) {
+        parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token: ${e}. Will sleep and retry...`);
+    }
+}
+
 const sell = async () => {
-    parentPort?.postMessage(`[Worker ${workerData.id}] Started buying the token`);
-    const balance = await trade.get_token_balance(keypair.publicKey, config.inputs.mint);
-    if (balance.uiAmount === 0 || balance.uiAmount === null) {
-        parentPort?.postMessage(`[Worker ${workerData.id}] No tokens to sell`);
-        return;
+    parentPort?.postMessage(`[Worker ${workerData.id}] Started selling the token`);
+    try {
+        const balance = await trade.get_token_balance(keypair.publicKey, config.inputs.mint);
+        if (balance.uiAmount === 0 || balance.uiAmount === null) {
+            parentPort?.postMessage(`[Worker ${workerData.id}] No tokens to sell`);
+            return;
+        }
+        let signature: String;
+        if (mint_meta.raydium_pool === null) {
+            signature = await trade.sell_token(balance.uiAmount, keypair, mint_meta, SLIPPAGE, true);
+        } else {
+            signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
+        }
+        parentPort?.postMessage(`[Worker ${workerData.id}] Sold ${balance.uiAmount} tokens. Signature: ${signature}`);
+    } catch (e) {
+        parentPort?.postMessage(`[Worker ${workerData.id}] Error selling the token: ${e}, you will have to sell manually...`);
     }
-    let signature: String;
-    if (mint_meta.raydium_pool === null) {
-        signature = await trade.sell_token(balance.uiAmount, keypair, mint_meta, SLIPPAGE, true);
-    } else {
-        signature = "";
-        // signature = swap_raydium(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, slippage: number = 0.05, priority: boolean = false)
-    }
-    parentPort?.postMessage(`[Worker ${workerData.id}] Sold ${balance.uiAmount} tokens. Signature: ${signature}`);
 }
 
 const control_loop = async () => new Promise(async (resolve) => {
@@ -44,7 +68,7 @@ const control_loop = async () => new Promise(async (resolve) => {
                 break;
             }
             if (spent < config.inputs.spend_limit * LAMPORTS_PER_SOL) {
-                parentPort?.postMessage(`[Worker ${workerData.id}] Buying...`);
+                await buy();
             }
         } else {
             parentPort?.postMessage(`[Worker ${workerData.id}] Mint metadata not available`);
@@ -72,6 +96,7 @@ async function main() {
     parentPort?.on('message', async (msg) => {
         if (msg.command === 'buy') {
             parentPort?.postMessage(`[Worker ${workerData.id}] Started buying the token`);
+            current_buy = config.inputs.start_buy;
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);
