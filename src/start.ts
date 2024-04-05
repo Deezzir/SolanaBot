@@ -4,6 +4,7 @@ import bs58 from 'bs58';
 import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import { getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 import * as common from './common.js';
+import * as trade from './trade.js';
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
@@ -11,13 +12,16 @@ const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
 var subscriptionID: number | undefined;
 
-export async function fetch_mint(mint: string): Promise<Object> {
+export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)
         .then(response => response.json())
         .then(data => {
-            return data;
+            return data as common.TokenMeta;
         })
-        .catch(err => common.log_error(`[ERROR] Failed fetching the mint: ${err}`));
+        .catch(err => {
+            common.log_error(`[ERROR] Failed fetching the mint: ${err}`);
+            return {} as common.TokenMeta;
+        });
 }
 
 export function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
@@ -170,21 +174,24 @@ async function wait_drop_unsub() {
 }
 
 export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[], keys_dir: string) {
-    const secrets: Uint8Array[] = [];
-    const ok = await common.get_keys(secrets, config.thread_cnt, keys_dir);
-    if (secrets.length === 0) {
+    const keys = await common.get_keys(config.thread_cnt + 1, keys_dir, 1);
+    if (keys.length === 0) {
         common.log_error('[ERROR] No keys available.');
         global.rl.close();
     }
-    if (!ok) {
+    if (!trade.check_has_balances(keys)) {
         common.log_error('[ERROR] First, topup the specified accounts.');
         global.rl.close();
     }
     common.log('[Main Worker] Starting the workers...');
-    for (let i = 1
-        ; i < config.thread_cnt; i++) {
+    for (let i = 0; i < config.thread_cnt; i++) {
+        const key = keys.at(i);
+        if (!key) {
+            common.log_error(`[ERROR] Failed to get the key at index ${i}`);
+            global.rl.close();
+        }
         const data: common.WorkerConfig = {
-            secret: secrets[i],
+            secret: key ?? new Uint8Array(),
             id: i + 1,
             inputs: config
         };

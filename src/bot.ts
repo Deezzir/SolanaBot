@@ -3,19 +3,22 @@ import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'comma
 import { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { readdir } from 'fs/promises';
 import * as common from './common.js';
+import * as trade from './trade.js';
 import { get_config, start_workers, wait_for_workers, worker_post_message, worker_update_mint } from './start.js';
 import dotenv from 'dotenv'
-import { existsSync, fstat, readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import * as readline from 'readline';
 import path from 'path';
 
 dotenv.config();
 const KEYS_DIR = process.env.KEYS_DIR || './keys';
 const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
-var KEYS_CNT = 0;
+const META_UPDATE_INTERVAL = 3000;
 
-let workers = new Array<common.WorkerPromise>();
-let config: common.BotConfig;
+var KEYS_CNT = 0;
+var workers = new Array<common.WorkerPromise>();
+var config: common.BotConfig
+var start_collect = false;
 
 async function balance() {
     common.log('Getting the balance of the keys...');
@@ -30,7 +33,7 @@ async function balance() {
         if (!key) continue;
 
         const keypair = Keypair.fromSecretKey(key);
-        const balance = await common.get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade.get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
         common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key_path === RESERVE_KEY_PATH ? '| (Reserve)' : ''}`);
     }
 }
@@ -53,11 +56,11 @@ async function collect(address: PublicKey, reserve: boolean) {
         if (reserve && file_path === RESERVE_KEY_PATH) continue;
 
         const sender = Keypair.fromSecretKey(key);
-        const amount = await common.get_balance(sender.publicKey);
+        const amount = await trade.get_balance(sender.publicKey);
         if (amount === 0) continue;
 
         common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(common.send_lamports(amount, sender, receiver, true)
+        transactions.push(trade.send_lamports(amount, sender, receiver, true)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
     }
@@ -71,7 +74,7 @@ async function collect_token(mint: PublicKey, receiver: PublicKey) {
     if (!reserve) throw new Error('Unreachable');
 
     const reserve_keypair = Keypair.fromSecretKey(reserve);
-    const receiver_assoc_addr = await common.create_assoc_token_account(reserve_keypair, receiver, mint);
+    const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
 
     let transactions = [];
     const files = common.natural_sort(await readdir(KEYS_DIR));
@@ -80,12 +83,12 @@ async function collect_token(mint: PublicKey, receiver: PublicKey) {
         if (!key) continue;
 
         const sender = Keypair.fromSecretKey(key);
-        const token_amount = await common.get_token_balance(sender.publicKey, mint);
+        const token_amount = await trade.get_token_balance(sender.publicKey, mint);
         const token_amount_raw = parseInt(token_amount.amount);
         if (token_amount.uiAmount === 0) continue;
 
         common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(common.send_tokens(token_amount_raw, sender, receiver_assoc_addr, receiver)
+        transactions.push(trade.send_tokens(token_amount_raw, sender, receiver_assoc_addr, receiver)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
     }
@@ -104,7 +107,7 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
     let payer: Keypair;
     try {
         payer = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
-        const balance = await common.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
         if (balance < amount * cnt) {
             common.log_error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${KEYS_CNT} keys`);
@@ -124,7 +127,7 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
         if (!key) continue;
         const receiver = Keypair.fromSecretKey(key);
         common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(common.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey)
+        transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
     }
@@ -150,10 +153,15 @@ async function start() {
     // wait_drop_sub(config.token_name, config.token_ticker, mint);
     if (config.mint) {
         common.log(`Token detected: ${config.mint.toString()}`);
+
         worker_update_mint(workers, config.mint.toString());
-        setInterval(async () => { worker_update_mint(workers, config.mint.toString()) }, 5000);
+        setInterval(async () => { worker_update_mint(workers, config.mint.toString()) }, META_UPDATE_INTERVAL);
+
         setTimeout(() => { worker_post_message(workers, 'buy') }, 3000);
         await wait_for_workers(workers);
+
+        if (start_collect)
+            collect_token(config.mint, config.return_pubkey);
     } else {
         common.log_error('[ERROR] Token not found. Exiting...');
         global.rl.close();
@@ -209,7 +217,6 @@ async function main() {
                         break;
                     case 'collect':
                         worker_post_message(workers, 'collect');
-                        collect_token(config.mint, config.return_pubkey);
                         break;
                     case 'sell':
                         worker_post_message(workers, 'sell');
@@ -258,7 +265,7 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-r, --reserve', 'Collect from the reserve account')
+        .option('-r, --reserve', 'Collect from the reserve account as well')
         .description('Collect all the SOL from the accounts to the provided address')
         .action(collect);
 

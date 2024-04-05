@@ -1,22 +1,11 @@
 import { readFileSync } from 'fs';
 import { readdir } from 'fs/promises';
 import dotenv from 'dotenv';
-import { ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, Transaction, TransactionInstruction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { createAssociatedTokenAccountInstruction, createTransferInstruction, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import path from 'path';
 import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
+import { PublicKey } from '@solana/web3.js';
 dotenv.config();
-
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-
-const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
-const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '');
-const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || '');
-
-const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
-const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
 export interface BotConfig {
     thread_cnt: number;
@@ -191,30 +180,15 @@ export function get_key(file_path: string): Uint8Array | undefined {
     }
 }
 
-export async function get_balance(pubkey: PublicKey): Promise<number> {
-    return await global.connection.getBalance(pubkey);
-}
-
-export async function get_keys(secrets: Uint8Array[], upto: number, keys_dir: string): Promise<boolean> {
-    let ok = true;
+export async function get_keys(to: number, keys_dir: string, from: number = 0): Promise<Uint8Array[]> {
     try {
         const files = natural_sort(await readdir(keys_dir));
-        for (const file of filter_keys(files).slice(0, upto)) {
-            const key = get_key(path.join(keys_dir, file));
-            if (!key) continue;
-            const keypair = Keypair.fromSecretKey(key);
-            const balance = await get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
-            if (balance === 0) {
-                log_error(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL`);
-                ok = false;
-            }
-            secrets.push(key);
-        }
-        if (!ok) log_error('[ERROR] Some accounts are empty.');
-        return ok;
+        return filter_keys(files).slice(from, to)
+            .map(file => get_key(path.join(keys_dir, file)))
+            .filter((key): key is Uint8Array => key !== undefined) as Uint8Array[];
     } catch (err) {
         log_error(`[ERROR] failed to process keys: ${err}`);
-        return false;
+        return [];
     }
 }
 
@@ -258,295 +232,13 @@ export function natural_sort(files: string[]) {
     });
 }
 
-export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, max: boolean = false, priority: boolean = false, retries: number = 0): Promise<string> {
-    const max_retries = 5;
-    const retry_delay = 1000;
-
-    try {
-        const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('confirmed');
-        const tx = new Transaction({
-            feePayer: sender.publicKey,
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight,
-            signatures: [],
-        }).add(SystemProgram.transfer({
-            fromPubkey: sender.publicKey,
-            toPubkey: receiver,
-            lamports: lamports - (max ? 5000 : 0) - (priority ? 100000 : 0),
-        }));
-        if (priority) {
-            const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-                units: 1000000,
-            });
-            const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: 100000,
-            });
-            tx.add(modify_cu);
-            tx.add(priority_fee);
-        }
-        return await sendAndConfirmTransaction(global.connection, tx, [sender]);
-    } catch (err) {
-        if (retries <= max_retries - 1) {
-            await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return send_lamports(lamports, sender, receiver, max, priority, retries + 1);
-        } else {
-            throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
-        }
-    }
+function box_muller() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
-export async function get_tx_fee(tx: Transaction): Promise<number> {
-    try {
-        const repsonse = await global.connection.getFeeForMessage(
-            tx.compileMessage(),
-            'confirmed'
-        );
-        if (!repsonse || !repsonse.value) return 0;
-        return repsonse.value;
-    } catch (err) {
-        log_error(`[ERROR] Failed to get the transaction fee: ${err}`);
-        return 0;
-    }
-}
-
-async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
-    const address = PublicKey.findProgramAddressSync(
-        [
-            owner.toBuffer(),
-            TOKEN_PROGRAM_ID.toBuffer(),
-            mint.toBuffer(),
-        ],
-        ASSOCIATED_TOKEN_PROGRAM_ID
-    )[0];
-    return address;
-}
-
-async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean> {
-    const accountInfo = await connection.getAccountInfo(assoc_address);
-    return accountInfo !== null;
-}
-
-function get_token_amount_raw(amount: number, token: TokenMeta): number {
-    return Math.round(amount * token.total_supply / token.market_cap);
-}
-
-function get_solana_amount_raw(amount: number, token: TokenMeta): number {
-    return Math.round(amount * token.market_cap / token.total_supply);
-}
-
-function calc_slippage_up(sol_amount: number, slippage: number): number {
-    const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 + slippage) + lamports * (1 + slippage) / 100);
-}
-
-function calc_slippage_down(sol_amount: number, slippage: number): number {
-    const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 - slippage));
-}
-
-function buy_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
-    const instruction_buf = Buffer.from('66063d1201daebea', 'hex');
-    const token_amount_buf = Buffer.alloc(8);
-    token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
-    const slippage_buf = Buffer.alloc(8);
-    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_up(sol_amount, slippage)), 0);
-    return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
-}
-
-function sell_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
-    const instruction_buf = Buffer.from('33e685a4017f83ad', 'hex');
-    const token_amount_buf = Buffer.alloc(8);
-    token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
-    const slippage_buf = Buffer.alloc(8);
-    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_down(sol_amount, slippage)), 0);
-    return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
-}
-
-export async function get_token_balance(pubkey: PublicKey, mint: PublicKey): Promise<TokenAmount> {
-    const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
-    const account_info = await global.connection.getTokenAccountBalance(assoc_addres);
-    return account_info.value || 0;
-}
-
-export async function send_tokens(token_amount: number, sender: Signer, receiver: PublicKey, owner: PublicKey, priority: boolean = false, retries: number = 0): Promise<string> {
-    const max_retries = 5;
-    const retry_delay = 1000;
-
-    try {
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
-        const tx = new Transaction({
-            feePayer: sender.publicKey,
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight,
-            signatures: [],
-        });
-        if (priority) {
-            const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-                units: 1000000,
-            });
-            const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: 100000,
-            });
-            tx.add(modify_cu);
-            tx.add(priority_fee);
-        }
-        tx.add(createTransferInstruction(
-            sender.publicKey,
-            receiver,
-            owner,
-            token_amount
-        ));
-        return await sendAndConfirmTransaction(global.connection, tx, [sender]);
-    } catch (err) {
-        if (retries <= max_retries - 1) {
-            await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return send_tokens(token_amount, sender, receiver, owner, priority, retries + 1);
-        } else {
-            throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
-        }
-    }
-}
-
-export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey, retries: number = 0): Promise<PublicKey> {
-    const max_retries = 10;
-    const retry_delay = 1000
-
-    try {
-        let account = await getOrCreateAssociatedTokenAccount(global.connection, payer, mint, owner);
-        return account.address;
-    } catch (err) {
-        if (retries <= max_retries - 1) {
-            await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return create_assoc_token_account(payer, owner, mint, retries + 1);
-        } else {
-            throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
-        }
-    }
-}
-
-export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: TokenMeta, slippage: number = 0.05, priority: boolean = false, retries: number = 0): Promise<string> {
-    const max_retries = 5;
-    const retry_delay = 1000;
-
-    const mint = new PublicKey(mint_meta.mint);
-    const bonding_curve = new PublicKey(mint_meta.bonding_curve);
-    const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
-
-    const token_amount = get_token_amount_raw(sol_amount, mint_meta);
-    const instruction_data = buy_data(sol_amount, token_amount, slippage);
-
-    try {
-        const assoc_address = await calc_assoc_token_addr(buyer.publicKey, mint);
-        const is_assoc = await check_assoc_token_addr(assoc_address);
-
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
-        const tx = new Transaction({
-            feePayer: buyer.publicKey,
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight,
-            signatures: [],
-        });
-        if (priority) {
-            const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-                units: 1000000,
-            });
-            const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: 100000,
-            });
-            tx.add(modify_cu);
-            tx.add(priority_fee);
-        }
-        if (!is_assoc) {
-            tx.add(createAssociatedTokenAccountInstruction(
-                buyer.publicKey,
-                assoc_address,
-                buyer.publicKey,
-                mint,
-                TOKEN_PROGRAM_ID,
-                ASSOCIATED_TOKEN_PROGRAM_ID,
-            ));
-        }
-        tx.add(new TransactionInstruction({
-            keys: [
-                { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
-                { pubkey: ACCOUNT_1, isSigner: false, isWritable: true },
-                { pubkey: mint, isSigner: false, isWritable: false },
-                { pubkey: bonding_curve, isSigner: false, isWritable: true },
-                { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
-                { pubkey: assoc_address, isSigner: false, isWritable: true },
-                { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
-                { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-            ],
-            programId: TRADE_PROGRAM_ID,
-            data: instruction_data,
-        }));
-        return await sendAndConfirmTransaction(global.connection, tx, [buyer]);
-    } catch (err) {
-        if (retries <= max_retries - 1) {
-            await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return buy_token(sol_amount, buyer, mint_meta, slippage, priority, retries + 1);
-        } else {
-            throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
-        }
-    }
-}
-
-export async function sell_token(token_amount: number, seller: Signer, mint_meta: TokenMeta, slippage: number = 0.05, priority: boolean = false, retries: number = 0): Promise<string> {
-    const max_retries = 5;
-    const retry_delay = 1000;
-
-    const mint = new PublicKey(mint_meta.mint);
-    const bonding_curve = new PublicKey(mint_meta.bonding_curve);
-    const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
-
-    const sol_amount = get_solana_amount_raw(token_amount, mint_meta);
-    const instruction_data = sell_data(sol_amount, token_amount, slippage);
-
-    try {
-        const assoc_address = await calc_assoc_token_addr(seller.publicKey, mint);
-
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
-        const tx = new Transaction({
-            feePayer: seller.publicKey,
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight,
-            signatures: [],
-        });
-        if (priority) {
-            const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-                units: 1000000,
-            });
-            const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: 100000,
-            });
-            tx.add(modify_cu);
-            tx.add(priority_fee);
-        }
-        tx.add(new TransactionInstruction({
-            keys: [
-                { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
-                { pubkey: ACCOUNT_1, isSigner: false, isWritable: true },
-                { pubkey: mint, isSigner: false, isWritable: false },
-                { pubkey: bonding_curve, isSigner: false, isWritable: true },
-                { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
-                { pubkey: assoc_address, isSigner: false, isWritable: true },
-                { pubkey: seller.publicKey, isSigner: true, isWritable: true },
-                { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            ],
-            programId: TRADE_PROGRAM_ID,
-            data: instruction_data,
-        }));
-        return await sendAndConfirmTransaction(global.connection, tx, [seller]);
-    } catch (err) {
-        if (retries <= max_retries - 1) {
-            await new Promise(resolve => setTimeout(resolve, retry_delay));
-            return sell_token(token_amount, seller, mint_meta, slippage, priority, retries + 1);
-        } else {
-            throw new Error(`Max retries reached, failed to send the transaction. Last error: ${err}`);
-        }
-    }
+export function normal_random(mean: number, std: number) {
+    return mean + box_muller() * Math.sqrt(std);
 }
