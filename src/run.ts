@@ -10,12 +10,14 @@ const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'me
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
-var subscriptionID: number | undefined;
+var SUBSCRIPTION_ID: number | undefined;
+let STOP_FUNCTION: (() => void) | null = null;
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)
         .then(response => response.json())
         .then(data => {
+            if (!data || data.statusCode !== undefined) return {} as common.TokenMeta;
             return data as common.TokenMeta;
         })
         .catch(err => {
@@ -24,14 +26,9 @@ export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
         });
 }
 
-export function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
+export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
+    if (message === 'stop') await wait_drop_unsub();
     workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
-}
-
-export async function worker_update_mint(workers: common.WorkerPromise[], mint: string) {
-    const mint_meta = await fetch_mint(mint);
-    if (mint_meta)
-        worker_post_message(workers, 'mint', mint_meta);
 }
 
 export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
@@ -68,18 +65,10 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
             },
             {
                 type: 'input',
-                name: 'return_pubkey',
-                message: 'Enter the return public key:',
+                name: 'collect_address',
+                message: 'Enter the public key for funds collection:',
                 validate: input => common.is_valid_pubkey(input) || "Please enter a valid public key.",
                 filter: input => new PublicKey(input)
-            },
-            {
-                type: 'list',
-                name: 'action',
-                message: 'Choose the action to perform after MC reached:',
-                choices: common.ActionStrings,
-                default: common.ActionStrings[0],
-                filter: input => common.ActionStrings.indexOf(input) as common.Action
             },
             {
                 type: 'input',
@@ -89,29 +78,70 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 filter: value => common.validate_int(value, 5000) ? parseInt(value, 10) : value
             },
             {
-                type: 'input',
-                name: 'token_name',
-                message: 'Enter the token name:',
-            },
-            {
-                type: 'input',
-                name: 'token_ticker',
-                message: 'Enter the token ticker:',
+                type: 'list',
+                name: 'action',
+                message: 'Choose the action to perform after MCAP reached:',
+                choices: common.ActionStrings,
+                default: common.ActionStrings[0],
+                filter: input => common.ActionStrings.indexOf(input) as common.Action
             },
         ]);
 
-        await common.clear_lines_up(Object.keys(answers).length);
+        const method = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'type',
+                message: 'Choose the type of the sniping:',
+                choices: ['Wait for the token to drop', 'Snipe an existing token'],
+                default: 0,
+                filter: input => input.toLowerCase().includes(common.MethodStrings[common.Method.Wait].toLocaleLowerCase()) ? common.Method.Wait : common.Method.Snipe
+            }
+        ]);
+
+        if (method.type === common.Method.Wait) {
+            const token_meta = await inquirer.prompt([
+                {
+                    type: 'input',
+                    name: 'token_name',
+                    message: 'Enter the token name:',
+                },
+                {
+                    type: 'input',
+                    name: 'token_ticker',
+                    message: 'Enter the token ticker:',
+                },
+            ]);
+            answers = { ...answers, ...token_meta };
+        } else {
+            const mint = await inquirer.prompt([
+                {
+                    type: 'input',
+                    name: 'mint',
+                    message: 'Enter the mint public key:',
+                    validate: async (input) => {
+                        if (!common.is_valid_pubkey(input)) return "Please enter a valid public key.";
+                        const meta = await fetch_mint(input);
+                        if (Object.keys(meta).length === 0) return "Failed fetching the mint data with the public key.";
+                        return true;
+                    },
+                    filter: input => new PublicKey(input)
+                }
+            ]);
+            answers = { ...answers, ...mint };
+        }
+
+        await common.clear_lines_up(Object.keys(answers).length + 1);
         console.table(common.BotConfigDisplay(answers));
-        const confirm = await inquirer.prompt([
+        const prompt = await inquirer.prompt([
             {
                 type: 'confirm',
-                name: 'confirmation',
+                name: 'proceed',
                 message: 'Do you want to start the bot with the above configuration?',
             }
         ]);
 
-        if (confirm.confirmation) break;
-        else await common.clear_lines_up(Object.keys(answers).length + 5);
+        if (prompt.proceed) break;
+        else await common.clear_lines_up(Object.keys(answers).length + 6);
     } while (true);
 
     return answers;
@@ -123,52 +153,57 @@ function decode_metaplex_instr(data: string) {
     return decoded;
 }
 
-export function wait_drop_sub(token_name: string, token_ticker: string, mint: PublicKey | undefined) {
-    common.log('[Main Worker] Waiting for the new token drop...');
-    subscriptionID = connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
-        if (err) return;
-        if (logs && logs.includes('Program log: Instruction: MintTo')) {
-            try {
-                const tx = await connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
-                if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
+export function wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
+    return new Promise((resolve, reject) => {
+        let mint: PublicKey;
+        STOP_FUNCTION = () => reject(new Error('User stopped the process'));
+        common.log('[Main Worker] Waiting for the new token drop...');
+        SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
+            if (err) return;
+            if (logs && logs.includes('Program log: Instruction: MintTo')) {
+                try {
+                    const tx = await global.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+                    if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
 
-                const inner_instructions = tx.meta.innerInstructions;
-                if (!inner_instructions) return;
+                    const inner_instructions = tx.meta.innerInstructions;
+                    if (!inner_instructions) return;
 
-                for (const inner of inner_instructions) {
-                    for (const instruction of inner.instructions) {
-                        if (!instruction.programId.equals(METAPLEX_PROGRAM_ID)) continue;
+                    for (const inner of inner_instructions) {
+                        for (const instruction of inner.instructions) {
+                            if (!instruction.programId.equals(METAPLEX_PROGRAM_ID)) continue;
 
-                        const partial = instruction as PartiallyDecodedInstruction;
-                        const [meta, bytes_read] = decode_metaplex_instr(partial.data);
-                        if (bytes_read <= 0) continue;
-                        if (meta.data.name === token_name && meta.data.symbol.includes(token_ticker)) {
-                            if (tx.meta.postTokenBalances[0].mint) {
-                                mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
-                            } else {
-                                mint = partial.accounts[1];
+                            const partial = instruction as PartiallyDecodedInstruction;
+                            const [meta, bytes_read] = decode_metaplex_instr(partial.data);
+                            if (bytes_read <= 0) continue;
+                            if (meta.data.name === token_name && meta.data.symbol.includes(token_ticker)) {
+                                if (tx.meta.postTokenBalances[0].mint)
+                                    mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
+                                else
+                                    mint = partial.accounts[1];
                             }
                         }
                     }
+                    const signers = tx.transaction.message.accountKeys.filter(key => key.signer);
+                    if (signers.some(({ pubkey }) => mint !== undefined && pubkey.equals(mint))) {
+                        STOP_FUNCTION = null;
+                        await wait_drop_unsub();
+                        resolve(mint);
+                    }
+                } catch (err) {
+                    common.log_error(`[ERROR] Failed fetching the parsed transaction: ${err}`);
                 }
-                const signers = tx.transaction.message.accountKeys.filter(key => key.signer);
-                if (signers.some(({ pubkey }) => mint !== undefined && pubkey.equals(mint)))
-                    await wait_drop_unsub();
-            } catch (err) {
-                common.log_error(`[ERROR] Failed fetching the parsed transaction: ${err}`);
             }
-        }
-    }, 'confirmed',);
-    if (subscriptionID === undefined) {
-        common.log_error('[ERROR] Failed to subscribe to logs.');
-        global.rl.close();
-    }
+        }, 'confirmed',);
+        if (SUBSCRIPTION_ID === undefined)
+            reject(new Error('Failed to subscribe to logs'));
+    });
 }
 
 async function wait_drop_unsub() {
-    if (subscriptionID !== undefined) {
-        connection.removeOnLogsListener(subscriptionID)
-            .then(() => subscriptionID = undefined)
+    if (SUBSCRIPTION_ID !== undefined) {
+        if (STOP_FUNCTION) STOP_FUNCTION();
+        connection.removeOnLogsListener(SUBSCRIPTION_ID)
+            .then(() => SUBSCRIPTION_ID = undefined)
             .catch(err => common.log_error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
     }
 }

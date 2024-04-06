@@ -1,122 +1,158 @@
 import { parentPort, workerData } from 'worker_threads';
-import { Keypair, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.js';
 import * as common from './common.js';
 import * as trade from './trade.js';
 
 const SLIPPAGE = 0.3;
+const MIN_BUY_THRESHOLD = 0.00001;
+const MIN_BALANCE_THRESHOLD = 0.001;
 
-global.connection = new Connection(process.env.RPC || '', 'confirmed');
-const config = workerData as common.WorkerConfig;
+const WORKER_CONFIG = workerData as common.WorkerConfig;
+global.connection = new Connection(WORKER_CONFIG.id % 2 === 0 ? process.env.RPC || '' : process.env.RPC_OTHER || '', 'confirmed');
 
-var keypair: Keypair;
-var mint_meta: common.TokenMeta;
-var finished = false;
-var spent = 0;
-var current_buy = 0;
-var second_buy = false;
-var start_sell = false;
+var WORKER_KEYPAIR: Keypair;
+var MINT_METADATA: common.TokenMeta;
+var IS_DONE = false;
+var CURRENT_SPENDINGS = 0;
+var CURRENT_BUY_AMOUNT = 0;
+var IS_SECOND_BUY = false;
+var START_SELL = false;
+var CANCEL_SLEEP: () => void;
+var MESSAGE_BUFFER: string[] = [];
 
 function sleep(seconds: number) {
-    return new Promise(resolve => setTimeout(resolve, seconds * 1000));
+    let timeout_id: NodeJS.Timeout;
+    let cancel: () => void = () => { };
+
+    const promise = new Promise<void>(resolve => {
+        timeout_id = setTimeout(resolve, seconds * 1000);
+        cancel = () => {
+            clearTimeout(timeout_id);
+            resolve();
+        };
+    });
+
+    return { promise, cancel };
 }
 
 const buy = async () => {
-    parentPort?.postMessage(`[Worker ${workerData.id}] Buying the token...`);
-    const std = current_buy * 0.1;
-    const amount = common.normal_random(config.inputs.start_buy, std);
+    MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
+    const std = CURRENT_BUY_AMOUNT * 0.1;
+    const amount = common.normal_random(WORKER_CONFIG.inputs.start_buy, std);
     try {
-        const signature = await trade.buy_token(amount, keypair, mint_meta, SLIPPAGE, true);
-        spent += amount;
-        if (second_buy) {
-            current_buy = current_buy / 2;
-            second_buy = false;
-        } else {
-            second_buy = true;
+        const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
+        let balance_change = amount;
+
+        try {
+            balance_change = await trade.get_balance_change(signature.toString(), WORKER_KEYPAIR.publicKey);
+        } catch (error) {
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change: ${error}`);
         }
-        parentPort?.postMessage(`[Worker ${workerData.id}] Bought ${amount.toFixed(2)} SOL of the token '${mint_meta.symbol}'. Signature: ${signature}`);
+        CURRENT_SPENDINGS += balance_change;
+        if (IS_SECOND_BUY) CURRENT_BUY_AMOUNT = CURRENT_BUY_AMOUNT / 2;
+        IS_SECOND_BUY = !IS_SECOND_BUY;
+        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount.toFixed(5)} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${signature}`);
     } catch (e) {
-        parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token: ${e}. Will sleep and retry...`);
+        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token: ${e}. Will sleep and retry...`);
     }
 }
 
 const sell = async () => {
-    parentPort?.postMessage(`[Worker ${workerData.id}] Started selling the token`);
+    MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Started selling the token`);
     try {
-        const balance = await trade.get_token_balance(keypair.publicKey, config.inputs.mint);
+        const balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
         if (balance.uiAmount === 0 || balance.uiAmount === null) {
-            parentPort?.postMessage(`[Worker ${workerData.id}] No tokens to sell`);
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
             return;
         }
         let signature: String;
-        if (mint_meta.raydium_pool === null) {
-            signature = await trade.sell_token(balance.uiAmount, keypair, mint_meta, SLIPPAGE, true);
+        if (MINT_METADATA.raydium_pool === null) {
+            signature = await trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
         } else {
             signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
         }
-        parentPort?.postMessage(`[Worker ${workerData.id}] Sold ${balance.uiAmount} tokens. Signature: ${signature}`);
+        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${balance.uiAmount.toFixed(2)} tokens. Signature: ${signature}`);
     } catch (e) {
-        parentPort?.postMessage(`[Worker ${workerData.id}] Error selling the token: ${e}, you will have to sell manually...`);
+        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token: ${e}, you will have to sell manually...`);
     }
 }
 
-const control_loop = async () => new Promise(async (resolve) => {
-    while (!finished) {
-        if (mint_meta !== undefined || mint_meta !== null) {
-            if (config.inputs.mcap_threshold >= mint_meta.usd_market_cap) {
-                parentPort?.postMessage(`[Worker ${workerData.id}] Market cap threshold reached, starting to sell...`);
-                start_sell = true;
+const control_loop = async () => new Promise<void>(async (resolve) => {
+    while (!IS_DONE) {
+        if (MINT_METADATA !== undefined && MINT_METADATA !== null && Object.keys(MINT_METADATA).length !== 0) {
+            if (WORKER_CONFIG.inputs.mcap_threshold <= MINT_METADATA.usd_market_cap) {
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Market cap threshold reached, starting to sell...`);
+                START_SELL = true;
                 break;
             }
-            if (spent < config.inputs.spend_limit * LAMPORTS_PER_SOL) {
+            if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
                 await buy();
+            } else {
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Spend limit reached, waiting for the next actions...`);
             }
         } else {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Mint metadata not available`);
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Mint metadata not available`);
         }
 
-        const sleep_for = common.normal_random(config.inputs.buy_interval, 5);
-        parentPort?.postMessage(`[Worker ${workerData.id}] Sleeping for ${sleep_for.toFixed(0)} seconds`);
-        await sleep(sleep_for);
+        const sleep_for = common.normal_random(WORKER_CONFIG.inputs.buy_interval, 5);
+        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
+        parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+        if (!IS_DONE) {
+            const { promise, cancel } = sleep(sleep_for);
+            CANCEL_SLEEP = cancel;
+            await promise;
+        }
+        MESSAGE_BUFFER = [];
     }
-    if (start_sell)
+    if (START_SELL)
         await sell();
-    resolve(0);
+    parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+    resolve();
 });
 
 async function main() {
-    parentPort?.postMessage(`[Worker ${workerData.id}] Started...`);
 
-    keypair = Keypair.fromSecretKey(new Uint8Array(config.secret));
-    const balance = await trade.get_balance(keypair.publicKey);
-    let spend_limit = config.inputs.spend_limit * LAMPORTS_PER_SOL;
+    WORKER_KEYPAIR = Keypair.fromSecretKey(new Uint8Array(WORKER_CONFIG.secret));
+    const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey);
+    let spend_limit = WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL;
 
     if (balance < spend_limit)
         spend_limit = balance;
 
+    spend_limit -= MIN_BALANCE_THRESHOLD * LAMPORTS_PER_SOL;
+
+    parentPort?.postMessage(`[Worker ${workerData.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
+
     parentPort?.on('message', async (msg) => {
         if (msg.command === 'buy') {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Started buying the token`);
-            current_buy = config.inputs.start_buy;
+            CURRENT_BUY_AMOUNT = WORKER_CONFIG.inputs.start_buy;
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);
         }
         if (msg.command === 'sell') {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Received sell command from the main thread`);
-            finished = true;
-            start_sell = true;
+            if (!START_SELL) {
+                parentPort?.postMessage(`[Worker ${workerData.id}] Received sell command from the main thread`);
+                IS_DONE = true;
+                START_SELL = true;
+            }
         }
         if (msg.command === 'collect') {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Received collect command from the main thread`);
-            finished = true;
+            if (!IS_DONE) {
+                parentPort?.postMessage(`[Worker ${workerData.id}] Received collect command from the main thread`);
+                IS_DONE = true;
+                CANCEL_SLEEP();
+            }
         }
         if (msg.command === 'stop') {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Stopped by the main thread`);
-            finished = true;
+            if (!IS_DONE) {
+                parentPort?.postMessage(`[Worker ${workerData.id}] Stopped by the main thread`);
+                IS_DONE = true;
+                CANCEL_SLEEP();
+            }
         }
         if (msg.command === 'mint') {
-            // parentPort?.postMessage(`[Worker ${workerData.id}] Updated mint metadata`);
-            mint_meta = msg.data;
+            MINT_METADATA = msg.data;
         }
     });
 }

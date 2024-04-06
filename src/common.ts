@@ -16,18 +16,27 @@ export interface BotConfig {
     action: Action;
     token_name: string;
     token_ticker: string;
-    return_pubkey: PublicKey;
-    mint: PublicKey;
+    collect_address: PublicKey;
+    mint: PublicKey | undefined;
 }
 
 export function BotConfigDisplay(config: BotConfig) {
     return {
         ...config,
         action: ActionStrings[config.action],
-        return_pubkey: config.return_pubkey.toString(),
-        mint: config.mint.toString()
+        token_name: config.token_name ? config.token_name : 'N/A',
+        token_ticker: config.token_ticker ? config.token_ticker : 'N/A',
+        collect_address: config.collect_address.toString(),
+        mint: config.mint ? config.mint.toString() : 'N/A'
     };
 }
+
+export enum Method {
+    Wait = 0,
+    Snipe = 1,
+}
+
+export const MethodStrings = ['Wait', 'Snipe'];
 
 export enum Action {
     Sell = 0,
@@ -105,7 +114,7 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
             break;
         case 'return_pubkey':
             if (is_valid_pubkey(value))
-                config.return_pubkey = new PublicKey(value);
+                config.collect_address = new PublicKey(value);
             else
                 log_error('Invalid return public key.');
             break;
@@ -240,5 +249,15 @@ function box_muller() {
 }
 
 export function normal_random(mean: number, std: number) {
-    return mean + box_muller() * Math.sqrt(std);
+    return Math.abs(mean + box_muller() * Math.sqrt(std));
+}
+
+export function read_json(file_path: string) {
+    try {
+        const content = readFileSync(file_path, 'utf8');
+        return JSON.parse(content);
+    } catch (err) {
+        log_error(`[ERROR] failed to read JSON file: ${err}`);
+        return undefined;
+    }
 }
