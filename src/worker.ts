@@ -8,7 +8,7 @@ const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.001;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
-global.connection = new Connection(WORKER_CONFIG.id % 2 === 0 ? process.env.RPC || '' : process.env.RPC_OTHER || '', 'confirmed');
+global.connection = new Connection(WORKER_CONFIG.id % 2 === 0 ? process.env.RPC || '' : process.env.RPC_OTHER || (process.env.RPC || ''), 'confirmed');
 
 var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;

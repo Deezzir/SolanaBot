@@ -38,7 +38,37 @@ async function balance() {
     }
 }
 
-async function buy_once(amount: number, mint: PublicKey, keypair_path: string) {
+async function sell_token_once(mint: PublicKey, keypair_path: string) {
+    common.log(`Selling all the tokens by the mint ${mint.toString()}...`);
+
+    let seller: Keypair;
+    try {
+        seller = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
+        const balance = await trade.get_balance(seller.publicKey) / LAMPORTS_PER_SOL;
+        common.log(`Payer address: ${seller.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
+    } catch (err) {
+        common.log_error('[ERROR] Failed to process seller file');
+        return;
+    }
+
+    const mint_meta = await run.fetch_mint(mint.toString());
+    if (Object.keys(mint_meta).length === 0) {
+        common.log_error('[ERROR] Mint metadata not found.');
+        return;
+    }
+    const token_amount = await trade.get_token_balance(seller.publicKey, mint);
+    if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) {
+        common.log_error('[ERROR] No tokens to sell');
+        return;
+    }
+
+    common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
+    trade.sell_token(token_amount, seller, mint_meta, 0.5, true)
+        .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+        .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
+}
+
+async function buy_token_once(amount: number, mint: PublicKey, keypair_path: string) {
     common.log(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`);
 
     let payer: Keypair;
@@ -65,7 +95,7 @@ async function warmup() {
 }
 
 async function collect(address: PublicKey, reserve: boolean) {
-    common.log(`Collecting all the funds from the accounts to ${address}...`);
+    common.log(`Collecting all the SOL from the accounts to ${address}...`);
     const receiver = new PublicKey(address);
     common.log(`Receiver address: ${receiver.toString()}\n`);
 
@@ -124,7 +154,7 @@ async function collect_token(mint: PublicKey, receiver: PublicKey) {
 }
 
 async function sell_token(mint: PublicKey) {
-    common.log(`Selling all the tokens by the mint ${mint.toString()}...`);
+    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
 
     const mint_meta = await run.fetch_mint(mint.toString());
     if (Object.keys(mint_meta).length === 0) {
@@ -378,7 +408,7 @@ async function main() {
 
     program
         .command('spl-buy-once')
-        .alias('bt')
+        .alias('bto')
         .argument('<amount>', 'Amount to buy in SOL', (value) => {
             const parsedValue = parseFloat(value);
             if (isNaN(parsedValue))
@@ -392,11 +422,23 @@ async function main() {
         })
         .argument('<keypair_path>', 'Path to the keypair file')
         .description('Buy the token once with the provided amount')
-        .action(buy_once);
+        .action(buy_token_once);
+
+    program
+        .command('spl-sell-once')
+        .alias('sto')
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value))
+                throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<keypair_path>', 'Path to the keypair file')
+        .description('Buy the token once with the provided amount')
+        .action(sell_token_once);
 
     program
         .command('spl-sell')
-        .alias('ct')
+        .alias('st')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
