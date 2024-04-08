@@ -6,10 +6,13 @@ import * as trade from './trade.js';
 const SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.001;
-const SELL_ITERATIONS = 10;
+const MIN_BUY = 0.05;
+const SELL_ITERATIONS = 5;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
-global.connection = new Connection(WORKER_CONFIG.id % 2 === 0 ? process.env.RPC || '' : process.env.RPC_OTHER || (process.env.RPC || ''), 'confirmed');
+const RPCS = process.env.RPC?.split(',') || [];
+global.connection = new Connection(RPCS[WORKER_CONFIG.id % RPCS?.length], 'confirmed');
+
 
 var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;
@@ -42,7 +45,7 @@ const buy = async () => {
 
     while (!IS_DONE) {
         try {
-            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
+            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, 0.2, true);
             let balance_change = amount;
 
             try {
@@ -71,22 +74,20 @@ const sell = async () => {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
                 return;
             }
-            let signature: String;
             let transactions = [];
             for (let i = 0; i < SELL_ITERATIONS; i++) {
                 if (MINT_METADATA.raydium_pool === null) {
                     transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true)
                         .then((sig) => {
-                            signature = sig;
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
-                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${ui_amount} tokens. Signature: ${signature}`);
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${ui_amount} tokens. Signature: ${sig}`);
                         })
                         .catch((e) => {
                             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token, retrying...`);
                         }));
                 } else {
-                    signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
+                    // signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
                 }
                 Promise.allSettled(transactions);
             }
@@ -103,6 +104,9 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Market cap threshold reached, starting to sell...`);
                 START_SELL = true;
                 break;
+            }
+            if (MINT_METADATA.usd_market_cap >= 25000) {
+                CURRENT_BUY_AMOUNT = MIN_BUY;
             }
             if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
                 await buy();

@@ -312,7 +312,8 @@ async function main() {
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
     KEYS_CNT = await common.count_keys(KEYS_DIR) - 1;
-    global.connection = new Connection(process.env.RPC || '', 'confirmed');
+    const rpcs = process.env.RPC?.split(',') || [];
+    global.connection = new Connection(rpcs[Math.ceil(Math.random() * rpcs?.length)], 'confirmed');
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));

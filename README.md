@@ -26,7 +26,6 @@ npm install
 
 ```bash
 RPC=
-RPC_OTHER=
 PROGRAM_ID=
 METAPLEX_PROGRAM_ID=metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
 ASSOCIATED_TOKEN_PROGRAM_ID=ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL
