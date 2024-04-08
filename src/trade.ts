@@ -18,16 +18,17 @@ const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent
 
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
-const PRIORITY_UNITS = 1000000;
-const PRIORITY_MICRO_LAMPORTS = 400000;
-const MAX_RETRIES = 30;
+const PRIORITY_UNITS = 100000;
+const PRIORITY_MICRO_LAMPORTS = 700000;
+const MAX_RETRIES = 5;
 
 export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.connection.getBalance(pubkey);
 }
 
-async function create_and_send_tx(instructions: TransactionInstruction[], seller: Signer, max_retries: number = 5): Promise<String> {
+async function create_and_send_tx(instructions: TransactionInstruction[], seller: Signer, max_retries: number = 5, priority: boolean = false): Promise<String> {
     const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+    if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: seller.publicKey,
         recentBlockhash: blockhash,
@@ -89,27 +90,27 @@ export async function check_has_balances(keys: Uint8Array[], min_balance: number
 }
 
 function instructions_add_priority(instructions: TransactionInstruction[]): void {
-    const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-        units: PRIORITY_UNITS,
-    });
+    // const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
+    //     units: PRIORITY_UNITS,
+    // });
     const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
         microLamports: PRIORITY_MICRO_LAMPORTS,
     });
-    instructions.push(modify_cu, priority_fee);
+    instructions.unshift(priority_fee);
+    // instructions.unshift(modify_cu, priority_fee);
 }
 
 export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, max: boolean = false, priority: boolean = false): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     let instructions: TransactionInstruction[] = [];
-    if (priority) instructions_add_priority(instructions);
     instructions.push(SystemProgram.transfer({
         fromPubkey: sender.publicKey,
         toPubkey: receiver,
         lamports: lamports - (max ? 5000 : 0) - (priority ? 100000 : 0),
     }));
 
-    return await create_and_send_tx(instructions, sender);
+    return await create_and_send_tx(instructions, sender, max_retries, priority);
 }
 
 export async function get_tx_fee(tx: Transaction): Promise<number> {
@@ -148,7 +149,7 @@ function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
 }
 
 function get_solana_amount_raw(amount: number, token: common.TokenMeta): number {
-    return Math.round(amount * token.market_cap / token.total_supply);
+    return amount * token.market_cap / (token.total_supply / 1_000_000);
 }
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {
@@ -197,7 +198,6 @@ export async function send_tokens(token_amount: number, sender: PublicKey, recei
     const max_retries = MAX_RETRIES;
 
     let instructions: TransactionInstruction[] = []
-    if (priority) instructions_add_priority(instructions);
     instructions.push(createTransferInstruction(
         sender,
         receiver,
@@ -205,7 +205,7 @@ export async function send_tokens(token_amount: number, sender: PublicKey, recei
         token_amount
     ));
 
-    return await create_and_send_tx(instructions, owner);
+    return await create_and_send_tx(instructions, owner, max_retries, priority);
 }
 
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
@@ -231,7 +231,6 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
     const is_assoc = await check_assoc_token_addr(assoc_address);
 
     let instructions: TransactionInstruction[] = [];
-    if (priority) instructions_add_priority(instructions);
     if (!is_assoc) {
         instructions.push(createAssociatedTokenAccountInstruction(
             buyer.publicKey,
@@ -258,7 +257,7 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, buyer);
+    return await create_and_send_tx(instructions, buyer, max_retries, priority);
 }
 
 export async function sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta, slippage: number = 0.05, priority: boolean = false): Promise<String> {
@@ -279,7 +278,6 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
     const assoc_address = await calc_assoc_token_addr(seller.publicKey, mint);
 
     let instructions: TransactionInstruction[] = [];
-    if (priority) instructions_add_priority(instructions);
     instructions.push(new TransactionInstruction({
         keys: [
             { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
@@ -296,7 +294,7 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, seller);
+    return await create_and_send_tx(instructions, seller, max_retries, priority);
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {

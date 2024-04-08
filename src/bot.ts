@@ -9,7 +9,7 @@ import dotenv from 'dotenv'
 import { existsSync, readFileSync } from 'fs';
 import * as readline from 'readline';
 import path from 'path';
-dotenv.config();
+dotenv.config({ path: './.env' });
 
 const KEYS_DIR = process.env.KEYS_DIR || './keys';
 const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
@@ -19,6 +19,40 @@ var KEYS_CNT = 0;
 var WORKERS = new Array<common.WorkerPromise>();
 var BOT_CONFIG: common.BotConfig
 var START_COLLECT = false;
+
+async function total_balance() {
+    common.log('Calculating the balance of the keys...');
+    if (KEYS_CNT === 0) {
+        common.log_error('[ERROR] No keys available.');
+        return;
+    }
+    let total = 0;
+    const files = common.natural_sort(await readdir(KEYS_DIR));
+    for (const file of files) {
+        const key_path = path.join(KEYS_DIR, file)
+        const key = common.get_key(key_path);
+        if (!key) continue;
+
+        const keypair = Keypair.fromSecretKey(key);
+        const balance = await trade.get_balance(keypair.publicKey);
+        total += balance;
+    }
+    common.log(`Total balance: ${total / LAMPORTS_PER_SOL} SOL`);
+}
+
+async function transfer_sol(amount: number, receiver: PublicKey, sender_path: string) {
+    common.log(`Transferring ${amount} SOL from ${sender_path} to ${receiver.toString()}...`);
+    const sender = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(sender_path, 'utf8'))));
+    const balance = await trade.get_balance(sender.publicKey);
+    if (balance < amount * LAMPORTS_PER_SOL) {
+        common.log_error(`[ERROR] Sender balance is not enough to transfer ${amount} SOL`);
+        return;
+    }
+
+    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, true)
+        .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+        .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
+}
 
 async function balance() {
     common.log('Getting the balance of the keys...');
@@ -45,7 +79,7 @@ async function sell_token_once(mint: PublicKey, keypair_path: string) {
     try {
         seller = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
         const balance = await trade.get_balance(seller.publicKey) / LAMPORTS_PER_SOL;
-        common.log(`Payer address: ${seller.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
+        common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
     } catch (err) {
         common.log_error('[ERROR] Failed to process seller file');
         return;
@@ -75,7 +109,7 @@ async function buy_token_once(amount: number, mint: PublicKey, keypair_path: str
     try {
         payer = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
         const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
-        common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
+        common.log(`Buyer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
     } catch (err) {
         common.log_error('[ERROR] Failed to process payer file');
         return;
@@ -203,7 +237,7 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
             return;
         }
     } catch (err) {
-        common.log_error('[ERROR] Failed to process payer file');
+        common.log_error(`[ERROR] Failed to process payer file: ${err}`);
         return;
     }
 
@@ -244,7 +278,7 @@ async function start() {
             await worker_update_mint(WORKERS, BOT_CONFIG.mint.toString());
             const interval = setInterval(async () => { if (BOT_CONFIG.mint) worker_update_mint(WORKERS, BOT_CONFIG.mint.toString()) }, META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(WORKERS, 'buy') }, 3000);
+            setTimeout(() => { run.worker_post_message(WORKERS, 'buy') }, 5000);
             await run.wait_for_workers(WORKERS);
             clearInterval(interval);
 
@@ -313,7 +347,7 @@ async function main() {
                 setup_readline();
                 await new Promise<void>(resolve => global.rl.question('Press ENTER to start the bot...', () => resolve()));
             } else {
-                BOT_CONFIG = await run.get_config(KEYS_CNT);
+                BOT_CONFIG = await run.get_config(KEYS_CNT - 1);
                 common.clear_lines_up(1);
                 if (!BOT_CONFIG) return;
             }
@@ -389,6 +423,12 @@ async function main() {
         .action(balance);
 
     program
+        .command('total-balance')
+        .alias('tb')
+        .description('Get the total balance of the accounts')
+        .action(total_balance);
+
+    program
         .command('warmup')
         .alias('w')
         .description('Warmup the accounts with the tokens')
@@ -448,6 +488,24 @@ async function main() {
         .action(sell_token);
 
     program
+        .command('transfer')
+        .alias('tr')
+        .argument('<amount>', 'Amount of SOL to topup', (value) => {
+            const parsedValue = parseFloat(value);
+            if (isNaN(parsedValue))
+                throw new InvalidArgumentError('Not a number.');
+            return parsedValue;
+        })
+        .argument('<address>', 'Public address of the receiver', (value) => {
+            if (!common.is_valid_pubkey(value))
+                throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<keypair_path>', 'Path to the keypair file')
+        .description('Transfer SOL from the specified keypair to the receiver')
+        .action(transfer_sol);
+
+    program
         .command('spl-collect')
         .alias('ct')
         .argument('<mint>', 'Public address of the mint', (value) => {
@@ -482,11 +540,17 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range (1-${KEYS_CNT}).`);
             return parseInt(value, 10);
         })
+        .option('-l, --list <ids...>', 'List of keypair IDs to topup', (value) => {
+            const ids = value.split(',');
+            if (!ids.every(id => common.validate_int(id, 1, KEYS_CNT)))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${KEYS_CNT}).`);
+            return ids;
+        })
         .alias('t')
         .description('Topup the accounts with SOL using the provided keypair')
         .action((amount, keypair_path, options) => {
             const { from, to } = options;
-            topup(amount, keypair_path, from - 1, to);
+            topup(amount, keypair_path, from, to);
         });
 
     program.parse(process.argv);

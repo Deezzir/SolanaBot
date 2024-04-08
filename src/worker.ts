@@ -3,9 +3,10 @@ import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.j
 import * as common from './common.js';
 import * as trade from './trade.js';
 
-const SLIPPAGE = 0.3;
+const SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.001;
+const SELL_ITERATIONS = 10;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 global.connection = new Connection(WORKER_CONFIG.id % 2 === 0 ? process.env.RPC || '' : process.env.RPC_OTHER || (process.env.RPC || ''), 'confirmed');
@@ -15,7 +16,6 @@ var MINT_METADATA: common.TokenMeta;
 var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
-var IS_SECOND_BUY = false;
 var START_SELL = false;
 var CANCEL_SLEEP: () => void;
 var MESSAGE_BUFFER: string[] = [];
@@ -37,43 +37,62 @@ function sleep(seconds: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const std = CURRENT_BUY_AMOUNT * 0.1;
+    const std = CURRENT_BUY_AMOUNT * 0.05;
     const amount = common.normal_random(WORKER_CONFIG.inputs.start_buy, std);
-    try {
-        const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
-        let balance_change = amount;
 
+    while (!IS_DONE) {
         try {
-            balance_change = await trade.get_balance_change(signature.toString(), WORKER_KEYPAIR.publicKey);
-        } catch (error) {
-            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change: ${error}`);
+            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
+            let balance_change = amount;
+
+            try {
+                balance_change = await trade.get_balance_change(signature.toString(), WORKER_KEYPAIR.publicKey);
+            } catch (error) {
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change, retrying...`);
+                continue;
+            }
+            CURRENT_SPENDINGS += balance_change;
+            CURRENT_BUY_AMOUNT = CURRENT_BUY_AMOUNT / 2;
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount.toFixed(5)} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${signature}`);
+            break;
+        } catch (e) {
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token, retrying...`);
         }
-        CURRENT_SPENDINGS += balance_change;
-        if (IS_SECOND_BUY) CURRENT_BUY_AMOUNT = CURRENT_BUY_AMOUNT / 2;
-        IS_SECOND_BUY = !IS_SECOND_BUY;
-        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount.toFixed(5)} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${signature}`);
-    } catch (e) {
-        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token: ${e}. Will sleep and retry...`);
     }
 }
 
 const sell = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Started selling the token`);
-    try {
-        const balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
-        if (balance.uiAmount === 0 || balance.uiAmount === null) {
-            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
-            return;
+    let sold: boolean = false;
+    while (!sold) {
+        try {
+            const balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
+            if (balance.uiAmount === 0 || balance.uiAmount === null) {
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
+                return;
+            }
+            let signature: String;
+            let transactions = [];
+            for (let i = 0; i < SELL_ITERATIONS; i++) {
+                if (MINT_METADATA.raydium_pool === null) {
+                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true)
+                        .then((sig) => {
+                            signature = sig;
+                            sold = true;
+                            const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${ui_amount} tokens. Signature: ${signature}`);
+                        })
+                        .catch((e) => {
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token, retrying...`);
+                        }));
+                } else {
+                    signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
+                }
+                Promise.allSettled(transactions);
+            }
+        } catch (e) {
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting the balance, retrying...`);
         }
-        let signature: String;
-        if (MINT_METADATA.raydium_pool === null) {
-            signature = await trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
-        } else {
-            signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
-        }
-        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${balance.uiAmount.toFixed(2)} tokens. Signature: ${signature}`);
-    } catch (e) {
-        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token: ${e}, you will have to sell manually...`);
     }
 }
 
@@ -88,7 +107,7 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
             if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
                 await buy();
             } else {
-                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Spend limit reached, waiting for the next actions...`);
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Spend limit reached...`);
             }
         } else {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Mint metadata not available`);
