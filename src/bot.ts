@@ -13,7 +13,7 @@ dotenv.config({ path: './.env' });
 
 const KEYS_DIR = process.env.KEYS_DIR || './keys';
 const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
-const META_UPDATE_INTERVAL = 5000;
+const META_UPDATE_INTERVAL = 1000;
 
 var KEYS_CNT = 0;
 var WORKERS = new Array<common.WorkerPromise>();
@@ -198,7 +198,7 @@ async function sell_token(mint: PublicKey) {
 
     try {
         let transactions = [];
-        const files = common.natural_sort(await readdir(KEYS_DIR));
+        const files = common.natural_sort(await readdir(KEYS_DIR)).slice(1);
         for (const file of files) {
             const key = common.get_key(path.join(KEYS_DIR, file));
             if (!key) continue;
@@ -278,7 +278,7 @@ async function start() {
             await worker_update_mint(WORKERS, BOT_CONFIG.mint.toString());
             const interval = setInterval(async () => { if (BOT_CONFIG.mint) worker_update_mint(WORKERS, BOT_CONFIG.mint.toString()) }, META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(WORKERS, 'buy') }, 5000);
+            setTimeout(() => { run.worker_post_message(WORKERS, 'buy') }, 1000);
             await run.wait_for_workers(WORKERS);
             clearInterval(interval);
 
@@ -313,11 +313,11 @@ async function main() {
 
     KEYS_CNT = await common.count_keys(KEYS_DIR) - 1;
     const rpcs = process.env.RPC?.split(',') || [];
-    global.connection = new Connection(rpcs[Math.ceil(Math.random() * rpcs?.length)], 'confirmed');
+    const rpc = rpcs[Math.floor(Math.random() * rpcs?.length)];
+    global.connection = new Connection(rpc, 'confirmed');
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
-    common.log('\n');
 
     program
         .version('1.0.0')

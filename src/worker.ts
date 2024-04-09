@@ -7,7 +7,7 @@ const SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.001;
 const MIN_BUY = 0.05;
-const SELL_ITERATIONS = 5;
+const SELL_ITERATIONS = 10;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPC?.split(',') || [];
@@ -45,14 +45,13 @@ const buy = async () => {
 
     while (!IS_DONE) {
         try {
-            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, 0.2, true);
+            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, 0.3, true);
             let balance_change = amount;
 
             try {
                 balance_change = await trade.get_balance_change(signature.toString(), WORKER_KEYPAIR.publicKey);
             } catch (error) {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change, retrying...`);
-                continue;
             }
             CURRENT_SPENDINGS += balance_change;
             CURRENT_BUY_AMOUNT = CURRENT_BUY_AMOUNT / 2;
@@ -72,7 +71,7 @@ const sell = async () => {
             const balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
             if (balance.uiAmount === 0 || balance.uiAmount === null) {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
-                return;
+                break;
             }
             let transactions = [];
             for (let i = 0; i < SELL_ITERATIONS; i++) {
@@ -89,7 +88,7 @@ const sell = async () => {
                 } else {
                     // signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
                 }
-                Promise.allSettled(transactions);
+                await Promise.allSettled(transactions);
             }
         } catch (e) {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting the balance, retrying...`);

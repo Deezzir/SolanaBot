@@ -19,7 +19,7 @@ const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
 const PRIORITY_UNITS = 100000;
-const PRIORITY_MICRO_LAMPORTS = 700000;
+const PRIORITY_MICRO_LAMPORTS = 500000;
 const MAX_RETRIES = 5;
 
 export async function get_balance(pubkey: PublicKey): Promise<number> {
