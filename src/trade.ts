@@ -16,11 +16,42 @@ const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '111111
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
+const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
+
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
 const PRIORITY_UNITS = 100000;
 const PRIORITY_MICRO_LAMPORTS = 500000;
 const MAX_RETRIES = 5;
+
+export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
+    return fetch(`${FETCH_MINT_API_URL}/${mint}`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return {} as common.TokenMeta;
+            return data as common.TokenMeta;
+        })
+        .catch(err => {
+            common.log_error(`[ERROR] Failed fetching the mint: ${err}`);
+            return {} as common.TokenMeta;
+        });
+}
+
+export async function fetch_random_mints(count: number): Promise<common.TokenMeta[]> {
+    const limit = 50;
+    const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
+    return fetch(`${FETCH_MINT_API_URL}?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return [] as common.TokenMeta[];
+            const shuffled = data.sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, count) as common.TokenMeta[];
+        })
+        .catch(err => {
+            common.log_error(`[ERROR] Failed fetching the mints: ${err}`);
+            return [] as common.TokenMeta[];
+        });
+}
 
 export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.connection.getBalance(pubkey);

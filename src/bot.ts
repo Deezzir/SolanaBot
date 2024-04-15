@@ -85,7 +85,7 @@ async function sell_token_once(mint: PublicKey, keypair_path: string) {
         return;
     }
 
-    const mint_meta = await run.fetch_mint(mint.toString());
+    const mint_meta = await trade.fetch_mint(mint.toString());
     if (Object.keys(mint_meta).length === 0) {
         common.log_error('[ERROR] Mint metadata not found.');
         return;
@@ -115,7 +115,7 @@ async function buy_token_once(amount: number, mint: PublicKey, keypair_path: str
         return;
     }
 
-    const mint_meta = await run.fetch_mint(mint.toString());
+    const mint_meta = await trade.fetch_mint(mint.toString());
     if (Object.keys(mint_meta).length === 0) {
         common.log_error('[ERROR] Mint metadata not found.');
         return;
@@ -124,8 +124,57 @@ async function buy_token_once(amount: number, mint: PublicKey, keypair_path: str
     common.log(`Transaction completed, signature: ${signature}`);
 }
 
-async function warmup() {
-    common.log('TODO: Warmup the accounts with the tokens');
+async function warmup(from?: number, to?: number) {
+    if (KEYS_CNT === 0) {
+        common.log_error('[ERROR] No keys available.');
+        return;
+    }
+
+    const counts = Array.from({ length: KEYS_CNT }, () => Math.floor(Math.random() * (40 - 10) + 10));
+    const acc_count = to ? to - (from || 0) : KEYS_CNT - (from || 0);
+
+    common.log(`Warming up ${acc_count} accounts...`);
+
+    let files = common.natural_sort(await readdir(KEYS_DIR));
+    files = files.slice(from, to)
+
+    for (const [index, file] of files.entries()) {
+        const key = common.get_key(path.join(KEYS_DIR, file));
+        if (!key) continue;
+        const buyer = Keypair.fromSecretKey(key);
+        const mints = (await trade.fetch_random_mints(counts[index])).filter(i => !i.market_id);
+
+        common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
+        for (const mint_meta of mints) {
+            const amount = common.normal_random(0.01, 0.001);
+            common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
+            while (true) {
+                try {
+                    const signature = await trade.buy_token(amount, buyer, mint_meta, 0.3, true);
+                    common.log(`Transaction completed for ${file}, signature: ${signature}`);
+                    break;
+                } catch (e) {
+                    // common.log(`Error buying the token, retrying...`);
+                }
+            }
+            setTimeout(() => { }, 1000);
+            while (true) {
+                try {
+                    const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
+                    if (balance.uiAmount === 0 || balance.uiAmount === null) {
+                        common.log(`No tokens to sell for ${file} and mint ${mint_meta.mint}`);
+                        break;
+                    }
+                    common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${file})...`);
+                    const signature = await trade.sell_token(balance, buyer, mint_meta, 0.5, true);
+                    common.log(`Transaction completed for ${file}, signature: ${signature}`);
+                    break;
+                } catch (e) {
+                    // common.log(`Error selling the token, retrying...`);
+                }
+            }
+        }
+    }
 }
 
 async function collect(address: PublicKey, reserve: boolean) {
@@ -190,7 +239,7 @@ async function collect_token(mint: PublicKey, receiver: PublicKey) {
 async function sell_token(mint: PublicKey) {
     common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
 
-    const mint_meta = await run.fetch_mint(mint.toString());
+    const mint_meta = await trade.fetch_mint(mint.toString());
     if (Object.keys(mint_meta).length === 0) {
         common.log_error('[ERROR] Mint metadata not found.');
         return;
@@ -259,7 +308,7 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
 
 async function start() {
     const worker_update_mint = async (workers: common.WorkerPromise[], mint: string) => {
-        const mint_meta = await run.fetch_mint(mint);
+        const mint_meta = await trade.fetch_mint(mint);
         if (Object.keys(mint_meta).length !== 0) {
             common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
             run.worker_post_message(workers, 'mint', mint_meta);
@@ -433,7 +482,20 @@ async function main() {
         .command('warmup')
         .alias('w')
         .description('Warmup the accounts with the tokens')
-        .action(warmup);
+        .option('-f, --from <value>', 'Warmup starting from the provided index', (value) => {
+            if (!common.validate_int(value, 1, KEYS_CNT))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${KEYS_CNT}).`);
+            return parseInt(value, 10);
+        })
+        .option('-t --to <value>', 'Warmup ending at the provided index', (value) => {
+            if (!common.validate_int(value, 1, KEYS_CNT))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${KEYS_CNT}).`);
+            return parseInt(value, 10);
+        })
+        .action((options) => {
+            const { from, to } = options;
+            warmup(from, to);
+        });
 
     program
         .command('collect')

@@ -7,24 +7,10 @@ import * as common from './common.js';
 import * as trade from './trade.js';
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
-const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
 let STOP_FUNCTION: (() => void) | null = null;
-
-export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
-    return fetch(`${FETCH_MINT_API_URL}/${mint}`)
-        .then(response => response.json())
-        .then(data => {
-            if (!data || data.statusCode !== undefined) return {} as common.TokenMeta;
-            return data as common.TokenMeta;
-        })
-        .catch(err => {
-            common.log_error(`[ERROR] Failed fetching the mint: ${err}`);
-            return {} as common.TokenMeta;
-        });
-}
 
 export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
     if (message === 'stop') await wait_drop_unsub();
@@ -120,7 +106,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                     message: 'Enter the mint public key:',
                     validate: async (input) => {
                         if (!common.is_valid_pubkey(input)) return "Please enter a valid public key.";
-                        const meta = await fetch_mint(input);
+                        const meta = await trade.fetch_mint(input);
                         if (Object.keys(meta).length === 0) return "Failed fetching the mint data with the public key.";
                         return true;
                     },
