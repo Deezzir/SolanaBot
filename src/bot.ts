@@ -157,13 +157,17 @@ async function warmup(from?: number, to?: number) {
                     // common.log(`Error buying the token, retrying...`);
                 }
             }
-            setTimeout(() => { }, 1000);
+            setTimeout(() => { }, 3000);
+            let twice = false;
             while (true) {
                 try {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
                         common.log(`No tokens to sell for ${file} and mint ${mint_meta.mint}`);
-                        break;
+                        setTimeout(() => { }, 1500);
+                        if (twice) break;
+                        twice = true;
+                        continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${file})...`);
                     const signature = await trade.sell_token(balance, buyer, mint_meta, 0.5, true);
@@ -188,7 +192,7 @@ async function collect(address: PublicKey, reserve: boolean) {
         const file_path = path.join(KEYS_DIR, file);
         const key = common.get_key(file_path);
         if (!key) continue;
-        if (reserve && file_path === RESERVE_KEY_PATH) continue;
+        if (!reserve && file_path === RESERVE_KEY_PATH) continue;
 
         const sender = Keypair.fromSecretKey(key);
         const amount = await trade.get_balance(sender.publicKey);

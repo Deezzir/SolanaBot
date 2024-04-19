@@ -15,6 +15,7 @@ export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So1111111
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
+const JITOTIP = new PublicKey(process.env.JITOTIP || 'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt');
 
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
@@ -22,7 +23,7 @@ const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/
 
 const PRIORITY_UNITS = 100000;
 const PRIORITY_MICRO_LAMPORTS = 500000;
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 2;
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)
@@ -138,7 +139,7 @@ export async function send_lamports(lamports: number, sender: Signer, receiver: 
     instructions.push(SystemProgram.transfer({
         fromPubkey: sender.publicKey,
         toPubkey: receiver,
-        lamports: lamports - (max ? 5000 : 0) - (priority ? 100000 : 0),
+        lamports: lamports - (max ? 5000 : 0),
     }));
 
     return await create_and_send_tx(instructions, sender, max_retries, priority);
@@ -272,6 +273,11 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
             ASSOCIATED_TOKEN_PROGRAM_ID,
         ));
     }
+    // instructions.push(SystemProgram.transfer({
+    //     fromPubkey: buyer.publicKey,
+    //     toPubkey: JITOTIP,
+    //     lamports: 0.0003 * LAMPORTS_PER_SOL,
+    // }));
     instructions.push(new TransactionInstruction({
         keys: [
             { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },

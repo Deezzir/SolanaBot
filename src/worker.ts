@@ -7,7 +7,7 @@ const SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.001;
 const MIN_BUY = 0.05;
-const SELL_ITERATIONS = 10;
+const SELL_ITERATIONS = 3;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPC?.split(',') || [];
@@ -40,12 +40,12 @@ function sleep(seconds: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const std = CURRENT_BUY_AMOUNT * 0.05;
-    const amount = common.normal_random(WORKER_CONFIG.inputs.start_buy, std);
+    const std = CURRENT_BUY_AMOUNT * 0.1;
+    const amount = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
 
     while (!IS_DONE) {
         try {
-            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, 0.3, true);
+            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
             let balance_change = amount;
 
             try {
@@ -58,7 +58,8 @@ const buy = async () => {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount.toFixed(5)} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${signature}`);
             break;
         } catch (e) {
-            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token, retrying...`);
+            parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
+            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
         }
     }
 }
@@ -104,7 +105,7 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
                 START_SELL = true;
                 break;
             }
-            if (MINT_METADATA.usd_market_cap >= 25000) {
+            if (MINT_METADATA.usd_market_cap >= 45000) {
                 CURRENT_BUY_AMOUNT = MIN_BUY;
             }
             if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
@@ -155,6 +156,7 @@ async function main() {
         if (msg.command === 'sell') {
             if (!START_SELL) {
                 parentPort?.postMessage(`[Worker ${workerData.id}] Received sell command from the main thread`);
+                CANCEL_SLEEP();
                 IS_DONE = true;
                 START_SELL = true;
             }
