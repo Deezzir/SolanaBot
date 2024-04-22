@@ -23,7 +23,7 @@ const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/
 
 const PRIORITY_UNITS = 100000;
 const PRIORITY_MICRO_LAMPORTS = 500000;
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 5;
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)

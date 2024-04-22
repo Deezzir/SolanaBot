@@ -140,6 +140,8 @@ function decode_metaplex_instr(data: string) {
 }
 
 export function wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
+    let name = token_name.toLowerCase();
+    let ticker = token_ticker.toLowerCase();
     return new Promise((resolve, reject) => {
         let mint: PublicKey;
         STOP_FUNCTION = () => reject(new Error('User stopped the process'));
@@ -161,7 +163,7 @@ export function wait_drop_sub(token_name: string, token_ticker: string): Promise
                             const partial = instruction as PartiallyDecodedInstruction;
                             const [meta, bytes_read] = decode_metaplex_instr(partial.data);
                             if (bytes_read <= 0) continue;
-                            if (meta.data.name === token_name && meta.data.symbol.includes(token_ticker)) {
+                            if (meta.data.name.toLowerCase() === name || meta.data.symbol.toLowerCase().includes(ticker)) {
                                 if (tx.meta.postTokenBalances[0].mint)
                                     mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
                                 else

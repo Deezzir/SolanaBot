@@ -130,7 +130,7 @@ async function warmup(from?: number, to?: number) {
         return;
     }
 
-    const counts = Array.from({ length: KEYS_CNT }, () => Math.floor(Math.random() * (40 - 10) + 10));
+    const counts = Array.from({ length: KEYS_CNT }, () => Math.floor(Math.random() * (20 - 5) + 5));
     const acc_count = to ? to - (from || 0) : KEYS_CNT - (from || 0);
 
     common.log(`Warming up ${acc_count} accounts...`);
@@ -146,7 +146,7 @@ async function warmup(from?: number, to?: number) {
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
-            const amount = common.normal_random(0.01, 0.001);
+            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(5));
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
             while (true) {
                 try {
@@ -401,7 +401,7 @@ async function main() {
                 setup_readline();
                 await new Promise<void>(resolve => global.rl.question('Press ENTER to start the bot...', () => resolve()));
             } else {
-                BOT_CONFIG = await run.get_config(KEYS_CNT - 1);
+                BOT_CONFIG = await run.get_config(KEYS_CNT);
                 common.clear_lines_up(1);
                 if (!BOT_CONFIG) return;
             }
