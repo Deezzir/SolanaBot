@@ -3,11 +3,12 @@ import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.j
 import * as common from './common.js';
 import * as trade from './trade.js';
 
-const SLIPPAGE = 0.5;
+const SLIPPAGE = 1.5;
 const MIN_BUY_THRESHOLD = 0.00001;
-const MIN_BALANCE_THRESHOLD = 0.001;
+const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
-const SELL_ITERATIONS = 3;
+const TRADE_ITERATIONS = 5;
+const JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPC?.split(',') || [];
@@ -20,7 +21,7 @@ var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
 var START_SELL = false;
-var CANCEL_SLEEP: () => void;
+var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 
 function sleep(seconds: number) {
@@ -40,25 +41,32 @@ function sleep(seconds: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const std = CURRENT_BUY_AMOUNT * 0.1;
-    const amount = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
+    const amount = parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
+    let bought: boolean = false;
 
-    while (!IS_DONE) {
+    while (!IS_DONE && !bought) {
         try {
-            const signature = await trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true);
-            let balance_change = amount;
-
-            try {
-                balance_change = await trade.get_balance_change(signature.toString(), WORKER_KEYPAIR.publicKey);
-            } catch (error) {
-                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change, retrying...`);
+            let transactions = [];
+            for (let i = 0; i < TRADE_ITERATIONS; i++) {
+                transactions.push(trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, JITOTIP, SLIPPAGE, true)
+                    .then(async (sig) => {
+                        try {
+                            const balance_change = await trade.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
+                            CURRENT_SPENDINGS += balance_change;
+                        } catch (error) {
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting balance change, retrying...`);
+                        }
+                        bought = true;
+                        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`);
+                    })
+                    .catch((e) => {
+                        MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
+                    }));
             }
-            CURRENT_SPENDINGS += balance_change;
-            CURRENT_BUY_AMOUNT = CURRENT_BUY_AMOUNT / 2;
-            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount.toFixed(5)} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${signature}`);
-            break;
+            await Promise.allSettled(transactions);
+
+            CURRENT_BUY_AMOUNT = (WORKER_CONFIG.inputs.spend_limit - CURRENT_SPENDINGS) * 0.8;
         } catch (e) {
-            parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
         }
     }
@@ -75,9 +83,9 @@ const sell = async () => {
                 break;
             }
             let transactions = [];
-            for (let i = 0; i < SELL_ITERATIONS; i++) {
+            for (let i = 0; i < TRADE_ITERATIONS; i++) {
                 if (MINT_METADATA.raydium_pool === null) {
-                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, true)
+                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, JITOTIP, SLIPPAGE, true)
                         .then((sig) => {
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
@@ -108,7 +116,11 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
             if (MINT_METADATA.usd_market_cap >= 45000) {
                 CURRENT_BUY_AMOUNT = MIN_BUY;
             }
-            if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
+            if (MINT_METADATA.raydium_pool !== null) {
+                MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Raydium pool detected, skipping...`);
+                continue;
+            }
+            if (CURRENT_SPENDINGS < WORKER_CONFIG.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
                 await buy();
             } else {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Spend limit reached...`);
@@ -134,7 +146,6 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
 });
 
 async function main() {
-
     WORKER_KEYPAIR = Keypair.fromSecretKey(new Uint8Array(WORKER_CONFIG.secret));
     const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey);
     let spend_limit = WORKER_CONFIG.inputs.spend_limit * LAMPORTS_PER_SOL;
@@ -143,6 +154,7 @@ async function main() {
         spend_limit = balance;
 
     spend_limit -= MIN_BALANCE_THRESHOLD * LAMPORTS_PER_SOL;
+    WORKER_CONFIG.inputs.spend_limit = spend_limit / LAMPORTS_PER_SOL;
 
     parentPort?.postMessage(`[Worker ${workerData.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
 
@@ -156,7 +168,7 @@ async function main() {
         if (msg.command === 'sell') {
             if (!START_SELL) {
                 parentPort?.postMessage(`[Worker ${workerData.id}] Received sell command from the main thread`);
-                CANCEL_SLEEP();
+                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
                 IS_DONE = true;
                 START_SELL = true;
             }
@@ -165,14 +177,14 @@ async function main() {
             if (!IS_DONE) {
                 parentPort?.postMessage(`[Worker ${workerData.id}] Received collect command from the main thread`);
                 IS_DONE = true;
-                CANCEL_SLEEP();
+                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
             }
         }
         if (msg.command === 'stop') {
             if (!IS_DONE) {
                 parentPort?.postMessage(`[Worker ${workerData.id}] Stopped by the main thread`);
                 IS_DONE = true;
-                CANCEL_SLEEP();
+                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
             }
         }
         if (msg.command === 'mint') {

@@ -73,7 +73,7 @@ export interface TokenMeta {
     complete: boolean;
     virtual_sol_reserves: number;
     virtual_token_reserves: number;
-    total_supply: number;
+    total_supply: bigint;
     website: string | null;
     show_name: boolean
     king_of_the_hill_timestamp: number | null;

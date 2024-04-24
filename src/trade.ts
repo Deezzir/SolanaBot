@@ -1,8 +1,18 @@
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
-import { createAssociatedTokenAccountInstruction, createTransferInstruction, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { createAssociatedTokenAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 // import { Liquidity, LiquidityPoolKeys, Percent, SPL_ACCOUNT_LAYOUT, Token, jsonInfo2PoolKeys } from '@raydium-io/raydium-sdk';
 // import { TokenAmount as RaydiumTokenAmount } from '@raydium-io/raydium-sdk';
 import * as common from './common.js';
+import * as jito from 'jito-ts';
+import path from 'path';
+import bs58 from 'bs58';
+
+export const KEYS_DIR = process.env.KEYS_DIR || './keys';
+export const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
+
+const RESERVE = common.get_key(RESERVE_KEY_PATH);
+if (!RESERVE) throw new Error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
+const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
 
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
@@ -12,18 +22,20 @@ const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || '');
 
 export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
+const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
+
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
-const JITOTIP = new PublicKey(process.env.JITOTIP || 'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt');
 
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
+const BLOCK_URL = process.env.BLOCK_URL || '';
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
 const PRIORITY_UNITS = 100000;
-const PRIORITY_MICRO_LAMPORTS = 500000;
-const MAX_RETRIES = 5;
+const PRIORITY_MICRO_LAMPORTS = 5000000;
+const MAX_RETRIES = 2;
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)
@@ -54,20 +66,87 @@ export async function fetch_random_mints(count: number): Promise<common.TokenMet
         });
 }
 
+export async function fetch_by_name(name: string): Promise<common.TokenMeta[]> {
+    const name_prepared = name.replace(/ /g, '%20');
+    return fetch(`${FETCH_MINT_API_URL}?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false&searchTerm=${name_prepared}`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return [] as common.TokenMeta[];
+            return data as common.TokenMeta[];
+        })
+        .catch(err => {
+            common.log_error(`[ERROR] Failed fetching the mints: ${err}`);
+            return [] as common.TokenMeta[];
+        });
+}
+
+export async function get_token_supply(mint: PublicKey): Promise<bigint> {
+    try {
+        const mint_1 = await getMint(global.connection, mint, 'confirmed');
+        return mint_1.supply;
+    } catch (err) {
+        common.log_error(`[ERROR] Failed to get the token supply: ${err}`);
+        return BigInt(1000000000000000);
+    }
+}
+
 export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.connection.getBalance(pubkey);
 }
 
-async function create_and_send_tx(instructions: TransactionInstruction[], seller: Signer, max_retries: number = 5, priority: boolean = false): Promise<String> {
+const isError = <T>(value: T | Error): value is Error => {
+    return value instanceof Error;
+};
+
+export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, tip: number, priority: boolean = false): Promise<String> {
+    const c = jito.searcher.searcherClient(BLOCK_URL, RESERVE_KEYPAIR);
+    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+
+    if (priority) instructions_add_priority(instructions);
+
+    instructions.unshift(SystemProgram.transfer({
+        fromPubkey: payer.publicKey,
+        toPubkey: JITOTIP,
+        lamports: tip * LAMPORTS_PER_SOL,
+    }));
+
+    const versioned_tx = new VersionedTransaction(new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: blockhash,
+        instructions: instructions.filter(Boolean),
+    }).compileToV0Message());
+    versioned_tx.sign([payer]);
+
+    let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
+    let bundle = new jito.bundle.Bundle([versioned_tx], 1);
+
+    if (!isError(bundle)) {
+        try {
+            const resp = await c.sendBundle(bundle);
+            await global.connection.confirmTransaction({
+                blockhash,
+                lastValidBlockHeight,
+                signature
+            }, 'confirmed');
+            return signature;
+        } catch (e) {
+            throw new Error(`Failed to send a bundle: ${e}`);
+        }
+    } else {
+        throw new Error(`Failed to create a bundle: ${bundle}`);
+    }
+}
+
+async function create_and_send_tx(instructions: TransactionInstruction[], payer: Signer, max_retries: number = 5, priority: boolean = false): Promise<String> {
     const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
     if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
-        payerKey: seller.publicKey,
+        payerKey: payer.publicKey,
         recentBlockhash: blockhash,
         instructions: instructions.filter(Boolean),
     }).compileToV0Message());
 
-    versioned_tx.sign([seller]);
+    versioned_tx.sign([payer]);
     try {
         const signature = await global.connection.sendTransaction(versioned_tx, {
             skipPreflight: true,
@@ -122,14 +201,13 @@ export async function check_has_balances(keys: Uint8Array[], min_balance: number
 }
 
 function instructions_add_priority(instructions: TransactionInstruction[]): void {
-    // const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-    //     units: PRIORITY_UNITS,
-    // });
+    const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
+        units: PRIORITY_UNITS,
+    });
     const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
         microLamports: PRIORITY_MICRO_LAMPORTS,
     });
-    instructions.unshift(priority_fee);
-    // instructions.unshift(modify_cu, priority_fee);
+    instructions.unshift(modify_cu, priority_fee);
 }
 
 export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, max: boolean = false, priority: boolean = false): Promise<String> {
@@ -177,16 +255,18 @@ async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean
 }
 
 function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
-    return Math.round(amount * token.total_supply / token.market_cap);
+    const sup = Number(token.total_supply);
+    return Math.round(amount * sup / token.market_cap);
 }
 
 function get_solana_amount_raw(amount: number, token: common.TokenMeta): number {
-    return amount * token.market_cap / (token.total_supply / 1_000_000);
+    const sup = Number(token.total_supply);
+    return amount * token.market_cap / (sup / 1_000_000);
 }
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {
     const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 + slippage) + lamports * (1 + slippage) / 100);
+    return Math.round(lamports * (1 + slippage) + lamports * (1 + slippage) / 1000);
 }
 
 function calc_slippage_down(sol_amount: number, slippage: number): number {
@@ -250,7 +330,7 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta, tip: number = 0.1, slippage: number = 0.05, priority: boolean = false): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     const mint = new PublicKey(mint_meta.mint);
@@ -273,11 +353,6 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
             ASSOCIATED_TOKEN_PROGRAM_ID,
         ));
     }
-    // instructions.push(SystemProgram.transfer({
-    //     fromPubkey: buyer.publicKey,
-    //     toPubkey: JITOTIP,
-    //     lamports: 0.0003 * LAMPORTS_PER_SOL,
-    // }));
     instructions.push(new TransactionInstruction({
         keys: [
             { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
@@ -294,10 +369,10 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, buyer, max_retries, priority);
+    return await create_and_send_tipped_tx(instructions, buyer, tip, priority);
 }
 
-export async function sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+export async function sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta, tip: number = 0.1, slippage: number = 0.05, priority: boolean = false): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     const mint = new PublicKey(mint_meta.mint);
@@ -331,7 +406,7 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, seller, max_retries, priority);
+    return await create_and_send_tipped_tx(instructions, seller, tip, priority);
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {

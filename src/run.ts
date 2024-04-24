@@ -10,7 +10,8 @@ const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'me
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
-let STOP_FUNCTION: (() => void) | null = null;
+let LOGS_STOP_FUNCTION: (() => void) | null = null;
+let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
 export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
     if (message === 'stop') await wait_drop_unsub();
@@ -139,13 +140,32 @@ function decode_metaplex_instr(data: string) {
     return decoded;
 }
 
-export function wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
+export function wait_drop_sub(token_name: string, token_ticker: string, start_timestamp: number): Promise<PublicKey | null> {
     let name = token_name.toLowerCase();
     let ticker = token_ticker.toLowerCase();
-    return new Promise((resolve, reject) => {
+
+    let search = [];
+
+    search.push(new Promise<PublicKey | null>(async (resolve, reject) => {
+        LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
+        common.log('[Main Worker] Waiting for the new token drop using Fetch url...');
+        while (true) {
+            const mints = (await trade.fetch_by_name(token_name)).filter(m => m.created_timestamp > start_timestamp);
+            if (mints.length > 0) {
+                LOGS_STOP_FUNCTION = null;
+                await wait_drop_unsub();
+                common.log(`[Main Worker] Found the mint using Fetch url`);
+                resolve(new PublicKey(mints[0].mint));
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }));
+
+    search.push(new Promise<PublicKey | null>((resolve, reject) => {
         let mint: PublicKey;
-        STOP_FUNCTION = () => reject(new Error('User stopped the process'));
-        common.log('[Main Worker] Waiting for the new token drop...');
+        LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
+        common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
         SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
             if (logs && logs.includes('Program log: Instruction: MintTo')) {
@@ -173,8 +193,9 @@ export function wait_drop_sub(token_name: string, token_ticker: string): Promise
                     }
                     const signers = tx.transaction.message.accountKeys.filter(key => key.signer);
                     if (signers.some(({ pubkey }) => mint !== undefined && pubkey.equals(mint))) {
-                        STOP_FUNCTION = null;
+                        LOGS_STOP_FUNCTION = null;
                         await wait_drop_unsub();
+                        common.log(`[Main Worker] Found the mint using Solana logs`);
                         resolve(mint);
                     }
                 } catch (err) {
@@ -184,12 +205,21 @@ export function wait_drop_sub(token_name: string, token_ticker: string): Promise
         }, 'confirmed',);
         if (SUBSCRIPTION_ID === undefined)
             reject(new Error('Failed to subscribe to logs'));
+    }));
+
+    return Promise.race(search).then(result => {
+        if (!result) return null;
+        return result;
+    }).catch(error => {
+        common.log_error(`[ERROR] An error occurred: ${error}`);
+        return null;
     });
 }
 
 async function wait_drop_unsub() {
     if (SUBSCRIPTION_ID !== undefined) {
-        if (STOP_FUNCTION) STOP_FUNCTION();
+        if (LOGS_STOP_FUNCTION) LOGS_STOP_FUNCTION();
+        if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
         connection.removeOnLogsListener(SUBSCRIPTION_ID)
             .then(() => SUBSCRIPTION_ID = undefined)
             .catch(err => common.log_error(`[ERROR] Failed to unsubscribe from logs: ${err}`));

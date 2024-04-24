@@ -11,8 +11,6 @@ import * as readline from 'readline';
 import path from 'path';
 dotenv.config({ path: './.env' });
 
-const KEYS_DIR = process.env.KEYS_DIR || './keys';
-const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
 const META_UPDATE_INTERVAL = 1000;
 
 var KEYS_CNT = 0;
@@ -27,9 +25,9 @@ async function total_balance() {
         return;
     }
     let total = 0;
-    const files = common.natural_sort(await readdir(KEYS_DIR));
+    const files = common.natural_sort(await readdir(trade.KEYS_DIR));
     for (const file of files) {
-        const key_path = path.join(KEYS_DIR, file)
+        const key_path = path.join(trade.KEYS_DIR, file)
         const key = common.get_key(key_path);
         if (!key) continue;
 
@@ -60,15 +58,15 @@ async function balance() {
         common.log_error('[ERROR] No keys available.');
         return;
     }
-    const files = common.natural_sort(await readdir(KEYS_DIR));
+    const files = common.natural_sort(await readdir(trade.KEYS_DIR));
     for (const file of files) {
-        const key_path = path.join(KEYS_DIR, file)
+        const key_path = path.join(trade.KEYS_DIR, file)
         const key = common.get_key(key_path);
         if (!key) continue;
 
         const keypair = Keypair.fromSecretKey(key);
         const balance = await trade.get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
-        common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key_path === RESERVE_KEY_PATH ? '| (Reserve)' : ''}`);
+        common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key_path === trade.RESERVE_KEY_PATH ? '| (Reserve)' : ''}`);
     }
 }
 
@@ -97,7 +95,7 @@ async function sell_token_once(mint: PublicKey, keypair_path: string) {
     }
 
     common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
-    trade.sell_token(token_amount, seller, mint_meta, 0.5, true)
+    trade.sell_token(token_amount, seller, mint_meta, 0.01, 0.5, true)
         .then(signature => common.log(`Transaction completed, signature: ${signature}`))
         .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
 }
@@ -120,7 +118,7 @@ async function buy_token_once(amount: number, mint: PublicKey, keypair_path: str
         common.log_error('[ERROR] Mint metadata not found.');
         return;
     }
-    const signature = await trade.buy_token(amount, payer, mint_meta, 0.05, true);
+    const signature = await trade.buy_token(amount, payer, mint_meta, 0.001, 0.05, true);
     common.log(`Transaction completed, signature: ${signature}`);
 }
 
@@ -135,22 +133,22 @@ async function warmup(from?: number, to?: number) {
 
     common.log(`Warming up ${acc_count} accounts...`);
 
-    let files = common.natural_sort(await readdir(KEYS_DIR));
+    let files = common.natural_sort(await readdir(trade.KEYS_DIR));
     files = files.slice(from, to)
 
     for (const [index, file] of files.entries()) {
-        const key = common.get_key(path.join(KEYS_DIR, file));
+        const key = common.get_key(path.join(trade.KEYS_DIR, file));
         if (!key) continue;
         const buyer = Keypair.fromSecretKey(key);
         const mints = (await trade.fetch_random_mints(counts[index])).filter(i => !i.market_id);
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
-            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(5));
+            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(2));
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
             while (true) {
                 try {
-                    const signature = await trade.buy_token(amount, buyer, mint_meta, 0.3, true);
+                    const signature = await trade.buy_token(amount, buyer, mint_meta, 0.001, 0.5, true);
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
@@ -170,7 +168,7 @@ async function warmup(from?: number, to?: number) {
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${file})...`);
-                    const signature = await trade.sell_token(balance, buyer, mint_meta, 0.5, true);
+                    const signature = await trade.sell_token(balance, buyer, mint_meta, 0.001, 0.5, true);
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
@@ -187,12 +185,12 @@ async function collect(address: PublicKey, reserve: boolean) {
     common.log(`Receiver address: ${receiver.toString()}\n`);
 
     let transactions = [];
-    const files = common.natural_sort(await readdir(KEYS_DIR));
+    const files = common.natural_sort(await readdir(trade.KEYS_DIR));
     for (const file of files) {
-        const file_path = path.join(KEYS_DIR, file);
+        const file_path = path.join(trade.KEYS_DIR, file);
         const key = common.get_key(file_path);
         if (!key) continue;
-        if (!reserve && file_path === RESERVE_KEY_PATH) continue;
+        if (!reserve && file_path === trade.RESERVE_KEY_PATH) continue;
 
         const sender = Keypair.fromSecretKey(key);
         const amount = await trade.get_balance(sender.publicKey);
@@ -209,7 +207,7 @@ async function collect(address: PublicKey, reserve: boolean) {
 
 async function collect_token(mint: PublicKey, receiver: PublicKey) {
     common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
-    const reserve = common.get_key(RESERVE_KEY_PATH);
+    const reserve = common.get_key(trade.RESERVE_KEY_PATH);
     if (!reserve) throw new Error('Unreachable');
 
     try {
@@ -217,9 +215,9 @@ async function collect_token(mint: PublicKey, receiver: PublicKey) {
         const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
 
         let transactions = [];
-        const files = common.natural_sort(await readdir(KEYS_DIR));
+        const files = common.natural_sort(await readdir(trade.KEYS_DIR));
         for (const file of files) {
-            const key = common.get_key(path.join(KEYS_DIR, file));
+            const key = common.get_key(path.join(trade.KEYS_DIR, file));
             if (!key) continue;
 
             const sender = Keypair.fromSecretKey(key);
@@ -251,9 +249,9 @@ async function sell_token(mint: PublicKey) {
 
     try {
         let transactions = [];
-        const files = common.natural_sort(await readdir(KEYS_DIR)).slice(1);
+        const files = common.natural_sort(await readdir(trade.KEYS_DIR)).slice(1);
         for (const file of files) {
-            const key = common.get_key(path.join(KEYS_DIR, file));
+            const key = common.get_key(path.join(trade.KEYS_DIR, file));
             if (!key) continue;
 
             const seller = Keypair.fromSecretKey(key);
@@ -261,7 +259,7 @@ async function sell_token(mint: PublicKey) {
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
             common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-            transactions.push(trade.sell_token(token_amount, seller, mint_meta, 0.5, true)
+            transactions.push(trade.sell_token(token_amount, seller, mint_meta, 0.1, 0.5, true)
                 .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                 .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
         }
@@ -295,11 +293,11 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
     }
 
     let transactions = [];
-    let files = common.natural_sort(await readdir(KEYS_DIR));
+    let files = common.natural_sort(await readdir(trade.KEYS_DIR));
     files = files.slice(from, to)
 
     for (const file of files) {
-        const key = common.get_key(path.join(KEYS_DIR, file));
+        const key = common.get_key(path.join(trade.KEYS_DIR, file));
         if (!key) continue;
         const receiver = Keypair.fromSecretKey(key);
         common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${file})...`);
@@ -311,8 +309,9 @@ async function topup(amount: number, keypair_path: string, from?: number, to?: n
 }
 
 async function start() {
-    const worker_update_mint = async (workers: common.WorkerPromise[], mint: string) => {
-        const mint_meta = await trade.fetch_mint(mint);
+    const worker_update_mint = async (workers: common.WorkerPromise[], mint: PublicKey) => {
+        const mint_meta = await trade.fetch_mint(mint.toString());
+        mint_meta.total_supply = await trade.get_token_supply(mint);
         if (Object.keys(mint_meta).length !== 0) {
             common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
             run.worker_post_message(workers, 'mint', mint_meta);
@@ -320,16 +319,17 @@ async function start() {
     }
 
     common.log('[Main Worker] Starting the bot...');
-    await run.start_workers(BOT_CONFIG, WORKERS, KEYS_DIR);
+    await run.start_workers(BOT_CONFIG, WORKERS, trade.KEYS_DIR);
 
     try {
-        const mint = BOT_CONFIG.mint ? BOT_CONFIG.mint : await run.wait_drop_sub(BOT_CONFIG.token_name, BOT_CONFIG.token_ticker);
+        const timestamp = Date.now();
+        const mint = BOT_CONFIG.mint ? BOT_CONFIG.mint : await run.wait_drop_sub(BOT_CONFIG.token_name, BOT_CONFIG.token_ticker, timestamp);
         if (mint) {
             BOT_CONFIG.mint = mint;
             common.log(`[Main Worker] Token detected: ${BOT_CONFIG.mint.toString()}`);
 
-            await worker_update_mint(WORKERS, BOT_CONFIG.mint.toString());
-            const interval = setInterval(async () => { if (BOT_CONFIG.mint) worker_update_mint(WORKERS, BOT_CONFIG.mint.toString()) }, META_UPDATE_INTERVAL);
+            await worker_update_mint(WORKERS, BOT_CONFIG.mint);
+            const interval = setInterval(async () => { if (BOT_CONFIG.mint) worker_update_mint(WORKERS, BOT_CONFIG.mint) }, META_UPDATE_INTERVAL);
 
             setTimeout(() => { run.worker_post_message(WORKERS, 'buy') }, 1000);
             await run.wait_for_workers(WORKERS);
@@ -361,10 +361,10 @@ function setup_readline() {
 
 
 async function main() {
-    if (!existsSync(RESERVE_KEY_PATH))
+    if (!existsSync(trade.RESERVE_KEY_PATH))
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
-    KEYS_CNT = await common.count_keys(KEYS_DIR) - 1;
+    KEYS_CNT = await common.count_keys(trade.KEYS_DIR) - 1;
     const rpcs = process.env.RPC?.split(',') || [];
     const rpc = rpcs[Math.floor(Math.random() * rpcs?.length)];
     global.connection = new Connection(rpc, 'confirmed');
@@ -391,11 +391,12 @@ async function main() {
             let selling = false;
             let stopping = false;
             let { config } = options;
+            console.log(JSON.stringify(config));
 
             if (config) {
-
                 config.collect_address = new PublicKey(config.collect_address);
-                config.mint = new PublicKey(config.mint);
+                if (config.mint)
+                    config.mint = new PublicKey(config.mint);
                 BOT_CONFIG = config;
                 console.table(common.BotConfigDisplay(BOT_CONFIG));
                 setup_readline();
