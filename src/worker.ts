@@ -8,7 +8,7 @@ const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
 const TRADE_ITERATIONS = 5;
-const JITOTIP = 0.1;
+let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPC?.split(',') || [];
@@ -113,9 +113,10 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
                 START_SELL = true;
                 break;
             }
-            if (MINT_METADATA.usd_market_cap >= 45000) {
-                CURRENT_BUY_AMOUNT = MIN_BUY;
-            }
+            // if (MINT_METADATA.usd_market_cap >= 45000) {
+            //     CURRENT_BUY_AMOUNT = MIN_BUY;
+            //     JITOTIP = 0.05;
+            // }
             if (MINT_METADATA.raydium_pool !== null) {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Raydium pool detected, skipping...`);
                 continue;

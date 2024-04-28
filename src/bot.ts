@@ -144,7 +144,7 @@ async function warmup(from?: number, to?: number) {
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
-            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(2));
+            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(4));
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
             while (true) {
                 try {
@@ -162,7 +162,7 @@ async function warmup(from?: number, to?: number) {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
                         common.log(`No tokens to sell for ${file} and mint ${mint_meta.mint}`);
-                        setTimeout(() => { }, 1500);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         if (twice) break;
                         twice = true;
                         continue;

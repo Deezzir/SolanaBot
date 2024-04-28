@@ -19,6 +19,7 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_P
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
 const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '');
 const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || '');
+const ACCOUNT_2 = new PublicKey(process.env.ACCOUNT_2 || '');
 
 export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
@@ -34,7 +35,7 @@ const BLOCK_URL = process.env.BLOCK_URL || '';
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
 const PRIORITY_UNITS = 100000;
-const PRIORITY_MICRO_LAMPORTS = 5000000;
+const PRIORITY_MICRO_LAMPORTS = 500000;
 const MAX_RETRIES = 2;
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
@@ -99,41 +100,46 @@ const isError = <T>(value: T | Error): value is Error => {
 };
 
 export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, tip: number, priority: boolean = false): Promise<String> {
-    const c = jito.searcher.searcherClient(BLOCK_URL, RESERVE_KEYPAIR);
-    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+    try {
+        const c = jito.searcher.searcherClient(BLOCK_URL, RESERVE_KEYPAIR);
+        const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
 
-    if (priority) instructions_add_priority(instructions);
+        if (priority) instructions_add_priority(instructions);
 
-    instructions.unshift(SystemProgram.transfer({
-        fromPubkey: payer.publicKey,
-        toPubkey: JITOTIP,
-        lamports: tip * LAMPORTS_PER_SOL,
-    }));
+        instructions.unshift(SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: JITOTIP,
+            lamports: tip * LAMPORTS_PER_SOL,
+        }));
 
-    const versioned_tx = new VersionedTransaction(new TransactionMessage({
-        payerKey: payer.publicKey,
-        recentBlockhash: blockhash,
-        instructions: instructions.filter(Boolean),
-    }).compileToV0Message());
-    versioned_tx.sign([payer]);
+        const versioned_tx = new VersionedTransaction(new TransactionMessage({
+            payerKey: payer.publicKey,
+            recentBlockhash: blockhash,
+            instructions: instructions.filter(Boolean),
+        }).compileToV0Message());
+        versioned_tx.sign([payer]);
 
-    let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
-    let bundle = new jito.bundle.Bundle([versioned_tx], 1);
+        let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
+        let bundle = new jito.bundle.Bundle([versioned_tx], 1);
 
-    if (!isError(bundle)) {
-        try {
-            const resp = await c.sendBundle(bundle);
-            await global.connection.confirmTransaction({
-                blockhash,
-                lastValidBlockHeight,
-                signature
-            }, 'confirmed');
-            return signature;
-        } catch (e) {
-            throw new Error(`Failed to send a bundle: ${e}`);
+        if (!isError(bundle)) {
+            try {
+                const resp = await c.sendBundle(bundle);
+                await global.connection.confirmTransaction({
+                    blockhash,
+                    lastValidBlockHeight,
+                    signature
+                }, 'confirmed');
+                return signature;
+            } catch (e) {
+                throw new Error(`Failed to send a bundle: ${e}`);
+            }
+        } else {
+            throw new Error(`Failed to create a bundle: ${bundle}`);
         }
-    } else {
-        throw new Error(`Failed to create a bundle: ${bundle}`);
+    } catch (err) {
+        throw new Error(`Failed to send tipped transaction: ${err}`);
+
     }
 }
 
@@ -207,7 +213,8 @@ function instructions_add_priority(instructions: TransactionInstruction[]): void
     const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
         microLamports: PRIORITY_MICRO_LAMPORTS,
     });
-    instructions.unshift(modify_cu, priority_fee);
+    instructions.unshift(priority_fee);
+    // instructions.unshift(modify_cu, priority_fee);
 }
 
 export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, max: boolean = false, priority: boolean = false): Promise<String> {
@@ -365,10 +372,13 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
             { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },
+            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
         ],
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
+    return await create_and_send_tx(instructions, buyer, max_retries, priority);
     return await create_and_send_tipped_tx(instructions, buyer, tip, priority);
 }
 
@@ -402,10 +412,13 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
             { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },
+            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
         ],
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
+    return await create_and_send_tx(instructions, seller, max_retries, priority);
     return await create_and_send_tipped_tx(instructions, seller, tip, priority);
 }
 
