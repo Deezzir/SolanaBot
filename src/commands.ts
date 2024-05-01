@@ -155,19 +155,19 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
     common.log(`Transaction completed, signature: ${signature}`);
 }
 
-export async function warmup(keys_cnt: number, from?: number, to?: number) {
+export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[]) {
     if (keys_cnt === 0) {
         common.log_error('[ERROR] No keys available.');
         return;
     }
 
-    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (20 - 5) + 5));
-    const acc_count = to ? to - (from || 0) : keys_cnt - (from || 0);
+    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (35 - 10) + 10));
+    const acc_count = list ? list.length : (to ? to - (from || 0) : keys_cnt - (from || 0));
 
     common.log(`Warming up ${acc_count} accounts...`);
 
     let files = common.natural_sort(await readdir(trade.KEYS_DIR));
-    files = files.slice(from, to)
+    files = list ? files.filter((_, index) => list.includes(index)) : files.slice(from, to)
 
     for (const [index, file] of files.entries()) {
         const key = common.get_key(path.join(trade.KEYS_DIR, file));
@@ -223,11 +223,11 @@ export async function collect(address: PublicKey, reserve: boolean) {
         const file_path = path.join(trade.KEYS_DIR, file);
         const key = common.get_key(file_path);
         if (!key) continue;
-        if (!reserve && file_path === trade.RESERVE_KEY_PATH) continue;
+        if (reserve && file_path === trade.RESERVE_KEY_PATH) continue;
 
         const sender = Keypair.fromSecretKey(key);
         const amount = await trade.get_balance(sender.publicKey);
-        if (amount === 0) continue;
+        if (amount === 0 || address === sender.publicKey) continue;
 
         common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
         transactions.push(trade.send_lamports(amount, sender, receiver, true)
@@ -303,20 +303,20 @@ export async function sell_token(mint: PublicKey) {
     }
 }
 
-export async function topup(amount: number, keypair_path: string, keys_cnt: number, from?: number, to?: number) {
+export async function topup(amount: number, keypair_path: string, keys_cnt: number, from?: number, to?: number, list?: number[]) {
     if (keys_cnt === 0) {
         common.log_error('[ERROR] No keys available.');
         return;
     }
-    const count = to ? to - (from || 0) : keys_cnt - (from || 0);
-    common.log(`Topping up ${amount} SOL to ${count} keys...`);
+    const acc_count = list ? list.length : (to ? to - (from || 0) : keys_cnt - (from || 0));
+    common.log(`Topping up ${amount} SOL to ${acc_count} keys...`);
 
     let payer: Keypair;
     try {
         payer = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
         const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
-        if (balance < amount * count) {
+        if (balance < amount * acc_count) {
             common.log_error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${keys_cnt} keys`);
             return;
         }
@@ -327,7 +327,7 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
 
     let transactions = [];
     let files = common.natural_sort(await readdir(trade.KEYS_DIR));
-    files = files.slice(from, to)
+    files = list ? files.filter((_, index) => list.includes(index)) : files.slice(from, to)
 
     for (const file of files) {
         const key = common.get_key(path.join(trade.KEYS_DIR, file));

@@ -166,9 +166,15 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
             return parseInt(value, 10);
         })
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+        })
         .action((options) => {
-            const { from, to } = options;
-            commands.warmup(keys_cnt, from, to);
+            const { from, to, list } = options;
+            commands.warmup(keys_cnt, from, to, list);
         });
 
     program
@@ -269,25 +275,25 @@ async function main() {
         .argument('<keypair_path>', 'Path to the keypair file')
         .option('-f, --from <value>', 'Topup starting from the provided index', (value) => {
             if (!common.validate_int(value, 1, keys_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+                throw new InvalidOptionArgumentError(`Not a valid range(1 - ${keys_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t --to <value>', 'Topup ending at the provided index', (value) => {
             if (!common.validate_int(value, 1, keys_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+                throw new InvalidOptionArgumentError(`Not a valid range(1 - ${keys_cnt}).`);
             return parseInt(value, 10);
         })
-        .option('-l, --list <ids...>', 'List of keypair IDs to topup', (value) => {
-            const ids = value.split(',');
-            if (!ids.every(id => common.validate_int(id, 1, keys_cnt)))
-                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
-            return ids;
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .alias('t')
         .description('Topup the accounts with SOL using the provided keypair')
         .action((amount, keypair_path, options) => {
-            const { from, to } = options;
-            commands.topup(amount, keypair_path, keys_cnt, from, to);
+            const { from, to, list } = options;
+            commands.topup(amount, keypair_path, keys_cnt, from, to, list);
         });
 
     program
