@@ -1,5 +1,6 @@
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { Metaplex } from "@metaplex-foundation/js";
 // import { Liquidity, LiquidityPoolKeys, Percent, SPL_ACCOUNT_LAYOUT, Token, jsonInfo2PoolKeys } from '@raydium-io/raydium-sdk';
 // import { TokenAmount as RaydiumTokenAmount } from '@raydium-io/raydium-sdk';
 import * as common from './common.js';
@@ -20,6 +21,9 @@ const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
 const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '');
 const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || '');
 const ACCOUNT_2 = new PublicKey(process.env.ACCOUNT_2 || '');
+const ACCOUNT_3 = new PublicKey(process.env.ACCOUNT_3 || '');
+const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
+const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 
 export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
@@ -28,6 +32,7 @@ const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
+const METAPLEX_TOKEN_META = new PublicKey(process.env.RENT_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
@@ -99,7 +104,7 @@ const isError = <T>(value: T | Error): value is Error => {
     return value instanceof Error;
 };
 
-export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, tip: number, priority: boolean = false): Promise<String> {
+export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number, priority: boolean = false): Promise<String> {
     try {
         const c = jito.searcher.searcherClient(BLOCK_URL, RESERVE_KEYPAIR);
         const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
@@ -117,7 +122,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
             recentBlockhash: blockhash,
             instructions: instructions.filter(Boolean),
         }).compileToV0Message());
-        versioned_tx.sign([payer]);
+        versioned_tx.sign(signers);
 
         let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
         let bundle = new jito.bundle.Bundle([versioned_tx], 1);
@@ -143,7 +148,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
     }
 }
 
-async function create_and_send_tx(instructions: TransactionInstruction[], payer: Signer, max_retries: number = 5, priority: boolean = false): Promise<String> {
+async function create_and_send_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], max_retries: number = 5, priority: boolean = false): Promise<String> {
     const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
     if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
@@ -152,7 +157,7 @@ async function create_and_send_tx(instructions: TransactionInstruction[], payer:
         instructions: instructions.filter(Boolean),
     }).compileToV0Message());
 
-    versioned_tx.sign([payer]);
+    versioned_tx.sign(signers);
     try {
         const signature = await global.connection.sendTransaction(versioned_tx, {
             skipPreflight: true,
@@ -227,7 +232,7 @@ export async function send_lamports(lamports: number, sender: Signer, receiver: 
         lamports: lamports - (max ? 5000 : 0),
     }));
 
-    return await create_and_send_tx(instructions, sender, max_retries, priority);
+    return await create_and_send_tx(instructions, sender, [sender], max_retries, priority);
 }
 
 export async function get_tx_fee(tx: Transaction): Promise<number> {
@@ -254,6 +259,24 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
         ASSOCIATED_TOKEN_PROGRAM_ID
     )[0];
     return address;
+}
+
+export async function get_token_meta(mint: PublicKey) {
+    const metaplex = Metaplex.make(global.connection);
+
+    const metaplex_acc = metaplex
+        .nfts()
+        .pdas()
+        .metadata({ mint });
+
+    const metaplex_acc_info = await connection.getAccountInfo(metaplex_acc);
+
+    if (metaplex_acc_info) {
+        const token = await metaplex.nfts().findByMint({ mintAddress: mint });
+        return [token.name, token.symbol];
+    }
+
+    throw new Error(`Failed to get the token metadata.`);
 }
 
 async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean> {
@@ -324,7 +347,7 @@ export async function send_tokens(token_amount: number, sender: PublicKey, recei
         token_amount
     ));
 
-    return await create_and_send_tx(instructions, owner, max_retries, priority);
+    return await create_and_send_tx(instructions, owner, [owner], max_retries, priority);
 }
 
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
@@ -378,8 +401,8 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, buyer, max_retries, priority);
-    return await create_and_send_tipped_tx(instructions, buyer, tip, priority);
+    return await create_and_send_tx(instructions, buyer, [buyer], max_retries, priority);
+    return await create_and_send_tipped_tx(instructions, buyer, [buyer], tip, priority);
 }
 
 export async function sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta, tip: number = 0.1, slippage: number = 0.05, priority: boolean = false): Promise<String> {
@@ -418,8 +441,62 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, seller, max_retries, priority);
-    return await create_and_send_tipped_tx(instructions, seller, tip, priority);
+    return await create_and_send_tx(instructions, seller, [seller], max_retries, priority);
+    return await create_and_send_tipped_tx(instructions, seller, [seller], tip, priority);
+}
+
+function create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
+    const instruction_buf = Buffer.from('181ec828051c0777', 'hex');
+
+    const token_name_buf = Buffer.alloc(4 + token_name.length);
+    token_name_buf.writeUInt32LE(token_name.length, 0);
+    token_name_buf.write(token_name, 4);
+
+    const token_ticker_buf = Buffer.alloc(4 + token_ticker.length);
+    token_ticker_buf.writeUInt32LE(token_ticker.length, 0);
+    token_ticker_buf.write(token_ticker, 4);
+
+    const meta_link_buf = Buffer.alloc(4 + meta_link.length);
+    meta_link_buf.writeUInt32LE(meta_link.length, 0);
+    meta_link_buf.write(meta_link, 4);
+
+    return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
+}
+
+export async function create_token(creator: Signer, meta: common.IPFSMetadata, cid: string, priority: boolean = false) {
+    const max_retries = MAX_RETRIES;
+    const meta_link = `${common.IPFS}${cid}`;
+    const instruction_data = create_data(meta.name, meta.symbol, meta_link)
+    const mint = Keypair.generate();
+    const [bonding] = PublicKey.findProgramAddressSync([BONDING_ADDR, mint.publicKey.toBuffer()], TRADE_PROGRAM_ID);
+    const [assoc_bonding] = PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
+    const [metaplex] = PublicKey.findProgramAddressSync([META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()], METAPLEX_TOKEN_META);
+
+    let instructions: TransactionInstruction[] = [];
+    instructions.push(new TransactionInstruction({
+        keys: [
+            { pubkey: mint.publicKey, isSigner: true, isWritable: true },                       // mint 1
+            { pubkey: ACCOUNT_3, isSigner: false, isWritable: false },                          // ACCOUNT3 2
+            { pubkey: bonding, isSigner: false, isWritable: true },                             // bonding curve 3
+            { pubkey: assoc_bonding, isSigner: false, isWritable: true },                       // assic bonding curve 4
+            { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },                          // ACCOUNT0 5
+            { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },                // METAPLEX_TOKEN_META 6
+            { pubkey: metaplex, isSigner: false, isWritable: true },                            // metaplex metadata account 7
+            { pubkey: creator.publicKey, isSigner: true, isWritable: true },                    // creater account 8
+            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },                  // SYSTEM_PROG 9
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },                   // TOKEN_PROG 10
+            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },        // ASSOC_TOKEN_ACC_PROG 11
+            { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },                    // RENT_PROG 12
+            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },                          // ACCOUNT2 13
+            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }                    // TRADE_PROG 14
+        ],
+        programId: TRADE_PROGRAM_ID,
+        data: instruction_data,
+    }));
+
+    // const sig = await create_and_send_tipped_tx(instructions, creater, [creater, mint], 30_000_000, priority);
+    const sig = await create_and_send_tx(instructions, creator, [creator, mint], max_retries, priority);
+    return [sig, mint.publicKey];
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {

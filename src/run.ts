@@ -140,7 +140,7 @@ function decode_metaplex_instr(data: string) {
     return decoded;
 }
 
-export function wait_drop_sub(token_name: string, token_ticker: string, start_timestamp: number): Promise<PublicKey | null> {
+export async function wait_drop_sub(token_name: string, token_ticker: string, start_timestamp: number): Promise<PublicKey | null> {
     let name = token_name.toLowerCase();
     let ticker = token_ticker.toLowerCase();
 

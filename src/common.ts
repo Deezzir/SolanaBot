@@ -1,11 +1,15 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { readdir } from 'fs/promises';
 import dotenv from 'dotenv';
-import path from 'path';
+import path, { basename } from 'path';
 import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
 import { PublicKey } from '@solana/web3.js';
 dotenv.config();
+
+export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
+const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
+const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
 
 export interface BotConfig {
     thread_cnt: number;
@@ -18,6 +22,34 @@ export interface BotConfig {
     token_ticker: string;
     collect_address: PublicKey;
     mint: PublicKey | undefined;
+}
+
+export type IPFSMetadata = {
+    name: string,
+    symbol: string,
+    description: string,
+    image: string | undefined,
+    showName: boolean,
+    createdOn: string,
+    twitter: string | undefined,
+    telegram: string | undefined,
+    website: string | undefined,
+}
+
+export type IPFSResponse = {
+    requestid: string,
+    status: string,
+    created: string,
+    pin: {
+        cid: string,
+        name: string,
+        origin: [],
+        meta: {},
+    }
+    info: {
+        size: string,
+    },
+    delegates: string[],
 }
 
 export function BotConfigDisplay(config: BotConfig) {
@@ -260,4 +292,74 @@ export function read_json(file_path: string) {
         log_error(`[ERROR] failed to read JSON file: ${err}`);
         return undefined;
     }
+}
+
+export async function fetch_ipfs_json(cid: string) {
+    const url = `${IPFS}${cid}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        throw new Error(`Failed to fetch IPFS JSON: ${error}`);
+    }
+}
+
+export async function upload_ipfs(data: any, content_type: string, file_name: string) {
+    var headers = new Headers();
+    headers.append("x-api-key", IPSF_API_KEY);
+
+    var body_data: BodyInit;
+    const form_data = new FormData();
+
+    if (content_type.includes("json")) {
+        form_data.append("Key", file_name);
+        form_data.append("Content-Type", "application/json; charset=utf-8");
+        const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+        form_data.append("Body", blob, "filename.json");
+        body_data = form_data;
+    } else {
+        if (data instanceof File) {
+            form_data.append("Body", data, file_name);
+        } else {
+            console.error("The provided data is not a file.");
+            return;
+        }
+        form_data.append("Key", file_name);
+        form_data.append("ContentType", content_type);
+        body_data = form_data;
+    }
+
+    const requestOptions: RequestInit = {
+        method: 'POST',
+        headers: headers,
+        body: body_data,
+        redirect: 'follow'
+    };
+
+    try {
+        const response = await fetch(IPFS_API, requestOptions);
+        const data = await response.json();
+        return data as IPFSResponse;
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+export async function create_metadata(meta: IPFSMetadata, image_path: string) {
+    const image_file = new File([readFileSync(image_path)], basename(image_path));
+    const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
+    if (!resp || resp.status !== 'pinned') {
+        console.error('Failed to upload image to IPFS');
+        return;
+    }
+    const cid = resp.pin.cid;
+    meta.image = `${IPFS}${cid}`;
+
+    const meta_resp = await upload_ipfs(meta, 'application/json', 'metadata.json');
+    if (!meta_resp || meta_resp.status !== 'pinned') {
+        console.error('Failed to upload metadata to IPFS');
+        return;
+    }
+    return meta_resp.pin.cid;
 }

@@ -5,6 +5,7 @@ import type { Interface } from 'readline';
 declare global {
     var rl: Interface;
     var connection: Connection;
+    var START_COLLECT: boolean;
 }
 
 export { };
