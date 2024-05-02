@@ -3,7 +3,7 @@ import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.j
 import * as common from './common.js';
 import * as trade from './trade.js';
 
-const SLIPPAGE = 1.5;
+const SLIPPAGE = 2.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
