@@ -334,7 +334,7 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
         if (!key) continue;
         const receiver = Keypair.fromSecretKey(key);
         common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, true)
+        transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, false, true)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
     }

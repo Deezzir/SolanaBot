@@ -528,7 +528,8 @@ export async function create_token(creator: Signer, meta: common.IPFSMetadata, c
 //     }))
 // }
 
-// async function get_raydium_swap_tx(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, pool_keys: any, slippage: number, priority: boolean): Promise<VersionedTransaction> {
+// async function get_raydium_swap_tx(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, pool_keys: any, slippage: number, priority: boolean): Promise<String> {
+//     const max_retries = MAX_RETRIES;
 //     const { min_amount_out, amount_in } = await calc_swap_amounts(amount, mint_from, mint_to, pool_keys, slippage);
 //     const token_accounts = await get_owner_token_accounts(seller.publicKey);
 
@@ -554,7 +555,7 @@ export async function create_token(creator: Signer, meta: common.IPFSMetadata, c
 //         } : undefined,
 //     });
 
-//     return create_versioned_tx(swap_tx.innerTransactions[0].instructions, seller);
+//     return create_and_send_tx(swap_tx.innerTransactions[0].instructions, seller, [seller], max_retries, true);
 // }
 
 // async function calc_swap_amounts(amount: number, mint_from: PublicKey, mint_to: PublicKey, pool_keys: any, slippage: number) {
@@ -585,11 +586,8 @@ export async function create_token(creator: Signer, meta: common.IPFSMetadata, c
 // }
 
 // export async function swap_raydium(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, slippage: number = 0.05, priority: boolean = false): Promise<String> {
-//     const max_retries = 5;
-
 //     const pool = await load_pool_keys(LIQUIDITY_FILE);
 //     const pool_keys = find_pool_info(pool, mint_from, mint_to);
 
-//     const tx = await get_raydium_swap_tx(amount, seller, mint_from, mint_to, pool_keys, slippage, priority);
-//     return await send_tx(tx, max_retries);
+//     return get_raydium_swap_tx(amount, seller, mint_from, mint_to, pool_keys, slippage, priority);
 // }
