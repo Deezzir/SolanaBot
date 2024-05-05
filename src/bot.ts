@@ -8,6 +8,7 @@ import * as common from './common.js';
 import * as trade from './trade.js';
 import * as run from './run.js';
 import * as commands from './commands.js';
+import { exit } from 'process';
 dotenv.config({ path: './.env' });
 
 function setup_readline() {
@@ -37,6 +38,7 @@ async function main() {
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
 
+    common.log(`Using RPC: ${rpc}`);
     program
         .version('1.0.0')
         .description('Solana Buy Bot CLI');
@@ -59,8 +61,14 @@ async function main() {
 
             if (config) {
                 config.collect_address = new PublicKey(config.collect_address);
-                if (config.mint)
+                if (config.mint) {
                     config.mint = new PublicKey(config.mint);
+                } else if (config.token_name && config.token_ticker) {
+                    common.log('Sniping mint address...');
+                } else {
+                    console.error('Invalid config file.');
+                    exit(1);
+                }
                 bot_config = config;
                 console.table(common.BotConfigDisplay(bot_config));
                 setup_readline();
@@ -227,8 +235,17 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .description('Sell all the token by the mint from the accounts to the market')
-        .action(commands.sell_token);
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+        })
+        .description('Sell all the token by the mint from the accounts')
+        .action((mint, options) => {
+            let { list } = options;
+            commands.sell_token(mint, list);
+        });
 
     program
         .command('transfer')

@@ -3,7 +3,7 @@ import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.j
 import * as common from './common.js';
 import * as trade from './trade.js';
 
-const SLIPPAGE = 2.5;
+const SLIPPAGE = 1.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
@@ -41,7 +41,7 @@ function sleep(seconds: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const amount = parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
+    const amount = CURRENT_BUY_AMOUNT // parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
     let bought: boolean = false;
 
     while (!IS_DONE && !bought) {
@@ -161,7 +161,7 @@ async function main() {
 
     parentPort?.on('message', async (msg) => {
         if (msg.command === 'buy') {
-            CURRENT_BUY_AMOUNT = WORKER_CONFIG.inputs.start_buy;
+            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, 0.02).toFixed(2));
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);

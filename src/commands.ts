@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { readdir } from 'fs/promises';
 import * as common from './common.js';
 import * as trade from './trade.js';
@@ -6,6 +6,7 @@ import * as run from './run.js';
 import dotenv from 'dotenv'
 import { readFileSync } from 'fs';
 import path from 'path';
+import { exit } from 'process';
 dotenv.config({ path: './.env' });
 
 export async function promote(count: number, cid: string, keypair_path: string) {
@@ -58,9 +59,9 @@ export async function spl_balance(mint: PublicKey, keys_cnt: number) {
             common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${ui_balance.toFixed(2)} ${token_symbol} ${key_path === trade.RESERVE_KEY_PATH ? '| (Reserve)' : ''}`);
         }
         const supply = parseInt((await trade.get_token_supply(mint)).toString());
-        const allocation = (total / supply) * 100;
+        const allocation = (total / (supply / 1_000_000)) * 100;
 
-        common.log(`\nTotal balance: ${total / LAMPORTS_PER_SOL} ${token_symbol}`);
+        common.log(`\nTotal balance: ${total} ${token_symbol}`);
         common.log(`Total allocation: ${allocation.toFixed(2)}%`);
     } catch (error) {
         common.log_error(`[ERROR] ${error}`);
@@ -271,8 +272,8 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey) {
     }
 }
 
-export async function sell_token(mint: PublicKey) {
-    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
+export async function sell_token(mint: PublicKey, list?: number[]) {
+    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...\n`);
 
     const mint_meta = await trade.fetch_mint(mint.toString());
     if (Object.keys(mint_meta).length === 0) {
@@ -282,7 +283,8 @@ export async function sell_token(mint: PublicKey) {
 
     try {
         let transactions = [];
-        const files = common.natural_sort(await readdir(trade.KEYS_DIR)).slice(1);
+        let files = common.natural_sort(await readdir(trade.KEYS_DIR)).slice(1);
+        files = list ? files.filter((_, index) => list.includes(index + 1)) : files;
         for (const file of files) {
             const key = common.get_key(path.join(trade.KEYS_DIR, file));
             if (!key) continue;
@@ -292,9 +294,15 @@ export async function sell_token(mint: PublicKey) {
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
             common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-            transactions.push(trade.sell_token(token_amount, seller, mint_meta, 0.1, 0.5, true)
-                .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
-                .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+            if (mint_meta.raydium_pool === null) {
+                transactions.push(trade.sell_token(token_amount, seller, mint_meta, 0.1, 0.5, true)
+                    .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
+                    .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+            } else {
+                transactions.push(trade.swap_jupiter(token_amount, seller, mint_meta, 0.5, false)
+                    .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
+                    .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+            }
         }
 
         await Promise.allSettled(transactions);
@@ -362,15 +370,18 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
         if (mint) {
             bot_config.mint = mint;
             common.log(`[Main Worker] Token detected: ${bot_config.mint.toString()}`);
+            exit(0);
 
+            // @ts-ignore
             await worker_update_mint(workers, bot_config.mint);
             const interval = setInterval(async () => { if (bot_config.mint) worker_update_mint(workers, bot_config.mint) }, META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(workers, 'buy') }, 1000);
+            setTimeout(() => { run.worker_post_message(workers, 'buy') }, 500);
             await run.wait_for_workers(workers);
             clearInterval(interval);
 
             if (global.START_COLLECT)
+                // @ts-ignore
                 await collect_token(bot_config.mint, bot_config.collect_address);
         } else {
             common.log_error('[ERROR] Token not found. Exiting...');

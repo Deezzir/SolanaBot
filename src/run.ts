@@ -1,5 +1,6 @@
 import inquirer from 'inquirer';
 import { Worker } from 'worker_threads';
+import io from "socket.io-client";
 import bs58 from 'bs58';
 import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import { getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
@@ -147,19 +148,41 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
     let search = [];
 
     search.push(new Promise<PublicKey | null>(async (resolve, reject) => {
-        LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
-        common.log('[Main Worker] Waiting for the new token drop using Fetch url...');
-        while (true) {
-            const mints = (await trade.fetch_by_name(token_name)).filter(m => m.created_timestamp > start_timestamp);
-            if (mints.length > 0) {
-                LOGS_STOP_FUNCTION = null;
-                await wait_drop_unsub();
-                common.log(`[Main Worker] Found the mint using Fetch url`);
-                resolve(new PublicKey(mints[0].mint));
-                break;
+        common.log('[Main Worker] Waiting for the new token drop using Websocket...');
+        let lastCoins: common.TokenMeta[] = [];
+        const socket = io("https://client-api-2-74b1891ee9f9.herokuapp.com", {
+            path: "/socket.io/",
+            query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
+            transports: ["websocket"]
+        });
+        LOGS_STOP_FUNCTION = () => { socket.disconnect(); reject(new Error('User stopped the process')) };
+        socket.on("connect", () => { });
+        socket.on("disconnect", () => { });
+
+        socket.prependAny(async (_, ...obj) => {
+            let currentDate = Date.now();
+            let token = obj[0];
+            let createdDate = (token.created_timestamp + 50000 + (Math.floor(Math.random() * 5)));
+
+            if (createdDate >= currentDate) {
+                lastCoins = lastCoins.sort((a, b) => b.created_timestamp - a.created_timestamp);
+                if (!lastCoins.some(e => e.mint === token.mint)) {
+                    lastCoins.push(token);
+                    lastCoins = lastCoins.sort((a, b) => b.created_timestamp - a.created_timestamp);
+
+                    if (token.name.toLowerCase() === token_name.toLowerCase() && token.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
+                        LOGS_STOP_FUNCTION = null
+                        await wait_drop_unsub();
+                        common.log(`[Main Worker] Found the mint using Websocket`);
+                        socket.disconnect();
+                        resolve(new PublicKey(token.mint));
+                    }
+                }
             }
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+            if (lastCoins.length >= 20) {
+                lastCoins.pop();
+            }
+        });
     }));
 
     search.push(new Promise<PublicKey | null>((resolve, reject) => {
@@ -168,7 +191,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
         SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
-            if (logs && logs.includes('Program log: Instruction: MintTo')) {
+            if (logs && logs.includes('Program log: Create')) {
                 try {
                     const tx = await global.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
                     if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
@@ -183,7 +206,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
                             const partial = instruction as PartiallyDecodedInstruction;
                             const [meta, bytes_read] = decode_metaplex_instr(partial.data);
                             if (bytes_read <= 0) continue;
-                            if (meta.data.name.toLowerCase() === name || meta.data.symbol.toLowerCase().includes(ticker)) {
+                            if (meta.data.name.toLowerCase() === name.toLowerCase() && meta.data.symbol.toLowerCase() === ticker.toLowerCase()) {
                                 if (tx.meta.postTokenBalances[0].mint)
                                     mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
                                 else
@@ -216,11 +239,11 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
     });
 }
 
-async function wait_drop_unsub() {
+export async function wait_drop_unsub() {
     if (SUBSCRIPTION_ID !== undefined) {
         if (LOGS_STOP_FUNCTION) LOGS_STOP_FUNCTION();
         if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
-        connection.removeOnLogsListener(SUBSCRIPTION_ID)
+        global.connection.removeOnLogsListener(SUBSCRIPTION_ID)
             .then(() => SUBSCRIPTION_ID = undefined)
             .catch(err => common.log_error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
     }

@@ -1,12 +1,14 @@
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
-// import { Liquidity, LiquidityPoolKeys, Percent, SPL_ACCOUNT_LAYOUT, Token, jsonInfo2PoolKeys } from '@raydium-io/raydium-sdk';
-// import { TokenAmount as RaydiumTokenAmount } from '@raydium-io/raydium-sdk';
+import fetch from 'cross-fetch';
+import { Wallet } from '@project-serum/anchor';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import path from 'path';
 import bs58 from 'bs58';
+// import { Liquidity, LiquidityPoolKeys, Percent, SPL_ACCOUNT_LAYOUT, Token, jsonInfo2PoolKeys } from '@raydium-io/raydium-sdk';
+// import { TokenAmount as RaydiumTokenAmount } from '@raydium-io/raydium-sdk';
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
 export const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
@@ -17,11 +19,11 @@ const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
 
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
-const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
-const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '');
-const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || '');
-const ACCOUNT_2 = new PublicKey(process.env.ACCOUNT_2 || '');
-const ACCOUNT_3 = new PublicKey(process.env.ACCOUNT_3 || '');
+const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
+const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || 'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
+const ACCOUNT_2 = new PublicKey(process.env.ACCOUNT_2 || 'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
+const ACCOUNT_3 = new PublicKey(process.env.ACCOUNT_3 || 'TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
 const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 
@@ -32,11 +34,12 @@ const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
-const METAPLEX_TOKEN_META = new PublicKey(process.env.RENT_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+const METAPLEX_TOKEN_META = new PublicKey(process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
 const BLOCK_URL = process.env.BLOCK_URL || '';
+const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
 
 const PRIORITY_UNITS = 100000;
@@ -174,9 +177,27 @@ async function create_and_send_tx(instructions: TransactionInstruction[], payer:
     }
 }
 
+async function create_and_send_vtx(tx: VersionedTransaction, signers: Signer[], max_retries: number = 5, priority: boolean = false): Promise<String> {
+    tx.sign(signers);
+
+    const rawTransaction = tx.serialize()
+    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+    const signature = await global.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: true,
+        maxRetries: max_retries
+    });
+    await global.connection.confirmTransaction({
+        blockhash,
+        lastValidBlockHeight,
+        signature
+    }, 'confirmed');
+
+    return signature;
+}
+
 export async function get_balance_change(signature: string, address: PublicKey): Promise<number> {
     try {
-        const tx_details = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        const tx_details = await global.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
         if (!tx_details)
             throw new Error(`[ERROR] Transaction not found: ${signature}`);
         const balance_index = tx_details?.transaction.message.getAccountKeys().staticAccountKeys.findIndex((i) => i.equals(address));
@@ -261,7 +282,7 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
     return address;
 }
 
-export async function get_token_meta(mint: PublicKey) {
+export async function get_token_meta(mint: PublicKey): Promise<[string, string, number]> {
     const metaplex = Metaplex.make(global.connection);
 
     const metaplex_acc = metaplex
@@ -269,11 +290,11 @@ export async function get_token_meta(mint: PublicKey) {
         .pdas()
         .metadata({ mint });
 
-    const metaplex_acc_info = await connection.getAccountInfo(metaplex_acc);
+    const metaplex_acc_info = await global.connection.getAccountInfo(metaplex_acc);
 
     if (metaplex_acc_info) {
         const token = await metaplex.nfts().findByMint({ mintAddress: mint });
-        return [token.name, token.symbol];
+        return [token.name, token.symbol, token.mint.decimals];
     }
 
     throw new Error(`Failed to get the token metadata.`);
@@ -285,8 +306,8 @@ async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean
 }
 
 function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
-    const sup = Number(token.total_supply);
-    return Math.round(amount * sup / token.market_cap);
+    const sup = Number(token);
+    return Math.round(amount * (sup / 1_000_000) / token.market_cap);
 }
 
 function get_solana_amount_raw(amount: number, token: common.TokenMeta): number {
@@ -497,6 +518,40 @@ export async function create_token(creator: Signer, meta: common.IPFSMetadata, c
     // const sig = await create_and_send_tipped_tx(instructions, creater, [creater, mint], 30_000_000, priority);
     const sig = await create_and_send_tx(instructions, creator, [creator, mint], max_retries, priority);
     return [sig, mint.publicKey];
+}
+
+export async function swap_jupiter(amount: TokenAmount, seller: Signer, mint: common.TokenMeta, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+    const max_retries = MAX_RETRIES;
+
+    const wallet = new Wallet(Keypair.fromSecretKey(seller.secretKey));
+    const amount_in = amount.amount;
+    const url = `${JUPITER_API_URL}quote?inputMint=${mint.mint.toString()}&outputMint=${SOLANA_TOKEN.toString()}&amount=${amount_in}&slippageBps=${slippage * 10000}`;
+
+    const quoteResponse = await (
+        await fetch(url)
+    ).json();
+
+    console.log(quoteResponse);
+
+    const { swapTransaction } = await (
+        await fetch(`${JUPITER_API_URL}swap`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                quoteResponse,
+                userPublicKey: wallet.publicKey.toString(),
+                wrapAndUnwrapSol: true,
+                computeUnitPriceMicroLamports: priority ? PRIORITY_MICRO_LAMPORTS : 0,
+            })
+        })
+    ).json();
+
+    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
+    var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+
+    return await create_and_send_vtx(transaction, [seller], max_retries, priority);
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {
