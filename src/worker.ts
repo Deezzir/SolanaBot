@@ -7,7 +7,7 @@ const SLIPPAGE = 1.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
-const TRADE_ITERATIONS = 5;
+const TRADE_ITERATIONS = 3;
 let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
@@ -41,7 +41,8 @@ function sleep(seconds: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const amount = CURRENT_BUY_AMOUNT // parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
+    const amount = CURRENT_BUY_AMOUNT > 0 ? CURRENT_BUY_AMOUNT : MIN_BUY; // parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
+    parentPort?.postMessage(`[Worker ${workerData.id}] Buying ${amount} SOL of the token '${MINT_METADATA.symbol}'`);
     let bought: boolean = false;
 
     while (!IS_DONE && !bought) {
@@ -60,6 +61,7 @@ const buy = async () => {
                         MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`);
                     })
                     .catch((e) => {
+                        //parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                         MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                     }));
             }

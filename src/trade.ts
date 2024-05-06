@@ -152,7 +152,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
 }
 
 async function create_and_send_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], max_retries: number = 5, priority: boolean = false): Promise<String> {
-    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('confirmed');
     if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: payer.publicKey,
@@ -163,7 +163,7 @@ async function create_and_send_tx(instructions: TransactionInstruction[], payer:
     versioned_tx.sign(signers);
     try {
         const signature = await global.connection.sendTransaction(versioned_tx, {
-            skipPreflight: true,
+            skipPreflight: false,
             maxRetries: max_retries,
         })
         await global.connection.confirmTransaction({
@@ -306,7 +306,7 @@ async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean
 }
 
 function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
-    const sup = Number(token);
+    const sup = Number(token.total_supply);
     return Math.round(amount * (sup / 1_000_000) / token.market_cap);
 }
 
