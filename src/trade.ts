@@ -531,8 +531,6 @@ export async function swap_jupiter(amount: TokenAmount, seller: Signer, mint: co
         await fetch(url)
     ).json();
 
-    console.log(quoteResponse);
-
     const { swapTransaction } = await (
         await fetch(`${JUPITER_API_URL}swap`, {
             method: 'POST',
@@ -551,7 +549,7 @@ export async function swap_jupiter(amount: TokenAmount, seller: Signer, mint: co
     const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
     var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
-    return await create_and_send_vtx(transaction, [seller], max_retries, priority);
+    return await create_and_send_vtx(transaction, [wallet.payer], max_retries, priority);
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {
