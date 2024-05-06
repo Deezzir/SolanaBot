@@ -161,7 +161,7 @@ async function main() {
 
     parentPort?.on('message', async (msg) => {
         if (msg.command === 'buy') {
-            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, 0.02).toFixed(2));
+            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, 0.1).toFixed(2));
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);

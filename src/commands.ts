@@ -370,9 +370,7 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
         if (mint) {
             bot_config.mint = mint;
             common.log(`[Main Worker] Token detected: ${bot_config.mint.toString()}`);
-            exit(0);
 
-            // @ts-ignore
             await worker_update_mint(workers, bot_config.mint);
             const interval = setInterval(async () => { if (bot_config.mint) worker_update_mint(workers, bot_config.mint) }, META_UPDATE_INTERVAL);
 
@@ -381,7 +379,6 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
             clearInterval(interval);
 
             if (global.START_COLLECT)
-                // @ts-ignore
                 await collect_token(bot_config.mint, bot_config.collect_address);
         } else {
             common.log_error('[ERROR] Token not found. Exiting...');
