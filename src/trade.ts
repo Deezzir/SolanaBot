@@ -1,4 +1,4 @@
-import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
 import fetch from 'cross-fetch';
@@ -151,46 +151,110 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
     }
 }
 
-async function create_and_send_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], max_retries: number = 5, priority: boolean = false): Promise<String> {
-    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('confirmed');
+async function isBlockhashExpired(lastValidBlockHeight: number) {
+    let currentBlockHeight = (await global.connection.getBlockHeight('finalized'));
+    return (currentBlockHeight > lastValidBlockHeight - 150);
+}
+
+async function create_and_send_tx(
+    instructions: TransactionInstruction[], payer: Signer, signers: Signer[],
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    max_retries: number = 5, priority: boolean = false
+): Promise<String> {
+    // const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+
     if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: payer.publicKey,
-        recentBlockhash: blockhash,
+        recentBlockhash: context.value.blockhash,
         instructions: instructions.filter(Boolean),
     }).compileToV0Message());
 
     versioned_tx.sign(signers);
-    try {
-        const signature = await global.connection.sendTransaction(versioned_tx, {
-            skipPreflight: false,
-            maxRetries: max_retries,
-        })
-        await global.connection.confirmTransaction({
-            blockhash,
-            lastValidBlockHeight,
-            signature
-        }, 'confirmed');
-        return signature;
-    } catch (err) {
-        throw new Error(`Max retries reached, failed to send the transaction: ${err}`);
+
+    const signature = await connection.sendTransaction(versioned_tx);
+    // ,{
+    //     skipPreflight: false,
+    //     maxRetries: max_retries,
+    // });
+
+    let hashExpired = false;
+    let txSuccess = false;
+    while (!hashExpired && !txSuccess) {
+        const { value: status } = await connection.getSignatureStatus(signature);
+
+        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'))) {
+            txSuccess = true;
+            break;
+        }
+
+        hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
+
+        if (hashExpired) {
+            throw new Error('Blockhash has expired.');
+        }
+
+        await common.sleep(2000);
     }
+
+    return signature;
+
+    // try {
+    //     const signature = await global.connection.sendTransaction(versioned_tx, {
+    //         skipPreflight: false,
+    //         maxRetries: max_retries,
+    //     })
+    //     await global.connection.confirmTransaction({
+    //         blockhash,
+    //         lastValidBlockHeight,
+    //         signature
+    //     }, 'confirmed');
+    //     return signature;
+    // } catch (err) {
+    //     throw new Error(`Max retries reached, failed to send the transaction: ${err}`);
+    // }
 }
 
-async function create_and_send_vtx(tx: VersionedTransaction, signers: Signer[], max_retries: number = 5, priority: boolean = false): Promise<String> {
+async function create_and_send_vtx(
+    tx: VersionedTransaction, signers: Signer[],
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    max_retries: number = 5, priority: boolean = false
+): Promise<String> {
+    // const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+
     tx.sign(signers);
 
-    const rawTransaction = tx.serialize()
-    const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
-    const signature = await global.connection.sendRawTransaction(rawTransaction, {
-        skipPreflight: true,
-        maxRetries: max_retries
-    });
-    await global.connection.confirmTransaction({
-        blockhash,
-        lastValidBlockHeight,
-        signature
-    }, 'confirmed');
+    const rawTransaction = tx.serialize();
+    const signature = await global.connection.sendRawTransaction(rawTransaction);
+    // ,{
+    //     skipPreflight: false,
+    //     maxRetries: max_retries,
+    // });
+
+    let hashExpired = false;
+    let txSuccess = false;
+    while (!hashExpired && !txSuccess) {
+        const { value: status } = await connection.getSignatureStatus(signature);
+
+        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'))) {
+            txSuccess = true;
+            break;
+        }
+
+        hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
+
+        if (hashExpired) {
+            throw new Error('Blockhash has expired.');
+        }
+
+        await common.sleep(2000);
+    }
+
+    // await global.connection.confirmTransaction({
+    //     blockhash,
+    //     lastValidBlockHeight,
+    //     signature
+    // }, 'confirmed');
 
     return signature;
 }
@@ -243,7 +307,11 @@ function instructions_add_priority(instructions: TransactionInstruction[]): void
     // instructions.unshift(modify_cu, priority_fee);
 }
 
-export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, max: boolean = false, priority: boolean = false): Promise<String> {
+export async function send_lamports(
+    lamports: number, sender: Signer, receiver: PublicKey,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    max: boolean = false, priority: boolean = false
+): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     let instructions: TransactionInstruction[] = [];
@@ -253,7 +321,7 @@ export async function send_lamports(lamports: number, sender: Signer, receiver: 
         lamports: lamports - (max ? 5000 : 0),
     }));
 
-    return await create_and_send_tx(instructions, sender, [sender], max_retries, priority);
+    return await create_and_send_tx(instructions, sender, [sender], context, max_retries, priority);
 }
 
 export async function get_tx_fee(tx: Transaction): Promise<number> {
@@ -357,7 +425,11 @@ export async function get_token_balance(pubkey: PublicKey, mint: PublicKey): Pro
     }
 }
 
-export async function send_tokens(token_amount: number, sender: PublicKey, receiver: PublicKey, owner: Signer, priority: boolean = false): Promise<String> {
+export async function send_tokens(
+    token_amount: number, sender: PublicKey, receiver: PublicKey, owner: Signer,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: boolean = false
+): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     let instructions: TransactionInstruction[] = []
@@ -368,7 +440,7 @@ export async function send_tokens(token_amount: number, sender: PublicKey, recei
         token_amount
     ));
 
-    return await create_and_send_tx(instructions, owner, [owner], max_retries, priority);
+    return await create_and_send_tx(instructions, owner, [owner], context, max_retries, priority);
 }
 
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
@@ -381,7 +453,11 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta, tip: number = 0.1, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+export async function buy_token(
+    sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    tip: number = 0.1, slippage: number = 0.05, priority: boolean = false
+): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     const mint = new PublicKey(mint_meta.mint);
@@ -422,11 +498,15 @@ export async function buy_token(sol_amount: number, buyer: Signer, mint_meta: co
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, buyer, [buyer], max_retries, priority);
+    return await create_and_send_tx(instructions, buyer, [buyer], context, max_retries, priority);
     return await create_and_send_tipped_tx(instructions, buyer, [buyer], tip, priority);
 }
 
-export async function sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta, tip: number = 0.1, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+export async function sell_token(
+    token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    tip: number = 0.1, slippage: number = 0.05, priority: boolean = false
+): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     const mint = new PublicKey(mint_meta.mint);
@@ -462,7 +542,7 @@ export async function sell_token(token_amount: TokenAmount, seller: Signer, mint
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
-    return await create_and_send_tx(instructions, seller, [seller], max_retries, priority);
+    return await create_and_send_tx(instructions, seller, [seller], context, max_retries, priority);
     return await create_and_send_tipped_tx(instructions, seller, [seller], tip, priority);
 }
 
@@ -484,7 +564,11 @@ function create_data(token_name: string, token_ticker: string, meta_link: string
     return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
 }
 
-export async function create_token(creator: Signer, meta: common.IPFSMetadata, cid: string, priority: boolean = false) {
+export async function create_token(
+    creator: Signer, meta: common.IPFSMetadata, cid: string,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: boolean = false
+): Promise<[String, PublicKey]> {
     const max_retries = MAX_RETRIES;
     const meta_link = `${common.IPFS}${cid}`;
     const instruction_data = create_data(meta.name, meta.symbol, meta_link)
@@ -516,11 +600,15 @@ export async function create_token(creator: Signer, meta: common.IPFSMetadata, c
     }));
 
     // const sig = await create_and_send_tipped_tx(instructions, creater, [creater, mint], 30_000_000, priority);
-    const sig = await create_and_send_tx(instructions, creator, [creator, mint], max_retries, priority);
+    const sig = await create_and_send_tx(instructions, creator, [creator, mint], context, max_retries, priority);
     return [sig, mint.publicKey];
 }
 
-export async function swap_jupiter(amount: TokenAmount, seller: Signer, mint: common.TokenMeta, slippage: number = 0.05, priority: boolean = false): Promise<String> {
+export async function swap_jupiter(
+    amount: TokenAmount, seller: Signer, mint: common.TokenMeta,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    slippage: number = 0.05, priority: boolean = false
+): Promise<String> {
     const max_retries = MAX_RETRIES;
 
     const wallet = new Wallet(Keypair.fromSecretKey(seller.secretKey));
@@ -549,7 +637,7 @@ export async function swap_jupiter(amount: TokenAmount, seller: Signer, mint: co
     const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
     var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
-    return await create_and_send_vtx(transaction, [wallet.payer], max_retries, priority);
+    return await create_and_send_vtx(transaction, [wallet.payer], context, max_retries, priority);
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {

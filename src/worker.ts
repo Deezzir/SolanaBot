@@ -47,9 +47,23 @@ const buy = async () => {
 
     while (!IS_DONE && !bought) {
         try {
+
             let transactions = [];
-            for (let i = 0; i < TRADE_ITERATIONS; i++) {
-                transactions.push(trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, JITOTIP, SLIPPAGE, true)
+            let count = TRADE_ITERATIONS;
+            let lastValidHeight = 0;
+
+            while (count > 0) {
+                const context = await connection.getLatestBlockhashAndContext('finalized');
+                const last = context.value.lastValidBlockHeight;
+
+                if (lastValidHeight !== last) {
+                    lastValidHeight = last;
+                } else {
+                    await common.sleep(500);
+                    continue;
+                }
+
+                transactions.push(trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, true)
                     .then(async (sig) => {
                         try {
                             const balance_change = await trade.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
@@ -64,6 +78,8 @@ const buy = async () => {
                         //parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                         MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                     }));
+
+                count--;
             }
             await Promise.allSettled(transactions);
 
@@ -84,10 +100,24 @@ const sell = async () => {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] No tokens to sell`);
                 break;
             }
+
             let transactions = [];
-            for (let i = 0; i < TRADE_ITERATIONS; i++) {
+            let count = TRADE_ITERATIONS;
+            let lastValidHeight = 0;
+
+            while (count > 0) {
+                const context = await connection.getLatestBlockhashAndContext('finalized');
+                const last = context.value.lastValidBlockHeight;
+
+                if (lastValidHeight !== last) {
+                    lastValidHeight = last;
+                } else {
+                    await common.sleep(500);
+                    continue;
+                }
+
                 if (MINT_METADATA.raydium_pool === null) {
-                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, JITOTIP, SLIPPAGE, true)
+                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, true)
                         .then((sig) => {
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
@@ -97,10 +127,20 @@ const sell = async () => {
                             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token, retrying...`);
                         }));
                 } else {
-                    // signature = ''; //await trade.swap_raydium(balance.uiAmount, keypair, config.inputs.mint, trade.SOLANA_TOKEN, SLIPPAGE, true)
+                    transactions.push(trade.swap_jupiter(balance, WORKER_KEYPAIR, MINT_METADATA, context, SLIPPAGE, true)
+                        .then((sig) => {
+                            sold = true;
+                            const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Sold ${ui_amount} tokens. Signature: ${sig}`);
+                        })
+                        .catch((e) => {
+                            MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token, retrying...`);
+                        }));
                 }
-                await Promise.allSettled(transactions);
+
+                count--;
             }
+            await Promise.allSettled(transactions);
         } catch (e) {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error getting the balance, retrying...`);
         }

@@ -248,6 +248,10 @@ export function is_valid_pubkey(input: string): boolean {
     }
 }
 
+export function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function validate_int(input: string, min: number = -Infinity, max: number = Infinity): boolean {
     const num = parseInt(input, 10);
     if (isNaN(num) || num < min || num > max) return false;

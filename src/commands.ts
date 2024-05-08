@@ -9,8 +9,8 @@ import path from 'path';
 import { exit } from 'process';
 dotenv.config({ path: './.env' });
 
-export async function promote(count: number, cid: string, keypair_path: string) {
-    common.log(`Promoting ${count} accounts with CID ${cid}...\n`);
+export async function promote(times: number, cid: string, keypair_path: string) {
+    common.log(`Promoting ${times} accounts with CID ${cid}...\n`);
 
     let creator: Keypair;
     let meta: common.IPFSMetadata;
@@ -26,12 +26,28 @@ export async function promote(count: number, cid: string, keypair_path: string) 
         return;
     }
 
+    let count = times;
     let transactions = [];
-    for (let i = 0; i < count; i++) {
-        transactions.push(trade.create_token(creator, meta, cid, true)
+    let lastValidHeight = 0;
+
+    while (count > 0) {
+        const context = await connection.getLatestBlockhashAndContext('finalized');
+        const last = context.value.lastValidBlockHeight;
+
+        if (lastValidHeight !== last) {
+            lastValidHeight = last;
+        } else {
+            await common.sleep(500);
+            continue;
+        }
+
+        transactions.push(trade.create_token(creator, meta, cid, context, true)
             .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
             .catch(error => common.log_error(`Transaction failed, error: ${error.message}`)));
+
+        count--;
     }
+
     await Promise.allSettled(transactions);
 }
 
@@ -77,7 +93,9 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender_p
         return;
     }
 
-    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, true)
+    const context = await connection.getLatestBlockhashAndContext('finalized');
+
+    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, context, true)
         .then(signature => common.log(`Transaction completed, signature: ${signature}`))
         .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
 }
@@ -129,9 +147,18 @@ export async function sell_token_once(mint: PublicKey, keypair_path: string) {
     }
 
     common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
-    trade.sell_token(token_amount, seller, mint_meta, 0.01, 0.5, true)
-        .then(signature => common.log(`Transaction completed, signature: ${signature}`))
-        .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
+
+    const context = await connection.getLatestBlockhashAndContext('finalized');
+
+    if (mint_meta.raydium_pool === null) {
+        trade.sell_token(token_amount, seller, mint_meta, context, 0.01, 0.5, true)
+            .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+            .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
+    } else {
+        trade.swap_jupiter(token_amount, seller, mint_meta, context, 0.5, true)
+            .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+            .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
+    }
 }
 
 export async function buy_token_once(amount: number, mint: PublicKey, keypair_path: string) {
@@ -152,8 +179,12 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
         common.log_error('[ERROR] Mint metadata not found.');
         return;
     }
-    const signature = await trade.buy_token(amount, payer, mint_meta, 0.001, 0.05, true);
-    common.log(`Transaction completed, signature: ${signature}`);
+
+    const context = await connection.getLatestBlockhashAndContext('finalized');
+
+    trade.buy_token(amount, payer, mint_meta, context, 0.01, 0.05, true)
+        .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+        .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
 }
 
 export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[]) {
@@ -182,27 +213,29 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
             while (true) {
                 try {
-                    const signature = await trade.buy_token(amount, buyer, mint_meta, 0.001, 0.5, true);
+                    const context = await connection.getLatestBlockhashAndContext('finalized');
+                    const signature = await trade.buy_token(amount, buyer, mint_meta, context, 0.001, 0.5, true);
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
                     // common.log(`Error buying the token, retrying...`);
                 }
             }
-            setTimeout(() => { }, 3000);
+            common.sleep(1500);
             let twice = false;
             while (true) {
                 try {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
                         common.log(`No tokens to sell for ${file} and mint ${mint_meta.mint}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await common.sleep(1500);
                         if (twice) break;
                         twice = true;
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${file})...`);
-                    const signature = await trade.sell_token(balance, buyer, mint_meta, 0.001, 0.5, true);
+                    const context = await connection.getLatestBlockhashAndContext('finalized');
+                    const signature = await trade.sell_token(balance, buyer, mint_meta, context, 0.001, 0.5, true);
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
@@ -218,22 +251,39 @@ export async function collect(address: PublicKey, reserve: boolean) {
     const receiver = new PublicKey(address);
     common.log(`Receiver address: ${receiver.toString()}\n`);
 
-    let transactions = [];
     const files = common.natural_sort(await readdir(trade.KEYS_DIR));
-    for (const file of files) {
+
+    let transactions = [];
+    let count = files.length;
+    let lastValidHeight = 0;
+
+    while (count > 0) {
+        const context = await connection.getLatestBlockhashAndContext('finalized');
+        const last = context.value.lastValidBlockHeight;
+
+        if (lastValidHeight !== last) {
+            lastValidHeight = last;
+        } else {
+            await common.sleep(500);
+            continue;
+        }
+
+        const file = files[count - 1];
         const file_path = path.join(trade.KEYS_DIR, file);
         const key = common.get_key(file_path);
         if (!key) continue;
-        if (reserve && file_path === trade.RESERVE_KEY_PATH) continue;
+        if (!reserve && file_path === trade.RESERVE_KEY_PATH) continue;
 
         const sender = Keypair.fromSecretKey(key);
         const amount = await trade.get_balance(sender.publicKey);
         if (amount === 0 || address === sender.publicKey) continue;
 
         common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(trade.send_lamports(amount, sender, receiver, true)
+        transactions.push(trade.send_lamports(amount, sender, receiver, context, true)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+
+        count--;
     }
 
     await Promise.allSettled(transactions);
@@ -248,9 +298,24 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey) {
         const reserve_keypair = Keypair.fromSecretKey(reserve);
         const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
 
-        let transactions = [];
         const files = common.natural_sort(await readdir(trade.KEYS_DIR));
-        for (const file of files) {
+
+        let transactions = [];
+        let count = files.length;
+        let lastValidHeight = 0;
+
+        while (count > 0) {
+            const context = await connection.getLatestBlockhashAndContext('finalized');
+            const last = context.value.lastValidBlockHeight;
+
+            if (lastValidHeight !== last) {
+                lastValidHeight = last;
+            } else {
+                await common.sleep(500);
+                continue;
+            }
+
+            const file = files[count - 1];
             const key = common.get_key(path.join(trade.KEYS_DIR, file));
             if (!key) continue;
 
@@ -261,9 +326,11 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey) {
             const sender_accoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
 
             common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-            transactions.push(trade.send_tokens(token_amount_raw, sender_accoc_addr, receiver_assoc_addr, sender, true)
+            transactions.push(trade.send_tokens(token_amount_raw, sender_accoc_addr, receiver_assoc_addr, sender, context, true)
                 .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                 .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+
+            count--;
         }
 
         await Promise.allSettled(transactions);
@@ -282,10 +349,25 @@ export async function sell_token(mint: PublicKey, list?: number[]) {
     }
 
     try {
-        let transactions = [];
         let files = common.natural_sort(await readdir(trade.KEYS_DIR)).slice(1);
         files = list ? files.filter((_, index) => list.includes(index + 1)) : files;
-        for (const file of files) {
+
+        let transactions = [];
+        let count = files.length;
+        let lastValidHeight = 0;
+
+        while (count > 0) {
+            const context = await connection.getLatestBlockhashAndContext('finalized');
+            const last = context.value.lastValidBlockHeight;
+
+            if (lastValidHeight !== last) {
+                lastValidHeight = last;
+            } else {
+                await common.sleep(500);
+                continue;
+            }
+
+            const file = files[count - 1];
             const key = common.get_key(path.join(trade.KEYS_DIR, file));
             if (!key) continue;
 
@@ -295,14 +377,16 @@ export async function sell_token(mint: PublicKey, list?: number[]) {
 
             common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${file})...`);
             if (mint_meta.raydium_pool === null) {
-                transactions.push(trade.sell_token(token_amount, seller, mint_meta, 0.1, 0.5, true)
+                transactions.push(trade.sell_token(token_amount, seller, mint_meta, context, 0.1, 1.5, true)
                     .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                     .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
             } else {
-                transactions.push(trade.swap_jupiter(token_amount, seller, mint_meta, 0.5, false)
+                transactions.push(trade.swap_jupiter(token_amount, seller, mint_meta, context, 1.5, false)
                     .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                     .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
             }
+
+            count--;
         }
 
         await Promise.allSettled(transactions);
@@ -333,18 +417,35 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
         return;
     }
 
-    let transactions = [];
     let files = common.natural_sort(await readdir(trade.KEYS_DIR));
     files = list ? files.filter((_, index) => list.includes(index)) : files.slice(from, to)
 
-    for (const file of files) {
+    let transactions = [];
+    let count = files.length;
+    let lastValidHeight = 0;
+
+    while (count > 0) {
+        const context = await connection.getLatestBlockhashAndContext('finalized');
+        const last = context.value.lastValidBlockHeight;
+
+        if (lastValidHeight !== last) {
+            lastValidHeight = last;
+        } else {
+            await common.sleep(500);
+            continue;
+        }
+
+        const file = files[count - 1];
         const key = common.get_key(path.join(trade.KEYS_DIR, file));
         if (!key) continue;
         const receiver = Keypair.fromSecretKey(key);
+
         common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-        transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, false, true)
+        transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, context, false, true)
             .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
             .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
+
+        count--;
     }
     await Promise.allSettled(transactions);
 }
