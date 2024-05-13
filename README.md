@@ -14,7 +14,7 @@ git clone https://github.com/Deezzir/SolanaBot.git
 cd SolanaBot
 ```
 
-3. Install Node.js and npm if you haven't already and install the dependencies
+3. Install Node.js and npm if you haven't already, and install the dependencies
 
 A good way to install Node.js and NPM is to use [npm DOCS](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
 
@@ -27,16 +27,22 @@ npm install
 ```bash
 RPC=
 PROGRAM_ID=
-METAPLEX_PROGRAM_ID=metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
-ASSOCIATED_TOKEN_PROGRAM_ID=ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL
+METAPLEX_PROGRAM_ID=
+ASSOCIATED_TOKEN_PROGRAM_ID=
 ACCOUNT_0=
 ACCOUNT_1=
-SYSTEM_PROGRAM_ID=11111111111111111111111111111111
-TOKEN_PROGRAM_ID=TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
-RENT_PROGRAM_ID=SysvarRent111111111111111111111111111111111
+ACCOUNT_2=
+ACCOUNT_3=
+SYSTEM_PROGRAM_ID=
+TOKEN_PROGRAM_ID=
+RENT_PROGRAM_ID=
 KEYS_DIR=./keys
+JITOTIP=
 FETCH_MINT_API_URL=
 LIQUIDITY_FILE=
+BLOCK_URL=
+IPFS_API_KEY=
+MONGO_URI=
 ```
 
 5. Build the project
@@ -48,5 +54,5 @@ npm run build
 6. Run the project
 
 ```bash
-npm start
+node dist/bot.js -h
 ```
