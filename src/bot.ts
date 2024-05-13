@@ -3,20 +3,14 @@ import dotenv from 'dotenv'
 import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'commander';
 import { PublicKey, Connection } from '@solana/web3.js';
 import { existsSync, } from 'fs';
-import * as readline from 'readline';
+import { clearLine, cursorTo, moveCursor } from 'readline';
 import * as common from './common.js';
 import * as trade from './trade.js';
 import * as run from './run.js';
 import * as commands from './commands.js';
+import * as drop from './drop.js';
 import { exit } from 'process';
 dotenv.config({ path: './.env' });
-
-function setup_readline() {
-    global.rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-}
 
 //------------------------------------------------------------
 // MAIN
@@ -71,7 +65,7 @@ async function main() {
                 }
                 bot_config = config;
                 console.table(common.BotConfigDisplay(bot_config));
-                setup_readline();
+                common.setup_readline();
                 await new Promise<void>(resolve => global.rl.question('Press ENTER to start the bot...', () => resolve()));
             } else {
                 bot_config = await run.get_config(keys_cnt);
@@ -79,13 +73,13 @@ async function main() {
                 if (!bot_config) return;
             }
 
-            if (global.rl === undefined) setup_readline();
+            if (global.rl === undefined) common.setup_readline();
             global.rl.setPrompt('Command (stop/config/collect/sell/set)> ');
             global.rl.prompt(true);
 
             global.rl.on('line', async (line) => {
-                readline.moveCursor(process.stdout, 0, -1);
-                readline.clearLine(process.stdout, 0);
+                moveCursor(process.stdout, 0, -1);
+                clearLine(process.stdout, 0);
                 switch (line.trim().split(' ')[0]) {
                     case 'stop':
                         if (!stopping) {
@@ -135,8 +129,8 @@ async function main() {
                 global.rl.prompt(true);
             }).on('close', () => {
                 common.log('[Main Worker] Stopping the bot...');
-                readline.cursorTo(process.stdout, 0);
-                readline.clearLine(process.stdout, 0);
+                cursorTo(process.stdout, 0);
+                clearLine(process.stdout, 0);
                 process.exit(0);
             });
             await commands.start(bot_config, workers)
@@ -347,6 +341,37 @@ async function main() {
         .argument('<keypair_path>', 'Path to the keypair file')
         .description('Create promotion tokens using the provided keypair')
         .action(commands.promote);
+
+    program
+        .command('drop')
+        .alias('d')
+        .argument('<airdrop>', 'Percent of tokens to be airdroped', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 0 || parsedValue > 100)
+                throw new InvalidArgumentError('Invalid range (0-100).');
+            return parsedValue;
+        })
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value))
+                throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<keypair_path>', 'Path to the keypair file')
+        .option('-p, --presale <number>', 'Turn on the presale', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 0 || parsedValue > 100)
+                throw new InvalidOptionArgumentError('Invalid range (0-100).');
+            return parsedValue;
+        })
+        .description('Do the drop')
+        .action(async (airdrop, mint, keypair_path, options) => {
+            const { presale } = options;
+            await drop.drop(airdrop, mint, keypair_path, presale);
+        });
 
     program.parse(process.argv);
     if (!process.argv.slice(2).length) {

@@ -17,7 +17,6 @@ const RESERVE = common.get_key(RESERVE_KEY_PATH);
 if (!RESERVE) throw new Error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
 const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
 
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
@@ -31,6 +30,7 @@ export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So1111111
 
 const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
 
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
@@ -350,7 +350,7 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
     return address;
 }
 
-export async function get_token_meta(mint: PublicKey): Promise<[string, string, number]> {
+export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> {
     const metaplex = Metaplex.make(global.connection);
 
     const metaplex_acc = metaplex
@@ -362,7 +362,12 @@ export async function get_token_meta(mint: PublicKey): Promise<[string, string, 
 
     if (metaplex_acc_info) {
         const token = await metaplex.nfts().findByMint({ mintAddress: mint });
-        return [token.name, token.symbol, token.mint.decimals];
+        return {
+            token_name: token.name,
+            token_symbol: token.symbol,
+            token_decimals: token.mint.decimals,
+            mint: mint,
+        }
     }
 
     throw new Error(`Failed to get the token metadata.`);

@@ -5,6 +5,7 @@ import path, { basename } from 'path';
 import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
 import { PublicKey } from '@solana/web3.js';
+import { createInterface } from 'readline';
 dotenv.config();
 
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
@@ -86,6 +87,13 @@ export interface WorkerConfig {
 export interface WorkerPromise {
     worker: Worker;
     promise: Promise<void>;
+}
+
+export interface MintMeta {
+    token_name: string;
+    token_symbol: string;
+    token_decimals: number;
+    mint: PublicKey
 }
 
 export interface TokenMeta {
@@ -366,4 +374,15 @@ export async function create_metadata(meta: IPFSMetadata, image_path: string) {
         return;
     }
     return meta_resp.pin.cid;
+}
+
+export function setup_readline() {
+    global.rl = createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+}
+
+export function round_two(num: number) {
+    return Math.round((num + Number.EPSILON) * 100) / 100;
 }

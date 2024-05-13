@@ -54,7 +54,7 @@ export async function promote(times: number, cid: string, keypair_path: string) 
 export async function spl_balance(mint: PublicKey, keys_cnt: number) {
     try {
         common.log(`Getting the token balance of the keys by the mint ${mint.toString()}...`);
-        const [token_name, token_symbol] = await trade.get_token_meta(mint);
+        const { token_name, token_symbol } = await trade.get_token_meta(mint);
         common.log(`Token name: ${token_name} | Symbol: ${token_symbol}\n`);
 
         if (keys_cnt === 0) {
@@ -128,8 +128,8 @@ export async function sell_token_once(mint: PublicKey, keypair_path: string) {
     let seller: Keypair;
     try {
         seller = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
-        const balance = await trade.get_balance(seller.publicKey) / LAMPORTS_PER_SOL;
-        common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${balance.toFixed(2)} SOL`);
+        const balance = await trade.get_token_balance(seller.publicKey, mint);
+        common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${balance.uiAmount || 0} tokens`);
     } catch (err) {
         common.log_error('[ERROR] Failed to process seller file');
         return;
@@ -323,10 +323,10 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey) {
             const token_amount = await trade.get_token_balance(sender.publicKey, mint);
             const token_amount_raw = parseInt(token_amount.amount);
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
-            const sender_accoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
+            const sender_assoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
 
             common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
-            transactions.push(trade.send_tokens(token_amount_raw, sender_accoc_addr, receiver_assoc_addr, sender, context, true)
+            transactions.push(trade.send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender, context, true)
                 .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                 .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
 
