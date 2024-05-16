@@ -7,7 +7,7 @@ const SLIPPAGE = 1.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.1;
 const MIN_BUY = 0.05;
-const TRADE_ITERATIONS = 3;
+const TRADE_ITERATIONS = 1;
 let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
@@ -83,7 +83,7 @@ const buy = async () => {
             }
             await Promise.allSettled(transactions);
 
-            CURRENT_BUY_AMOUNT = (WORKER_CONFIG.inputs.spend_limit - CURRENT_SPENDINGS) * 0.8;
+            CURRENT_BUY_AMOUNT = (WORKER_CONFIG.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
         } catch (e) {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
         }
@@ -203,7 +203,8 @@ async function main() {
 
     parentPort?.on('message', async (msg) => {
         if (msg.command === 'buy') {
-            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, 0.1).toFixed(2));
+            const std = WORKER_CONFIG.inputs.start_buy * 0.05;
+            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);

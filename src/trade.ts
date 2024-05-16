@@ -172,7 +172,7 @@ async function create_and_send_tx(
 
     versioned_tx.sign(signers);
 
-    const signature = await connection.sendTransaction(versioned_tx);
+    const signature = await global.connection.sendTransaction(versioned_tx);
     // ,{
     //     skipPreflight: false,
     //     maxRetries: max_retries,
@@ -181,11 +181,15 @@ async function create_and_send_tx(
     let hashExpired = false;
     let txSuccess = false;
     while (!hashExpired && !txSuccess) {
-        const { value: status } = await connection.getSignatureStatus(signature);
+        const { value: status } = await global.connection.getSignatureStatus(signature);
 
-        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'))) {
+        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) && status.err === null) {
             txSuccess = true;
             break;
+        }
+
+        if (status && status.err) {
+            throw new Error(`Transaction failed: ${status.err}`);
         }
 
         hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
@@ -234,7 +238,7 @@ async function create_and_send_vtx(
     let hashExpired = false;
     let txSuccess = false;
     while (!hashExpired && !txSuccess) {
-        const { value: status } = await connection.getSignatureStatus(signature);
+        const { value: status } = await global.connection.getSignatureStatus(signature);
 
         if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'))) {
             txSuccess = true;
@@ -380,12 +384,12 @@ async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean
 
 function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
     const sup = Number(token.total_supply);
-    return Math.round(amount * (sup / 1_000_000) / token.market_cap);
+    return Math.round(amount * sup / token.market_cap);
 }
 
 function get_solana_amount_raw(amount: number, token: common.TokenMeta): number {
     const sup = Number(token.total_supply);
-    return amount * token.market_cap / (sup / 1_000_000);
+    return amount * token.market_cap / (sup * 1_000_000);
 }
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {

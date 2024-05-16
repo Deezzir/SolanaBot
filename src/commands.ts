@@ -271,12 +271,12 @@ export async function collect(address: PublicKey, reserve: boolean) {
         const file = files[count - 1];
         const file_path = path.join(trade.KEYS_DIR, file);
         const key = common.get_key(file_path);
-        if (!key) continue;
-        if (!reserve && file_path === trade.RESERVE_KEY_PATH) continue;
+        if (!key) { count--; continue; }
+        if (!reserve && file_path === trade.RESERVE_KEY_PATH) { count--; continue; }
 
         const sender = Keypair.fromSecretKey(key);
         const amount = await trade.get_balance(sender.publicKey);
-        if (amount === 0 || address === sender.publicKey) continue;
+        if (amount === 0 || address === sender.publicKey) { count--; continue; }
 
         common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
         transactions.push(trade.send_lamports(amount, sender, receiver, context, true)
@@ -317,12 +317,12 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey) {
 
             const file = files[count - 1];
             const key = common.get_key(path.join(trade.KEYS_DIR, file));
-            if (!key) continue;
+            if (!key) { count--; continue; }
 
             const sender = Keypair.fromSecretKey(key);
             const token_amount = await trade.get_token_balance(sender.publicKey, mint);
             const token_amount_raw = parseInt(token_amount.amount);
-            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
+            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) { count--; continue };
             const sender_assoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
 
             common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${file})...`);
@@ -369,11 +369,11 @@ export async function sell_token(mint: PublicKey, list?: number[]) {
 
             const file = files[count - 1];
             const key = common.get_key(path.join(trade.KEYS_DIR, file));
-            if (!key) continue;
+            if (!key) { count--; continue; }
 
             const seller = Keypair.fromSecretKey(key);
             const token_amount = await trade.get_token_balance(seller.publicKey, mint);
-            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
+            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) { count--; continue };
 
             common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${file})...`);
             if (mint_meta.raydium_pool === null) {
@@ -437,7 +437,7 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
 
         const file = files[count - 1];
         const key = common.get_key(path.join(trade.KEYS_DIR, file));
-        if (!key) continue;
+        if (!key) { count--; continue; }
         const receiver = Keypair.fromSecretKey(key);
 
         common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${file})...`);
