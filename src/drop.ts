@@ -1,9 +1,10 @@
 import { MongoClient, Db, ServerApiVersion, ClientSession } from "mongodb";
 import * as common from "./common.js";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, RpcResponseAndContext, Signer, TransactionInstruction } from "@solana/web3.js";
 import * as trade from "./trade.js";
 import { readFileSync } from "fs";
 import dotenv from "dotenv";
+import { createAssociatedTokenAccountInstruction, createTransferInstruction } from "@solana/spl-token";
 dotenv.config();
 
 const RECORDS_PER_ITERATION = 2;
@@ -20,6 +21,33 @@ const DB_CLIENT = new MongoClient(MONGO_URI, {
         deprecationErrors: true,
     },
 });
+
+async function send_tokens(
+    token_amount: number, mint: PublicKey, sender: PublicKey, receiver: PublicKey, payer: Signer,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: boolean = false
+): Promise<String> {
+    let instructions: TransactionInstruction[] = []
+
+    const ata = await trade.calc_assoc_token_addr(receiver, mint);
+    instructions.push(
+        createAssociatedTokenAccountInstruction(
+            payer.publicKey,
+            ata,
+            receiver,
+            mint
+        )
+    );
+
+    instructions.push(createTransferInstruction(
+        sender,
+        ata,
+        payer.publicKey,
+        token_amount
+    ));
+
+    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, priority);
+}
 
 
 async function connect_db() {
@@ -133,13 +161,12 @@ async function count_records(col_name: string) {
     }
     try {
         const collection = DB?.collection(col_name);
-        const count = await collection?.countDocuments();
+        const count = await collection?.countDocuments({ tx: null });
         return count || 0;
     } catch (error) {
         console.error(`[ERROR] Failed to count records: ${error}`);
         throw error;
     }
-
 }
 
 async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.MintMeta) {
@@ -157,6 +184,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
         const drop_assoc_addr = await trade.calc_assoc_token_addr(drop.publicKey, mint_meta.mint);
 
         while (records.length > 0) {
+            console.log(`Processing ${records.length} records...`);
             let db_updates: any[] = [];
             let transactions = [];
             let count = records.length;
@@ -178,10 +206,10 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
                 const token_amount = record.tokensToSend;
                 const xUsername = record.xUsername;
                 const token_amount_raw = token_amount * (10 ** mint_meta.token_decimals);
-                const receiver_assoc_addr = await trade.create_assoc_token_account(drop, receiver, mint_meta.mint);
+                // const receiver_assoc_addr = await trade.create_assoc_token_account(drop, receiver, mint_meta.mint);
 
-                console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')}...`);
-                transactions.push(trade.send_tokens(token_amount_raw, drop_assoc_addr, receiver_assoc_addr, drop, context, true)
+                console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`);
+                transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop, context, true)
                     .then((signature) => {
                         console.log(`Transaction completed for ${xUsername}, signature: ${signature}`)
                         db_updates.push({
@@ -197,7 +225,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
             }
             await Promise.allSettled(transactions);
             await bulk_write(col_name, db_updates);
-            await common.sleep(1000);
+            await common.sleep(500);
 
             records = await collection?.find({ tx: null }).limit(RECORDS_PER_ITERATION).toArray();
             if (!records) throw new Error("Failed to fetch records");

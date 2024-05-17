@@ -156,7 +156,7 @@ async function isBlockhashExpired(lastValidBlockHeight: number) {
     return (currentBlockHeight > lastValidBlockHeight - 150);
 }
 
-async function create_and_send_tx(
+export async function create_and_send_tx(
     instructions: TransactionInstruction[], payer: Signer, signers: Signer[],
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
     max_retries: number = 5, priority: boolean = false
@@ -455,7 +455,7 @@ export async function send_tokens(
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
     const max_retries = MAX_RETRIES;
     try {
-        let account = await getOrCreateAssociatedTokenAccount(global.connection, payer, mint, owner, false, 'confirmed', { maxRetries: max_retries, skipPreflight: true });
+        let account = await getOrCreateAssociatedTokenAccount(global.connection, payer, mint, owner, false, 'confirmed', { maxRetries: max_retries, skipPreflight: false });
         return account.address;
     } catch (err) {
         throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
