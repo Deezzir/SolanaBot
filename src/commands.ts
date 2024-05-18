@@ -209,7 +209,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
-            const amount = parseFloat(common.normal_random(0.01, 0.001).toFixed(4));
+            const amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
             while (true) {
                 try {
@@ -218,7 +218,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
-                    // common.log(`Error buying the token, retrying...`);
+                    common.log(`Failed to buy the token, retrying... ${e}`);
                 }
             }
             common.sleep(1500);
@@ -239,7 +239,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
                 } catch (e) {
-                    // common.log(`Error selling the token, retrying...`);
+                    common.log(`Error selling the token, retrying... ${e}`);
                 }
             }
         }
