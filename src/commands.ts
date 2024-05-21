@@ -6,7 +6,6 @@ import * as run from './run.js';
 import dotenv from 'dotenv'
 import { readFileSync } from 'fs';
 import path from 'path';
-import { exit } from 'process';
 dotenv.config({ path: './.env' });
 
 export async function promote(times: number, cid: string, keypair_path: string) {
@@ -187,13 +186,21 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
         .catch(error => common.log_error(`Transaction failed, error: ${error.message}`));
 }
 
-export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[]) {
+export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[], min?: number, max?: number) {
+    const MIN = min || 1;
+    const MAX = max || 5;
+
+    if (MAX < MIN) {
+        common.log_error('[ERROR] Invalid min and max values.');
+        return;
+    }
+
     if (keys_cnt === 0) {
         common.log_error('[ERROR] No keys available.');
         return;
     }
 
-    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (35 - 10) + 10));
+    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (5 - 1) + 1));
     const acc_count = list ? list.length : (to ? to - (from || 0) : keys_cnt - (from || 0));
 
     common.log(`Warming up ${acc_count} accounts...`);
@@ -205,13 +212,15 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
         const key = common.get_key(path.join(trade.KEYS_DIR, file));
         if (!key) continue;
         const buyer = Keypair.fromSecretKey(key);
-        const mints = (await trade.fetch_random_mints(counts[index])).filter(i => !i.market_id);
+        const mints = (await trade.fetch_random_mints(counts[index] || 3)).filter(i => !i.market_id);
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
-            const amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
+            let amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
+            if (amount === 0) amount = 0.001;
             common.log(`Buying ${amount} SOL of the token '${mint_meta.name}' with mint ${mint_meta.mint}...`);
-            while (true) {
+            let buy_attempts = 5;
+            while (buy_attempts > 0) {
                 try {
                     const context = await connection.getLatestBlockhashAndContext('finalized');
                     const signature = await trade.buy_token(amount, buyer, mint_meta, context, 0.001, 0.5, true);
@@ -219,6 +228,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
                     break;
                 } catch (e) {
                     common.log(`Failed to buy the token, retrying... ${e}`);
+                    buy_attempts--;
                 }
             }
             common.sleep(1500);
@@ -381,7 +391,7 @@ export async function sell_token(mint: PublicKey, list?: number[]) {
                     .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                     .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
             } else {
-                transactions.push(trade.swap_jupiter(token_amount, seller, mint_meta, context, 1.5, false)
+                transactions.push(trade.swap_jupiter(token_amount, seller, mint_meta, context, 0.5, true)
                     .then(signature => common.log(`Transaction completed for ${file}, signature: ${signature}`))
                     .catch(error => common.log_error(`Transaction failed for ${file}, error: ${error.message}`)));
             }
@@ -457,8 +467,10 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
         const mint_meta = await trade.fetch_mint(mint.toString());
         mint_meta.total_supply = await trade.get_token_supply(mint);
         if (Object.keys(mint_meta).length !== 0) {
-            common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
-            run.worker_post_message(workers, 'mint', mint_meta);
+            if (mint_meta.usd_market_cap) {
+                common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
+                run.worker_post_message(workers, 'mint', mint_meta);
+            }
         }
     }
 

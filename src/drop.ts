@@ -7,13 +7,14 @@ import dotenv from "dotenv";
 import { createAssociatedTokenAccountInstruction, createTransferInstruction } from "@solana/spl-token";
 dotenv.config();
 
-const RECORDS_PER_ITERATION = 2;
+const RECORDS_PER_ITERATION = 10;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017";
-const DB_NAME = process.env.MONGO_DB || "taro";
+const DB_NAME = process.env.MONGO_DB || "test";
 const AIRDROP_COLLECTION = "airdropusers";
 const PRESALE_COLLECTION = "presaleusers";
 const PRESALE_FEE_PERCENT = 0.05;
 let DB: Db | undefined = undefined;
+
 const DB_CLIENT = new MongoClient(MONGO_URI, {
     serverApi: {
         version: ServerApiVersion.v1,
@@ -219,7 +220,17 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
                             }
                         });
                     })
-                    .catch(error => console.error(`Transaction failed for ${xUsername}, error: ${error.message}`)));
+                    .catch(error => {
+                        console.error(`Transaction failed for ${xUsername}, error: ${error.message}`);
+                        if (error.message.includes("Provided owner is not allowed")) {
+                            db_updates.push({
+                                updateOne: {
+                                    filter: { wallet: record.wallet },
+                                    update: { $set: { tx: "Provided owner is not allowed" } }
+                                }
+                            });
+                        }
+                    }));
 
                 count--;
             }

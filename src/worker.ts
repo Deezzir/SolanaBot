@@ -205,6 +205,7 @@ async function main() {
         if (msg.command === 'buy') {
             const std = WORKER_CONFIG.inputs.start_buy * 0.05;
             CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
+            if (CURRENT_BUY_AMOUNT > WORKER_CONFIG.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONFIG.inputs.spend_limit;
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);

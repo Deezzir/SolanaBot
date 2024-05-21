@@ -174,9 +174,21 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
+        .option('-m, --min<number>', 'Minimum amount of tokens for each key', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            return parsedValue;
+        })
+        .option('-M, --max<number>', 'Maximum amount of tokens for each key', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            return parsedValue;
+        })
         .action((options) => {
-            const { from, to, list } = options;
-            commands.warmup(keys_cnt, from, to, list);
+            const { from, to, list, min, max } = options;
+            commands.warmup(keys_cnt, from, to, list, min, max);
         });
 
     program

@@ -189,7 +189,7 @@ export async function create_and_send_tx(
         }
 
         if (status && status.err) {
-            throw new Error(`Transaction failed: ${status.err}`);
+            throw new Error(`Transaction failed`);
         }
 
         hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
@@ -240,9 +240,13 @@ async function create_and_send_vtx(
     while (!hashExpired && !txSuccess) {
         const { value: status } = await global.connection.getSignatureStatus(signature);
 
-        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'))) {
+        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) && status.err === null) {
             txSuccess = true;
             break;
+        }
+
+        if (status && status.err) {
+            throw new Error(`Transaction failed`);
         }
 
         hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
@@ -627,6 +631,10 @@ export async function swap_jupiter(
     const quoteResponse = await (
         await fetch(url)
     ).json();
+
+    if (quoteResponse.errorCode) {
+        throw new Error(`Failed to get the quote: ${quoteResponse.error}`);
+    }
 
     const { swapTransaction } = await (
         await fetch(`${JUPITER_API_URL}swap`, {
