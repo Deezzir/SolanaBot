@@ -224,7 +224,7 @@ export function get_key(file_path: string): Uint8Array | undefined {
         const content = readFileSync(file_path, 'utf8');
         return new Uint8Array(JSON.parse(content));
     } catch (err) {
-        log_error(`[ERROR] failed to read key file: ${err}`);
+        log_error(`[ERROR] failed to read key file: ${err} (${file_path})`);
         return undefined;
     }
 }
