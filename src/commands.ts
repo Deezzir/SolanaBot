@@ -199,8 +199,9 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
         common.log_error('[ERROR] No keys available.');
         return;
     }
+    keys_cnt++;
 
-    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (5 - 1) + 1));
+    const counts = Array.from({ length: keys_cnt }, () => Math.floor(Math.random() * (MAX - MIN) + MIN));
     const acc_count = list ? list.length : (to ? to - (from || 0) : keys_cnt - (from || 0));
 
     common.log(`Warming up ${acc_count} accounts...`);
@@ -231,14 +232,14 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
                     buy_attempts--;
                 }
             }
-            common.sleep(1500);
+            common.sleep(1000);
             let twice = false;
             while (true) {
                 try {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
                         common.log(`No tokens to sell for ${file} and mint ${mint_meta.mint}`);
-                        await common.sleep(1500);
+                        await common.sleep(1000);
                         if (twice) break;
                         twice = true;
                         continue;
