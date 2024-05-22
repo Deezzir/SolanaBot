@@ -132,37 +132,37 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
             if (validate_int(value, 1))
                 config.thread_cnt = parseInt(value, 10);
             else
-                log_error('Invalid thread count.');
+                error('Invalid thread count.');
             break;
         case 'buy_interval':
             if (validate_int(value, 1))
                 config.buy_interval = parseInt(value, 10);
             else
-                log_error('Invalid buy interval.');
+                error('Invalid buy interval.');
             break;
         case 'spend_limit':
             if (validate_float(value, 0.001))
                 config.spend_limit = parseFloat(value);
             else
-                log_error('Invalid spend limit.');
+                error('Invalid spend limit.');
             break;
         case 'start_buy':
             if (validate_float(value, 0.001))
                 config.start_buy = parseFloat(value);
             else
-                log_error('Invalid start buy.');
+                error('Invalid start buy.');
             break;
         case 'return_pubkey':
             if (is_valid_pubkey(value))
                 config.collect_address = new PublicKey(value);
             else
-                log_error('Invalid return public key.');
+                error('Invalid return public key.');
             break;
         case 'mcap_threshold':
             if (validate_int(value, 5000))
                 config.mcap_threshold = parseInt(value, 10);
             else
-                log_error('Invalid market cap threshold.');
+                error('Invalid market cap threshold.');
             break;
         case 'action':
             value = value.toLowerCase();
@@ -171,7 +171,7 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
             else if (value === 'collect')
                 config.action = Action.Collect;
             else
-                log_error('Invalid action.');
+                error('Invalid action.');
             break;
         case 'token_name':
             config.token_name = value;
@@ -183,10 +183,10 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
             if (is_valid_pubkey(value))
                 config.mint = new PublicKey(value);
             else
-                log_error('Invalid mint public key.');
+                error('Invalid mint public key.');
             break;
         default:
-            log_error('Invalid key.');
+            error('Invalid key.');
             break;
     }
 }
@@ -198,7 +198,7 @@ export function log(message: string): void {
     if (global.rl !== undefined) global.rl.prompt(true);
 }
 
-export function log_error(message: string): void {
+export function error(message: string): void {
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
     console.error(message);
@@ -214,7 +214,7 @@ export async function count_keys(keys_dir: string): Promise<number> {
         const files = await readdir(keys_dir);
         return filter_keys(files).length;
     } catch (err) {
-        log_error(`[ERROR] failed to read keys directory: ${err}`);
+        error(`[ERROR] failed to read keys directory: ${err}`);
         return 0;
     }
 }
@@ -224,10 +224,18 @@ export function get_key(file_path: string): Uint8Array | undefined {
         const content = readFileSync(file_path, 'utf8');
         return new Uint8Array(JSON.parse(content));
     } catch (err) {
-        log_error(`[ERROR] failed to read key file: ${err} (${file_path})`);
+        error(`[ERROR] failed to read key file: ${err} (${file_path})`);
         return undefined;
     }
 }
+
+export const chunks = <T>(array: T[], chunkSize = 10): T[][] => {
+    let res: T[][] = [];
+    for (let currentChunk = 0; currentChunk < array.length; currentChunk += chunkSize) {
+        res.push(array.slice(currentChunk, currentChunk + chunkSize));
+    }
+    return res;
+};
 
 export async function get_keys(to: number, keys_dir: string, from: number = 0): Promise<Uint8Array[]> {
     try {
@@ -236,7 +244,7 @@ export async function get_keys(to: number, keys_dir: string, from: number = 0): 
             .map(file => get_key(path.join(keys_dir, file)))
             .filter((key): key is Uint8Array => key !== undefined) as Uint8Array[];
     } catch (err) {
-        log_error(`[ERROR] failed to process keys: ${err}`);
+        error(`[ERROR] failed to process keys: ${err}`);
         return [];
     }
 }
@@ -301,7 +309,7 @@ export function read_json(file_path: string) {
         const content = readFileSync(file_path, 'utf8');
         return JSON.parse(content);
     } catch (err) {
-        log_error(`[ERROR] failed to read JSON file: ${err}`);
+        error(`[ERROR] failed to read JSON file: ${err}`);
         return undefined;
     }
 }

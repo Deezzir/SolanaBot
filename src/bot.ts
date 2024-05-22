@@ -385,6 +385,12 @@ async function main() {
             await drop.drop(airdrop, mint, keypair_path, presale);
         });
 
+    program
+        .command('clean')
+        .alias('cl')
+        .description('Clean the accounts')
+        .action(commands.clean);
+
     program.parse(process.argv);
     if (!process.argv.slice(2).length) {
         program.outputHelp();

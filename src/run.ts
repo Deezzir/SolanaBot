@@ -222,7 +222,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
                         resolve(mint);
                     }
                 } catch (err) {
-                    common.log_error(`[ERROR] Failed fetching the parsed transaction: ${err}`);
+                    common.error(`[ERROR] Failed fetching the parsed transaction: ${err}`);
                 }
             }
         }, 'confirmed',);
@@ -234,7 +234,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         if (!result) return null;
         return result;
     }).catch(error => {
-        common.log_error(`[ERROR] An error occurred: ${error}`);
+        common.error(`[ERROR] An error occurred: ${error}`);
         return null;
     });
 }
@@ -245,25 +245,25 @@ export async function wait_drop_unsub() {
         if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
         global.connection.removeOnLogsListener(SUBSCRIPTION_ID)
             .then(() => SUBSCRIPTION_ID = undefined)
-            .catch(err => common.log_error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
+            .catch(err => common.error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
     }
 }
 
 export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[], keys_dir: string) {
     const keys = await common.get_keys(config.thread_cnt + 1, keys_dir, 1);
     if (keys.length === 0) {
-        common.log_error('[ERROR] No keys available.');
+        common.error('[ERROR] No keys available.');
         global.rl.close();
     }
     if (!trade.check_has_balances(keys)) {
-        common.log_error('[ERROR] First, topup the specified accounts.');
+        common.error('[ERROR] First, topup the specified accounts.');
         global.rl.close();
     }
     common.log('[Main Worker] Starting the workers...');
     for (let i = 0; i < config.thread_cnt; i++) {
         const key = keys.at(i);
         if (!key) {
-            common.log_error(`[ERROR] Failed to get the key at index ${i}`);
+            common.error(`[ERROR] Failed to get the key at index ${i}`);
             global.rl.close();
         }
         const data: common.WorkerConfig = {
@@ -274,7 +274,7 @@ export async function start_workers(config: common.BotConfig, workers: common.Wo
         const worker = new Worker(WORKER_PATH, { workerData: data });
         const promise = new Promise<void>((resolve, reject) => {
             worker.on('message', (msg) => common.log(msg));
-            worker.on('error', (err) => { common.log_error(`[Worker ${i}] encountered error: ${err}`); reject() });
+            worker.on('error', (err) => { common.error(`[Worker ${i}] encountered error: ${err}`); reject() });
             worker.on('exit', (code) => {
                 if (code !== 0) reject(new Error(`[Worker ${i}] Stopped with exit code ${code}`));
                 else resolve();
@@ -291,6 +291,6 @@ export async function wait_for_workers(workers: common.WorkerPromise[]) {
         await Promise.all(promises);
         common.log('[Main Worker] All workers have finished executing');
     } catch (err) {
-        common.log_error(`[ERROR] One of the workers encountered an error`);
+        common.error(`[ERROR] One of the workers encountered an error`);
     }
 }

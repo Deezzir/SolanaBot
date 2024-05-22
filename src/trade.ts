@@ -1,5 +1,5 @@
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext } from '@solana/web3.js';
-import { createAssociatedTokenAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { AccountLayout, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
@@ -54,7 +54,7 @@ export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
             return data as common.TokenMeta;
         })
         .catch(err => {
-            common.log_error(`[ERROR] Failed fetching the mint: ${err}`);
+            common.error(`[ERROR] Failed fetching the mint: ${err}`);
             return {} as common.TokenMeta;
         });
 }
@@ -70,7 +70,7 @@ export async function fetch_random_mints(count: number): Promise<common.TokenMet
             return shuffled.slice(0, count) as common.TokenMeta[];
         })
         .catch(err => {
-            common.log_error(`[ERROR] Failed fetching the mints: ${err}`);
+            common.error(`[ERROR] Failed fetching the mints: ${err}`);
             return [] as common.TokenMeta[];
         });
 }
@@ -84,7 +84,7 @@ export async function fetch_by_name(name: string): Promise<common.TokenMeta[]> {
             return data as common.TokenMeta[];
         })
         .catch(err => {
-            common.log_error(`[ERROR] Failed fetching the mints: ${err}`);
+            common.error(`[ERROR] Failed fetching the mints: ${err}`);
             return [] as common.TokenMeta[];
         });
 }
@@ -94,7 +94,7 @@ export async function get_token_supply(mint: PublicKey): Promise<bigint> {
         const mint_1 = await getMint(global.connection, mint, 'confirmed');
         return mint_1.supply;
     } catch (err) {
-        common.log_error(`[ERROR] Failed to get the token supply: ${err}`);
+        common.error(`[ERROR] Failed to get the token supply: ${err}`);
         return BigInt(1000000000000000);
     }
 }
@@ -292,14 +292,14 @@ export async function check_has_balances(keys: Uint8Array[], min_balance: number
             const keypair = Keypair.fromSecretKey(key);
             const balance = await get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
             if (balance <= min_balance) {
-                common.log_error(`Address: ${keypair.publicKey.toString().padEnd(44, ' ')} has no balance.`);
+                common.error(`Address: ${keypair.publicKey.toString().padEnd(44, ' ')} has no balance.`);
                 ok = false;
             }
         }
-        if (!ok) common.log_error('[ERROR] Some accounts are empty.');
+        if (!ok) common.error('[ERROR] Some accounts are empty.');
         return ok;
     } catch (err) {
-        common.log_error(`[ERROR] failed to process keys: ${err}`);
+        common.error(`[ERROR] failed to process keys: ${err}`);
         return false;
     }
 }
@@ -341,7 +341,7 @@ export async function get_tx_fee(tx: Transaction): Promise<number> {
         if (!repsonse || !repsonse.value) return 0;
         return repsonse.value;
     } catch (err) {
-        common.log_error(`[ERROR] Failed to get the transaction fee: ${err}`);
+        common.error(`[ERROR] Failed to get the transaction fee: ${err}`);
         return 0;
     }
 }
@@ -655,6 +655,46 @@ export async function swap_jupiter(
     var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
     return await create_and_send_vtx(transaction, [wallet.payer], context, max_retries, priority);
+}
+
+export async function close_accounts(owner: Wallet) {
+    const token_accounts = await global.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
+    const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
+    const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => acc.data.mint);
+
+    const accounts = deserialized.filter((acc) => acc.data.amount === BigInt(0));
+
+
+    for (const chunk of common.chunks(accounts)) {
+        let success = false;
+        while (!success) {
+            const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('finalized');
+
+            const txn = new Transaction();
+            txn.feePayer = owner.publicKey;
+            txn.recentBlockhash = blockhash;
+            for (const account of chunk) {
+                txn.add(createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey));
+            }
+
+            const signedTransaction = await owner.signTransaction(txn);
+            const serializedTransaction = signedTransaction.serialize();
+
+            try {
+                const signature = await global.connection.sendRawTransaction(serializedTransaction);
+                await global.connection.confirmTransaction({
+                    blockhash,
+                    lastValidBlockHeight,
+                    signature
+                }, 'confirmed');
+                common.log(`${chunk.length} accounts closed: ${signature}`);
+                success = true;
+            } catch (err) {
+                common.error(`Failed to close accounts, retrying...`);
+            }
+        }
+    }
+    return unsold;
 }
 
 // async function load_pool_keys(liquidity_file: string): Promise<any[]> {
