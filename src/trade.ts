@@ -60,7 +60,7 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
 }
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
-    return fetch(`${FETCH_MINT_API_URL}/${mint}`)
+    return fetch(`${FETCH_MINT_API_URL}/coins/${mint}`)
         .then(response => response.json())
         .then(data => {
             if (!data || data.statusCode !== undefined) return {} as common.TokenMeta;
@@ -75,26 +75,12 @@ export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
 export async function fetch_random_mints(count: number): Promise<common.TokenMeta[]> {
     const limit = 50;
     const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
-    return fetch(`${FETCH_MINT_API_URL}?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC`)
+    return fetch(`${FETCH_MINT_API_URL}/coins/?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC`)
         .then(response => response.json())
         .then(data => {
             if (!data || data.statusCode !== undefined) return [] as common.TokenMeta[];
             const shuffled = data.sort(() => 0.5 - Math.random());
             return shuffled.slice(0, count) as common.TokenMeta[];
-        })
-        .catch(err => {
-            common.error(`[ERROR] Failed fetching the mints: ${err}`);
-            return [] as common.TokenMeta[];
-        });
-}
-
-export async function fetch_by_name(name: string): Promise<common.TokenMeta[]> {
-    const name_prepared = name.replace(/ /g, '%20');
-    return fetch(`${FETCH_MINT_API_URL}?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false&searchTerm=${name_prepared}`)
-        .then(response => response.json())
-        .then(data => {
-            if (!data || data.statusCode !== undefined) return [] as common.TokenMeta[];
-            return data as common.TokenMeta[];
         })
         .catch(err => {
             common.error(`[ERROR] Failed fetching the mints: ${err}`);
