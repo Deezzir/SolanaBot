@@ -606,20 +606,20 @@ export async function create_token(
     let instructions: TransactionInstruction[] = [];
     instructions.push(new TransactionInstruction({
         keys: [
-            { pubkey: mint.publicKey, isSigner: true, isWritable: true },                       // mint 1
-            { pubkey: MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT3 2
-            { pubkey: bonding, isSigner: false, isWritable: true },                             // bonding curve 3
-            { pubkey: assoc_bonding, isSigner: false, isWritable: true },                       // assic bonding curve 4
-            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT0 5
-            { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },                // METAPLEX_TOKEN_META 6
-            { pubkey: metaplex, isSigner: false, isWritable: true },                            // metaplex metadata account 7
-            { pubkey: creator.publicKey, isSigner: true, isWritable: true },                    // creater account 8
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },                  // SYSTEM_PROG 9
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },                   // TOKEN_PROG 10
-            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },        // ASSOC_TOKEN_ACC_PROG 11
-            { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },                    // RENT_PROG 12
-            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT2 13
-            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }                    // TRADE_PROG 14
+            { pubkey: mint.publicKey, isSigner: true, isWritable: true },
+            { pubkey: MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
+            { pubkey: bonding, isSigner: false, isWritable: true },
+            { pubkey: assoc_bonding, isSigner: false, isWritable: true },
+            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+            { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },
+            { pubkey: metaplex, isSigner: false, isWritable: true },
+            { pubkey: creator.publicKey, isSigner: true, isWritable: true },
+            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
+            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
         ],
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
