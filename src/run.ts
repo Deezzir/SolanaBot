@@ -9,7 +9,7 @@ import * as trade from './trade.js';
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
-const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '');
+const TRADE_PROGRAM_ID = new PublicKey(process.env.TRADE_PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;

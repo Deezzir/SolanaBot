@@ -19,17 +19,15 @@ const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
 
 const SWAP_SEED = 'swap';
 
-const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
-const ACCOUNT_1 = new PublicKey(process.env.ACCOUNT_1 || 'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
-const ACCOUNT_2 = new PublicKey(process.env.ACCOUNT_2 || 'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
-const ACCOUNT_3 = new PublicKey(process.env.ACCOUNT_3 || 'TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
+const TRADE_PROGRAM_ID = new PublicKey(process.env.TRADE_PROGRAM_ID || '');
+const GLOBAL_ACCOUNT = new PublicKey(process.env.GLOBAL_ACCOUNT || '');
+const FEE_RECIPIENT_ACCOUNT = new PublicKey(process.env.FEE_RECIPIENT_ACCOUNT || '');
+const EVENT_AUTHORITUY_ACCOUNT = new PublicKey(process.env.EVENT_AUTHORITUY_ACCOUNT || '');
+const MINT_AUTHORITY_ACCOUNT = new PublicKey(process.env.MINT_AUTHORITY_ACCOUNT || '');
 const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 
 export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
-
-const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
 
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
@@ -39,7 +37,8 @@ const METAPLEX_TOKEN_META = new PublicKey(process.env.METAPLEX_TOKEN_META || 'me
 
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
-const BLOCK_URL = process.env.BLOCK_URL || '';
+const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
+const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-engine.jito.wtf';
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
@@ -123,7 +122,7 @@ const isError = <T>(value: T | Error): value is Error => {
 
 export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number, priority: boolean = false): Promise<String> {
     try {
-        const c = jito.searcher.searcherClient(BLOCK_URL, RESERVE_KEYPAIR);
+        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, RESERVE_KEYPAIR);
         const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
 
         if (priority) instructions_add_priority(instructions);
@@ -509,8 +508,8 @@ export async function buy_token(
     }
     instructions.push(new TransactionInstruction({
         keys: [
-            { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
-            { pubkey: ACCOUNT_1, isSigner: false, isWritable: true },
+            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+            { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
             { pubkey: mint, isSigner: false, isWritable: false },
             { pubkey: bonding_curve, isSigner: false, isWritable: true },
             { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
@@ -519,7 +518,7 @@ export async function buy_token(
             { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },
+            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
             { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
         ],
         programId: TRADE_PROGRAM_ID,
@@ -553,8 +552,8 @@ export async function sell_token(
     let instructions: TransactionInstruction[] = [];
     instructions.push(new TransactionInstruction({
         keys: [
-            { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },
-            { pubkey: ACCOUNT_1, isSigner: false, isWritable: true },
+            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+            { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
             { pubkey: mint, isSigner: false, isWritable: false },
             { pubkey: bonding_curve, isSigner: false, isWritable: true },
             { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
@@ -563,7 +562,7 @@ export async function sell_token(
             { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },
+            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
             { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
         ],
         programId: TRADE_PROGRAM_ID,
@@ -608,10 +607,10 @@ export async function create_token(
     instructions.push(new TransactionInstruction({
         keys: [
             { pubkey: mint.publicKey, isSigner: true, isWritable: true },                       // mint 1
-            { pubkey: ACCOUNT_3, isSigner: false, isWritable: false },                          // ACCOUNT3 2
+            { pubkey: MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT3 2
             { pubkey: bonding, isSigner: false, isWritable: true },                             // bonding curve 3
             { pubkey: assoc_bonding, isSigner: false, isWritable: true },                       // assic bonding curve 4
-            { pubkey: ACCOUNT_0, isSigner: false, isWritable: false },                          // ACCOUNT0 5
+            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT0 5
             { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },                // METAPLEX_TOKEN_META 6
             { pubkey: metaplex, isSigner: false, isWritable: true },                            // metaplex metadata account 7
             { pubkey: creator.publicKey, isSigner: true, isWritable: true },                    // creater account 8
@@ -619,7 +618,7 @@ export async function create_token(
             { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },                   // TOKEN_PROG 10
             { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },        // ASSOC_TOKEN_ACC_PROG 11
             { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },                    // RENT_PROG 12
-            { pubkey: ACCOUNT_2, isSigner: false, isWritable: false },                          // ACCOUNT2 13
+            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },                          // ACCOUNT2 13
             { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }                    // TRADE_PROG 14
         ],
         programId: TRADE_PROGRAM_ID,

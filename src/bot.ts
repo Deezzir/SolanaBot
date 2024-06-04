@@ -25,7 +25,7 @@ async function main() {
     global.START_COLLECT = false;
     let workers = new Array<common.WorkerPromise>();
     const keys_cnt = await common.count_keys(trade.KEYS_DIR) - 1;
-    const rpcs = process.env.RPC?.split(',') || [];
+    const rpcs = process.env.RPCS?.split(',') || [];
     const rpc = rpcs[Math.floor(Math.random() * rpcs?.length)];
     global.connection = new Connection(rpc, 'confirmed');
     const program = new Command();

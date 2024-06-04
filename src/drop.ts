@@ -9,7 +9,7 @@ dotenv.config();
 
 const RECORDS_PER_ITERATION = 10;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017";
-const DB_NAME = process.env.MONGO_DB || "test";
+const DB_NAME = process.env.MONGO_DB_NAME || "test";
 const AIRDROP_COLLECTION = "airdropusers";
 const PRESALE_COLLECTION = "presaleusers";
 let DB: Db | undefined = undefined;

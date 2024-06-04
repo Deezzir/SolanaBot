@@ -11,7 +11,7 @@ const TRADE_ITERATIONS = 1;
 let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
-const RPCS = process.env.RPC?.split(',') || [];
+const RPCS = process.env.RPCS?.split(',') || [];
 global.connection = new Connection(RPCS[WORKER_CONFIG.id % RPCS?.length], 'confirmed');
 
 
