@@ -674,11 +674,9 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
     const token_accounts = await global.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
     const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => acc.data.mint);
-
     const accounts = deserialized.filter((acc) => acc.data.amount === BigInt(0));
 
-
-    for (const chunk of common.chunks(accounts)) {
+    for (const chunk of common.chunks(accounts, 20)) {
         let success = false;
         while (!success) {
             const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('finalized');
