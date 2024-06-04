@@ -1,10 +1,10 @@
-import { MongoClient, Db, ServerApiVersion, ClientSession } from "mongodb";
+import { MongoClient, Db, ServerApiVersion, ClientSession, WithId, Document, BulkWriteResult } from "mongodb";
 import * as common from "./common.js";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, RpcResponseAndContext, Signer, TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, RpcResponseAndContext, Signer, TransactionInstruction } from "@solana/web3.js";
 import * as trade from "./trade.js";
 import { readFileSync } from "fs";
 import dotenv from "dotenv";
-import { createAssociatedTokenAccountInstruction, createTransferInstruction } from "@solana/spl-token";
+import { TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createTransferInstruction, getAccount } from "@solana/spl-token";
 dotenv.config();
 
 const RECORDS_PER_ITERATION = 10;
@@ -12,7 +12,6 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017";
 const DB_NAME = process.env.MONGO_DB || "test";
 const AIRDROP_COLLECTION = "airdropusers";
 const PRESALE_COLLECTION = "presaleusers";
-const PRESALE_FEE_PERCENT = 0.05;
 let DB: Db | undefined = undefined;
 
 const DB_CLIENT = new MongoClient(MONGO_URI, {
@@ -31,14 +30,17 @@ async function send_tokens(
     let instructions: TransactionInstruction[] = []
 
     const ata = await trade.calc_assoc_token_addr(receiver, mint);
-    instructions.push(
-        createAssociatedTokenAccountInstruction(
-            payer.publicKey,
-            ata,
-            receiver,
-            mint
-        )
-    );
+
+    if (!(await trade.check_account_exists(ata))) {
+        instructions.push(
+            createAssociatedTokenAccountInstruction(
+                payer.publicKey,
+                ata,
+                receiver,
+                mint
+            )
+        );
+    }
 
     instructions.push(createTransferInstruction(
         sender,
@@ -51,7 +53,7 @@ async function send_tokens(
 }
 
 
-async function connect_db() {
+async function connect_db(): Promise<void> {
     try {
         await DB_CLIENT.connect();
         DB = DB_CLIENT.db(DB_NAME);
@@ -61,7 +63,7 @@ async function connect_db() {
     }
 }
 
-async function fetch_records(collectionName: string) {
+async function fetch_records(collectionName: string): Promise<WithId<Document>[] | undefined> {
     if (!DB) {
         await connect_db();
     }
@@ -75,12 +77,12 @@ async function fetch_records(collectionName: string) {
     }
 }
 
-function calc_airdrop_amount(airdrop_percent: number, total_tokens: number, record_count: number) {
+function calc_airdrop_amount(airdrop_percent: number, total_tokens: number, record_count: number): number {
     const airdrop_amount = (airdrop_percent / 100) * total_tokens / record_count;
     return Math.floor(airdrop_amount);
 }
 
-async function calc_presale_amounts(presale_percent: number, total_tokens: number): Promise<{ presale_tokens: number, presale_sol: number, presale_fee: number }> {
+async function calc_presale_amounts(presale_percent: number, total_tokens: number): Promise<{ presale_tokens: number, presale_sol: number }> {
     if (!DB) {
         await connect_db();
     }
@@ -101,28 +103,27 @@ async function calc_presale_amounts(presale_percent: number, total_tokens: numbe
                 }
             }
         ]).toArray();
-        const presale_sol = common.round_two(result && result.length > 0 ? result[0].totalSolAmount : 0.0);
-        const presale_fee = common.round_two(presale_sol * PRESALE_FEE_PERCENT);
-        return { presale_tokens, presale_sol, presale_fee };
+        const presale_sol = common.round_two(result && result.length > 0 ? result[0].total : 0.0);
+        return { presale_tokens, presale_sol };
     } catch (error) {
         console.error(`[ERROR] Failed to calculate presale amounts: ${error}`);
         throw error;
     }
 }
 
-async function bulk_write(col_name: string, operations: any[]) {
+async function bulk_write(col_name: string, operations: any[]): Promise<BulkWriteResult | undefined> {
     if (!DB) {
         await connect_db();
     }
     try {
-        await DB?.collection(col_name).bulkWrite(operations);
+        return await DB?.collection(col_name).bulkWrite(operations);
     } catch (error) {
         console.error(`[ERROR] Failed to update airdrop balances: ${error}`);
         throw error;
     }
 }
 
-async function update_airdrop_balance(token_amount: number) {
+async function update_airdrop_balance(token_amount: number): Promise<void> {
     console.log(`Updating airdrop balances...`);
     await bulk_write(AIRDROP_COLLECTION, [
         {
@@ -134,7 +135,7 @@ async function update_airdrop_balance(token_amount: number) {
     ]);
 }
 
-async function update_presale_balance(token_amount: number, total_sol: number) {
+async function update_presale_balance(token_amount: number, total_sol: number): Promise<void> {
     console.log(`Updating airdrop balances...`);
     let bulk_writes: any[] = [];
 
@@ -156,7 +157,7 @@ async function update_presale_balance(token_amount: number, total_sol: number) {
     await bulk_write(PRESALE_COLLECTION, bulk_writes);
 }
 
-async function count_records(col_name: string) {
+async function count_records(col_name: string): Promise<number> {
     if (!DB) {
         await connect_db();
     }
@@ -170,7 +171,7 @@ async function count_records(col_name: string) {
     }
 }
 
-async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.MintMeta) {
+async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.MintMeta): Promise<void> {
     if (!DB) {
         await connect_db();
     }
@@ -247,7 +248,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
     }
 }
 
-async function airdrop(percent: number, ui_balance: number, mint_meta: common.MintMeta, drop: Keypair) {
+async function airdrop(percent: number, ui_balance: number, mint_meta: common.MintMeta, drop: Keypair): Promise<void> {
     const airdrop_count = await count_records(AIRDROP_COLLECTION);
     if (airdrop_count === 0) {
         console.error('No airdrop records found, exiting...');
@@ -266,27 +267,27 @@ async function airdrop(percent: number, ui_balance: number, mint_meta: common.Mi
     console.log(`Airdrop completed`);
 }
 
-async function presale(percent: number, ui_balance: number, mint_meta: common.MintMeta, drop: Keypair) {
+async function presale(percent: number, ui_balance: number, mint_meta: common.MintMeta, drop: Keypair): Promise<void> {
     const presale_count = await count_records(PRESALE_COLLECTION);
     if (presale_count === 0) {
         console.error('\nNo presale records found, exiting...');
         return;
     }
 
-    const { presale_tokens, presale_sol, presale_fee } = await calc_presale_amounts(percent, ui_balance);
+    const { presale_tokens, presale_sol } = await calc_presale_amounts(percent, ui_balance);
     console.log(
-        `Presale | Total Amount ${mint_meta.token_symbol}: ${presale_tokens} | Total SOL: ${presale_sol} | Fee SOL: ${presale_fee} | Record count: ${presale_count}`
+        `Presale | Total Amount ${mint_meta.token_symbol}: ${presale_tokens} | Total SOL: ${presale_sol} | Record count: ${presale_count}`
     );
 
     await new Promise<void>(resolve => global.rl.question('Press ENTER to start the presale...', () => resolve()));
 
     console.log(`\nStarting Presale drop...`);
-    await update_presale_balance(presale_tokens, presale_sol - presale_fee);
+    await update_presale_balance(presale_tokens, presale_sol);
     await drop_tokens(PRESALE_COLLECTION, drop, mint_meta);
     console.log(`Presale drop completed`);
 }
 
-export async function drop(airdrop_percent: number, mint: PublicKey, keypair_path: string, presale_percent: number = 0) {
+export async function drop(airdrop_percent: number, mint: PublicKey, keypair_path: string, presale_percent: number = 0): Promise<void> {
     console.log(`Dropping the mint ${mint.toString()}...`);
     console.log(`Airdrop percent: ${airdrop_percent}% | Presale percent: ${presale_percent}%`);
 
@@ -307,15 +308,45 @@ export async function drop(airdrop_percent: number, mint: PublicKey, keypair_pat
 
     try {
         await connect_db();
+        if (global.rl === undefined) common.setup_readline();
 
-        await airdrop(airdrop_percent, ui_balance, mint_meta, drop);
         if (presale_percent !== 0) await presale(presale_percent, ui_balance, mint_meta, drop);
+        if (airdrop_percent !== 0) await airdrop(airdrop_percent, ui_balance, mint_meta, drop);
 
         console.log(`\nDropping completed`);
         await DB_CLIENT.close();
         console.log(`Database connection closed`);
         process.exit(0);
     } catch (error) {
-        console.error(`[ERROR] Failed to drop tokens`);
+        console.error(`[ERROR] Failed to drop tokens: ${error}`);
+    }
+}
+
+export async function clear_drop(airdrop_to_remove_path: string): Promise<void> {
+    console.log(`Clearing the database...`);
+
+    try {
+        await connect_db();
+
+        let to_remove = readFileSync(airdrop_to_remove_path, 'utf8').split('\n');
+        to_remove = to_remove.map((line) => line.trim());
+        console.log(`Removing ${to_remove.length} records...`);
+
+        let bulk_writes: any[] = [];
+        for (let wallet of to_remove) {
+            bulk_writes.push({
+                deleteOne: {
+                    filter: { wallet: wallet }
+                }
+            });
+        }
+
+        await bulk_write(AIRDROP_COLLECTION, bulk_writes);
+
+        console.log(`Database cleared`);
+        await DB_CLIENT.close();
+        console.log(`Database connection closed`);
+    } catch (error) {
+        console.error(`[ERROR] Failed to clear the database`);
     }
 }

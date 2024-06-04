@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { readdir } from 'fs/promises';
 import dotenv from 'dotenv';
 import path, { basename } from 'path';
@@ -6,6 +6,7 @@ import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
 import { PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
+import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
 dotenv.config();
 
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
@@ -35,6 +36,13 @@ export type IPFSMetadata = {
     twitter: string | undefined,
     telegram: string | undefined,
     website: string | undefined,
+}
+
+export type RaydiumAmounts = {
+    amount_in: RayTokenAmount,
+    token_in: PublicKey,
+    token_out: PublicKey,
+    min_amount_out: CurrencyAmount;
 }
 
 export type IPFSResponse = {
@@ -126,7 +134,7 @@ export interface TokenMeta {
     usd_market_cap: number;
 }
 
-export function update_bot_config(config: BotConfig, key: string, value: string) {
+export function update_bot_config(config: BotConfig, key: string, value: string): void {
     switch (key) {
         case 'thread_cnt':
             if (validate_int(value, 1))
@@ -264,7 +272,7 @@ export function is_valid_pubkey(input: string): boolean {
     }
 }
 
-export function sleep(ms: number) {
+export function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
@@ -280,31 +288,31 @@ export function validate_float(input: string, min: number = -Infinity, max: numb
     return true;
 }
 
-export function shuffle(array: Array<any>) {
+export function shuffle(array: Array<any>): void {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
     }
 }
 
-export function natural_sort(files: string[]) {
+export function natural_sort(files: string[]): string[] {
     return files.sort((a, b) => {
         return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
 }
 
-function box_muller() {
+function box_muller(): number {
     let u = 0, v = 0;
     while (u === 0) u = Math.random();
     while (v === 0) v = Math.random();
     return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
-export function normal_random(mean: number, std: number) {
+export function normal_random(mean: number, std: number): number {
     return Math.abs(mean + box_muller() * Math.sqrt(std));
 }
 
-export function read_json(file_path: string) {
+export function read_json(file_path: string): any | undefined {
     try {
         const content = readFileSync(file_path, 'utf8');
         return JSON.parse(content);
@@ -314,7 +322,7 @@ export function read_json(file_path: string) {
     }
 }
 
-export async function fetch_ipfs_json(cid: string) {
+export async function fetch_ipfs_json(cid: string): Promise<any> {
     const url = `${IPFS}${cid}`;
     try {
         const response = await fetch(url);
@@ -325,7 +333,7 @@ export async function fetch_ipfs_json(cid: string) {
     }
 }
 
-export async function upload_ipfs(data: any, content_type: string, file_name: string) {
+export async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse | undefined> {
     var headers = new Headers();
     headers.append("x-api-key", IPSF_API_KEY);
 
@@ -366,7 +374,7 @@ export async function upload_ipfs(data: any, content_type: string, file_name: st
     }
 }
 
-export async function create_metadata(meta: IPFSMetadata, image_path: string) {
+export async function create_metadata(meta: IPFSMetadata, image_path: string): Promise<string | undefined> {
     const image_file = new File([readFileSync(image_path)], basename(image_path));
     const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
     if (!resp || resp.status !== 'pinned') {
@@ -384,13 +392,13 @@ export async function create_metadata(meta: IPFSMetadata, image_path: string) {
     return meta_resp.pin.cid;
 }
 
-export function setup_readline() {
+export function setup_readline(): void {
     global.rl = createInterface({
         input: process.stdin,
         output: process.stdout
     });
 }
 
-export function round_two(num: number) {
+export function round_two(num: number): number {
     return Math.round((num + Number.EPSILON) * 100) / 100;
 }

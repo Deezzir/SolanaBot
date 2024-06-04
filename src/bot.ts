@@ -201,7 +201,10 @@ async function main() {
         })
         .option('-r, --reserve', 'Collect from the reserve account as well')
         .description('Collect all the SOL from the accounts to the provided address')
-        .action(commands.collect);
+        .action((address, options) => {
+            const { reserve } = options;
+            commands.collect(address, reserve);
+        });
 
     program
         .command('spl-buy-once')
@@ -390,6 +393,19 @@ async function main() {
         .alias('cl')
         .description('Clean the accounts')
         .action(commands.clean);
+
+    program
+        .command('clear-drop')
+        .alias('cd')
+        .argument('<airdrop_file_path>', 'Path to the airdrop file', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Airdrop file does not exist.');
+            return value;
+        })
+        .description('Clear the drop')
+        .action((airdrop_file_path) => {
+            drop.clear_drop(airdrop_file_path);
+        });
 
     program.parse(process.argv);
     if (!process.argv.slice(2).length) {

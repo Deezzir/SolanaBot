@@ -3,7 +3,7 @@ import { Worker } from 'worker_threads';
 import io from "socket.io-client";
 import bs58 from 'bs58';
 import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
-import { getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
+import { CreateMetadataAccountV3InstructionData, getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 import * as common from './common.js';
 import * as trade from './trade.js';
 
@@ -14,7 +14,7 @@ var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
-export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}) {
+export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
     workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
 }
@@ -135,7 +135,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
     return answers;
 }
 
-function decode_metaplex_instr(data: string) {
+function decode_metaplex_instr(data: string): [CreateMetadataAccountV3InstructionData, number] {
     const serializer = getCreateMetadataAccountV3InstructionDataSerializer();
     const decoded = serializer.deserialize(bs58.decode(data));
     return decoded;
@@ -239,7 +239,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
     });
 }
 
-export async function wait_drop_unsub() {
+export async function wait_drop_unsub(): Promise<void> {
     if (SUBSCRIPTION_ID !== undefined) {
         if (LOGS_STOP_FUNCTION) LOGS_STOP_FUNCTION();
         if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
@@ -249,7 +249,7 @@ export async function wait_drop_unsub() {
     }
 }
 
-export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[], keys_dir: string) {
+export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[], keys_dir: string): Promise<void> {
     const keys = await common.get_keys(config.thread_cnt + 1, keys_dir, 1);
     if (keys.length === 0) {
         common.error('[ERROR] No keys available.');
@@ -285,7 +285,7 @@ export async function start_workers(config: common.BotConfig, workers: common.Wo
     }
 }
 
-export async function wait_for_workers(workers: common.WorkerPromise[]) {
+export async function wait_for_workers(workers: common.WorkerPromise[]): Promise<void> {
     let promises = workers.map(w => w.promise);
     try {
         await Promise.all(promises);

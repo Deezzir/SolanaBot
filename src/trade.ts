@@ -1,14 +1,14 @@
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext } from '@solana/web3.js';
-import { AccountLayout, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createTransferInstruction, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
+import BN from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import path from 'path';
 import bs58 from 'bs58';
-// import { Liquidity, LiquidityPoolKeys, Percent, SPL_ACCOUNT_LAYOUT, Token, jsonInfo2PoolKeys } from '@raydium-io/raydium-sdk';
-// import { TokenAmount as RaydiumTokenAmount } from '@raydium-io/raydium-sdk';
+import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
 export const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
@@ -17,6 +17,7 @@ const RESERVE = common.get_key(RESERVE_KEY_PATH);
 if (!RESERVE) throw new Error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
 const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
 
+const SWAP_SEED = 'swap';
 
 const TRADE_PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ACCOUNT_0 = new PublicKey(process.env.ACCOUNT_0 || '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
@@ -26,7 +27,7 @@ const ACCOUNT_3 = new PublicKey(process.env.ACCOUNT_3 || 'TSLvdd1pWpHVjahSpsvCXU
 const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 
-export const SOLANA_TOKEN = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
+export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
 const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
 
@@ -40,11 +41,24 @@ const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
 const BLOCK_URL = process.env.BLOCK_URL || '';
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
-const LIQUIDITY_FILE = process.env.LIQUIDITY_FILE || 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json';
+const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
 const PRIORITY_UNITS = 100000;
 const PRIORITY_MICRO_LAMPORTS = 500000;
 const MAX_RETRIES = 2;
+
+export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
+    try {
+        let account_info = await getAccount(global.connection, account);
+        if (account_info && account_info.isInitialized) return true;
+    } catch (error) {
+        if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
+            return false;
+        } else {
+            throw new Error(`[ERROR] Failed to check the account: ${error}`);
+        }
+    }
+}
 
 export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/${mint}`)
@@ -151,7 +165,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
     }
 }
 
-async function isBlockhashExpired(lastValidBlockHeight: number) {
+async function isBlockhashExpired(lastValidBlockHeight: number): Promise<boolean> {
     let currentBlockHeight = (await global.connection.getBlockHeight('finalized'));
     return (currentBlockHeight > lastValidBlockHeight - 150);
 }
@@ -618,7 +632,7 @@ export async function create_token(
 }
 
 export async function swap_jupiter(
-    amount: TokenAmount, seller: Signer, mint: common.TokenMeta,
+    amount: TokenAmount, seller: Signer, from: PublicKey, to: PublicKey,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
     slippage: number = 0.05, priority: boolean = false
 ): Promise<String> {
@@ -626,7 +640,7 @@ export async function swap_jupiter(
 
     const wallet = new Wallet(Keypair.fromSecretKey(seller.secretKey));
     const amount_in = amount.amount;
-    const url = `${JUPITER_API_URL}quote?inputMint=${mint.mint.toString()}&outputMint=${SOLANA_TOKEN.toString()}&amount=${amount_in}&slippageBps=${slippage * 10000}`;
+    const url = `${JUPITER_API_URL}quote?inputMint=${from.toString()}&outputMint=${to.toString()}&amount=${amount_in}&slippageBps=${slippage * 10000}`;
 
     const quoteResponse = await (
         await fetch(url)
@@ -657,7 +671,7 @@ export async function swap_jupiter(
     return await create_and_send_vtx(transaction, [wallet.payer], context, max_retries, priority);
 }
 
-export async function close_accounts(owner: Wallet) {
+export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
     const token_accounts = await global.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
     const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => acc.data.mint);
@@ -697,95 +711,196 @@ export async function close_accounts(owner: Wallet) {
     return unsold;
 }
 
-// async function load_pool_keys(liquidity_file: string): Promise<any[]> {
-//     const liquidity_resp = await fetch(liquidity_file);
-//     if (!liquidity_resp.ok) {
-//         throw new Error(`[ERROR]: Failed to fetch liquidity file: ${liquidity_file}`);
-//     }
-//     const liquidity = (await liquidity_resp.json()) as { official: any; unOfficial: any };
-//     return [...(liquidity?.official ?? []), ...(liquidity?.unOfficial ?? [])]
-// }
+async function calc_raydium_amounts(
+    pool_keys: LiquidityPoolKeys,
+    pool_info: LiquidityPoolInfo,
+    token_buy: PublicKey,
+    amount_in: number,
+    raw_slippage: number,
+): Promise<common.RaydiumAmounts> {
+    let mint_token_out = token_buy;
+    let token_out_decimals = pool_keys.baseMint.equals(mint_token_out)
+        ? pool_info.baseDecimals
+        : pool_keys.quoteDecimals;
+    let mint_token_in = pool_keys.baseMint.equals(mint_token_out)
+        ? pool_keys.quoteMint
+        : pool_keys.baseMint;
+    let token_in_decimals = pool_keys.baseMint.equals(mint_token_out)
+        ? pool_info.quoteDecimals
+        : pool_info.baseDecimals;
 
-// function find_pool_info(pool: any[], base_mint: PublicKey, quote_mint: PublicKey): LiquidityPoolKeys | null {
-//     const data = pool.find(
-//         (i) => (i.baseMint === base_mint.toString() && i.quoteMint === quote_mint.toString()) || (i.baseMint === quote_mint.toString() && i.quoteMint === base_mint.toString())
-//     );
-//     if (!data) return null;
-//     return jsonInfo2PoolKeys(data) as LiquidityPoolKeys;
-// }
+    const token_in = new Token(TOKEN_PROGRAM_ID, mint_token_in, token_in_decimals);
+    const token_amount_in = new RayTokenAmount(token_in, amount_in, false);
+    const token_out = new Token(TOKEN_PROGRAM_ID, mint_token_out, token_out_decimals);
+    const slippage = new Percent(raw_slippage, 100);
+    const { minAmountOut } = Liquidity.computeAmountOut({
+        poolKeys: pool_keys,
+        poolInfo: pool_info,
+        amountIn: token_amount_in,
+        currencyOut: token_out,
+        slippage,
+    });
+    return {
+        amount_in: token_amount_in,
+        token_in: mint_token_in,
+        token_out: mint_token_out,
+        min_amount_out: minAmountOut,
+    };
+};
 
-// async function get_owner_token_accounts(owner: PublicKey) {
-//     const walletTokenAccount = await global.connection.getTokenAccountsByOwner(owner, {
-//         programId: TOKEN_PROGRAM_ID,
-//     })
+async function create_swap_acc_intsruction(seller: Signer, token_acc: PublicKey, lamports: number = 0): Promise<TransactionInstruction[]> {
+    let instructions: TransactionInstruction[] = [];
+    instructions.push(SystemProgram.createAccountWithSeed({
+        seed: SWAP_SEED,
+        basePubkey: seller.publicKey,
+        fromPubkey: seller.publicKey,
+        newAccountPubkey: token_acc,
+        lamports: await global.connection.getMinimumBalanceForRentExemption(165) + lamports,
+        space: 165,
+        programId: TOKEN_PROGRAM_ID,
+    }));
+    instructions.push(
+        createInitializeAccountInstruction(
+            token_acc,
+            SOL_MINT,
+            seller.publicKey,
+            TOKEN_PROGRAM_ID,
+        )
+    );
+    return instructions;
+}
 
-//     return walletTokenAccount.value.map((i) => ({
-//         pubkey: i.pubkey,
-//         programId: i.account.owner,
-//         accountInfo: SPL_ACCOUNT_LAYOUT.decode(i.account.data),
-//     }))
-// }
+async function create_raydium_swap_tx(
+    amount: TokenAmount, seller: Signer, token_buy: PublicKey, pool_keys: LiquidityPoolKeys, pool_info: LiquidityPoolInfo,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    slippage: number, priority: boolean
+) {
+    const max_retries = MAX_RETRIES;
+    const raw_amount_in = parseInt(amount.amount, 10);
+    const { amount_in, token_in, token_out, min_amount_out } = await calc_raydium_amounts(
+        pool_keys,
+        pool_info,
+        token_buy,
+        amount.uiAmount || 0,
+        slippage,
+    );
 
-// async function get_raydium_swap_tx(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, pool_keys: any, slippage: number, priority: boolean): Promise<String> {
-//     const max_retries = MAX_RETRIES;
-//     const { min_amount_out, amount_in } = await calc_swap_amounts(amount, mint_from, mint_to, pool_keys, slippage);
-//     const token_accounts = await get_owner_token_accounts(seller.publicKey);
+    let token_in_acc: PublicKey;
+    let token_out_acc: PublicKey;
+    let instructions: TransactionInstruction[] = [];
 
-//     const swap_tx = await Liquidity.makeSwapInstructionSimple({
-//         connection: connection,
-//         makeTxVersion: 1,
-//         poolKeys: {
-//             ...pool_keys,
-//         },
-//         userKeys: {
-//             tokenAccounts: token_accounts,
-//             owner: seller.publicKey,
-//         },
-//         amountIn: amount_in,
-//         amountOut: min_amount_out,
-//         fixedSide: 'in',
-//         config: {
-//             bypassAssociatedCheck: false,
-//         },
-//         computeBudgetConfig: priority ? {
-//             microLamports: PRIORITY_MICRO_LAMPORTS,
-//             units: PRIORITY_UNITS,
-//         } : undefined,
-//     });
+    if (token_in.equals(SOL_MINT)) {
+        token_out_acc = await calc_assoc_token_addr(seller.publicKey, token_out);
+        if (!(await check_account_exists(token_out_acc))) {
+            instructions.push(
+                createAssociatedTokenAccountInstruction(
+                    seller.publicKey,
+                    token_out_acc,
+                    seller.publicKey,
+                    token_out
+                )
+            );
+        }
+        token_in_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
+        instructions = instructions.concat(await create_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
+    } else {
+        token_out_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
+        instructions = instructions.concat(await create_swap_acc_intsruction(seller, token_out_acc));
+        token_in_acc = await calc_assoc_token_addr(seller.publicKey, token_in);
+    }
+    instructions.push(new TransactionInstruction({
+        programId: new PublicKey(pool_keys.programId),
+        keys: [
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: pool_keys.id, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.authority, isSigner: false, isWritable: false },
+            { pubkey: pool_keys.openOrders, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.targetOrders, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.baseVault, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.quoteVault, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketProgramId, isSigner: false, isWritable: false },
+            { pubkey: pool_keys.marketId, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketBids, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketAsks, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketEventQueue, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketBaseVault, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketQuoteVault, isSigner: false, isWritable: true },
+            { pubkey: pool_keys.marketAuthority, isSigner: false, isWritable: false },
+            { pubkey: token_in_acc, isSigner: false, isWritable: true },
+            { pubkey: token_out_acc, isSigner: false, isWritable: true },
+            { pubkey: seller.publicKey, isSigner: true, isWritable: false },
+        ],
+        data: Buffer.from(
+            Uint8Array.of(
+                9,
+                ...new BN(amount_in.raw).toArray("le", 8),
+                ...new BN(min_amount_out.raw).toArray("le", 8),
+            ),
+        ),
+    }));
+    if (token_in.equals(SOL_MINT)) {
+        instructions.push(createCloseAccountInstruction(token_in_acc, seller.publicKey, seller.publicKey));
+    } else {
+        instructions.push(createCloseAccountInstruction(token_out_acc, seller.publicKey, seller.publicKey));
+    }
 
-//     return create_and_send_tx(swap_tx.innerTransactions[0].instructions, seller, [seller], max_retries, true);
-// }
+    return create_and_send_tx(instructions, seller, [seller], context, max_retries, priority);
+};
 
-// async function calc_swap_amounts(amount: number, mint_from: PublicKey, mint_to: PublicKey, pool_keys: any, slippage: number) {
-//     const pool_info = await Liquidity.fetchInfo({ connection: global.connection, poolKeys: pool_keys });
+async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys | undefined> {
+    const ammAccount = await global.connection.getAccountInfo(amm);
+    if (ammAccount) {
+        const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(ammAccount.data);
+        const marketAccount = await global.connection.getAccountInfo(poolState.marketId);
+        if (marketAccount) {
+            const marketState = MARKET_STATE_LAYOUT_V3.decode(marketAccount.data);
+            const marketAuthority = PublicKey.createProgramAddressSync(
+                [
+                    marketState.ownAddress.toBuffer(),
+                    marketState.vaultSignerNonce.toArrayLike(Buffer, "le", 8),
+                ],
+                MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
+            );
+            return {
+                id: amm,
+                programId: MAINNET_PROGRAM_ID.AmmV4,
+                status: poolState.status,
+                baseDecimals: poolState.baseDecimal.toNumber(),
+                quoteDecimals: poolState.quoteDecimal.toNumber(),
+                lpDecimals: 9,
+                baseMint: poolState.baseMint,
+                quoteMint: poolState.quoteMint,
+                version: 4,
+                authority: RAYDIUM_AUTHORITY,
+                openOrders: poolState.openOrders,
+                baseVault: poolState.baseVault,
+                quoteVault: poolState.quoteVault,
+                marketProgramId: MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
+                marketId: marketState.ownAddress,
+                marketBids: marketState.bids,
+                marketAsks: marketState.asks,
+                marketEventQueue: marketState.eventQueue,
+                marketBaseVault: marketState.baseVault,
+                marketQuoteVault: marketState.quoteVault,
+                marketAuthority: marketAuthority,
+                targetOrders: poolState.targetOrders,
+                lpMint: poolState.lpMint,
+            } as unknown as LiquidityPoolKeys;
+        }
+    }
+    return undefined;
+};
 
-//     const currency_in = new Token(TOKEN_PROGRAM_ID, mint_from, pool_keys.baseDecimals);
-//     const currency_out = new Token(TOKEN_PROGRAM_ID, mint_to, pool_keys.quoteDecimals);
-//     const amount_in = new RaydiumTokenAmount(currency_in, amount, false);
-//     const slipage = new Percent(slippage * 100, 100);
-
-//     const { amountOut, minAmountOut, currentPrice, executionPrice, priceImpact, fee } = Liquidity.computeAmountOut({
-//         poolKeys: pool_keys,
-//         poolInfo: pool_info,
-//         amountIn: amount_in,
-//         currencyOut: currency_out,
-//         slippage: slipage
-//     })
-
-//     return {
-//         amount_out: amountOut,
-//         min_amount_out: minAmountOut,
-//         current_price: currentPrice,
-//         execution_price: executionPrice,
-//         price_impact: priceImpact,
-//         fee: fee,
-//         amount_in
-//     }
-// }
-
-// export async function swap_raydium(amount: number, seller: Signer, mint_from: PublicKey, mint_to: PublicKey, slippage: number = 0.05, priority: boolean = false): Promise<String> {
-//     const pool = await load_pool_keys(LIQUIDITY_FILE);
-//     const pool_keys = find_pool_info(pool, mint_from, mint_to);
-
-//     return get_raydium_swap_tx(amount, seller, mint_from, mint_to, pool_keys, slippage, priority);
-// }
+export async function swap_raydium(
+    amount: TokenAmount, seller: Signer, amm: PublicKey, swap_to: PublicKey,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    slippage: number = 0.05, priority: boolean = false
+): Promise<String> {
+    const pool_keys = await get_raydium_poolkeys(amm);
+    if (pool_keys) {
+        const pool_info = await Liquidity.fetchInfo({ connection: global.connection, poolKeys: pool_keys });
+        const raw_slippage = slippage * 100;
+        return create_raydium_swap_tx(amount, seller, swap_to, pool_keys, pool_info, context, raw_slippage, priority);
+    }
+    throw new Error(`Failed to get the pool keys.`);
+}

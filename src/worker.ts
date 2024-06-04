@@ -5,9 +5,9 @@ import * as trade from './trade.js';
 
 const SLIPPAGE = 1.5;
 const MIN_BUY_THRESHOLD = 0.00001;
-const MIN_BALANCE_THRESHOLD = 0.1;
+const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.05;
-const TRADE_ITERATIONS = 5;
+const TRADE_ITERATIONS = 1;
 let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
@@ -24,7 +24,7 @@ var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 
-function sleep(seconds: number) {
+function sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
     let cancel: () => void = () => { };
 
@@ -127,7 +127,8 @@ const sell = async () => {
                             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error selling the token, retrying...`);
                         }));
                 } else {
-                    transactions.push(trade.swap_jupiter(balance, WORKER_KEYPAIR, MINT_METADATA, context, SLIPPAGE, true)
+                    const amm = new PublicKey(MINT_METADATA.raydium_pool);
+                    transactions.push(trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, context, SLIPPAGE, true)
                         .then((sig) => {
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
@@ -206,6 +207,7 @@ async function main() {
             const std = WORKER_CONFIG.inputs.start_buy * 0.05;
             CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
             if (CURRENT_BUY_AMOUNT > WORKER_CONFIG.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONFIG.inputs.spend_limit;
+            if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);
