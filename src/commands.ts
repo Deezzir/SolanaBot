@@ -28,6 +28,13 @@ export async function clean(keys_cnt: number): Promise<void> {
         if (!key) continue;
 
         const wallet = new Wallet(Keypair.fromSecretKey(key));
+
+        const balance = await trade.get_balance(wallet.publicKey);
+        if (balance === 0) {
+            common.error(`No balance for ${wallet.publicKey.toString().padEnd(44, ' ')} (${file}), skipping...`);
+            continue;
+        }
+
         common.log(`Cleaning ${wallet.publicKey.toString().padEnd(44, ' ')} (${file})...`);
         const unsold = await trade.close_accounts(wallet);
         if (unsold) unsold_set = [...new Set([...unsold_set, ...unsold.map(i => i.toString())])]
