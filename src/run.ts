@@ -9,6 +9,7 @@ import * as trade from './trade.js';
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
+const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 const TRADE_PROGRAM_ID = new PublicKey(process.env.TRADE_PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
@@ -150,7 +151,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
     search.push(new Promise<PublicKey | null>(async (resolve, reject) => {
         common.log('[Main Worker] Waiting for the new token drop using Websocket...');
         let lastCoins: common.TokenMeta[] = [];
-        const socket = io("https://client-api-2-74b1891ee9f9.herokuapp.com", {
+        const socket = io(FETCH_MINT_API_URL, {
             path: "/socket.io/",
             query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
             transports: ["websocket"]
