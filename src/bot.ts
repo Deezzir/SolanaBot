@@ -186,9 +186,10 @@ async function main() {
                 throw new InvalidOptionArgumentError('Not a number.');
             return parsedValue;
         })
+        .option('-k --keep', 'Sell the token after warming up', false)
         .action((options) => {
-            const { from, to, list, min, max } = options;
-            commands.warmup(keys_cnt, from, to, list, min, max);
+            const { from, to, list, min, max, keep } = options;
+            commands.warmup(keys_cnt, from, to, list, min, max, keep);
         });
 
     program

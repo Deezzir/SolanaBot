@@ -267,7 +267,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
     }
 }
 
-export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[], min?: number, max?: number): Promise<void> {
+export async function warmup(keys_cnt: number, from?: number, to?: number, list?: number[], min?: number, max?: number, keep?: boolean): Promise<void> {
     const MIN = min || 1;
     const MAX = max || 5;
 
@@ -294,7 +294,13 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
         const key = common.get_key(path.join(trade.KEYS_DIR, file));
         if (!key) continue;
         const buyer = Keypair.fromSecretKey(key);
-        const mints = (await trade.fetch_random_mints(counts[index] || 3)).filter(i => !i.market_id);
+        let mints = [];
+
+        while (true) {
+            mints = (await trade.fetch_random_mints(counts[index])).filter(i => !i.raydium_pool);
+            if (mints.length === counts[index]) break;
+            await common.sleep(1000);
+        }
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${counts[index]} tokens (${file})...`);
         for (const mint_meta of mints) {
@@ -315,7 +321,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
             }
             common.sleep(1000);
             let twice = false;
-            while (true) {
+            while (true && !keep) {
                 try {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {

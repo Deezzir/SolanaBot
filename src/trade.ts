@@ -662,7 +662,7 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
     const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => acc.data.mint);
     const accounts = deserialized.filter((acc) => acc.data.amount === BigInt(0));
 
-    for (const chunk of common.chunks(accounts, 20)) {
+    for (const chunk of common.chunks(accounts, 15)) {
         let success = false;
         while (!success) {
             const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('finalized');
