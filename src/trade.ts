@@ -201,9 +201,9 @@ async function instructions_add_priority(instructions: TransactionInstruction[],
 export async function create_and_send_tx(
     instructions: TransactionInstruction[], payer: Signer, signers: Signer[],
     ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    max_retries: number = 5, priority: common.Priority = 'medium'
+    max_retries: number = 5, priority: common.Priority | undefined
 ): Promise<String> {
-    instructions = await instructions_add_priority(instructions, payer, priority);
+    if (priority) instructions = await instructions_add_priority(instructions, payer, priority);
 
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: payer.publicKey,
@@ -263,7 +263,7 @@ export async function check_has_balances(keys: Uint8Array[], min_balance: number
 export async function send_lamports(
     lamports: number, sender: Signer, receiver: PublicKey,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    max: boolean = false, priority: common.Priority = 'medium'
+    max: boolean = false, priority: common.Priority | undefined = undefined
 ): Promise<String> {
     const max_retries = MAX_RETRIES;
 
