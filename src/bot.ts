@@ -1,7 +1,6 @@
 import figlet from 'figlet';
 import dotenv from 'dotenv'
 import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'commander';
-import { PublicKey, Connection } from '@solana/web3.js';
 import { existsSync, } from 'fs';
 import { clearLine, cursorTo, moveCursor } from 'readline';
 import * as common from './common.js';
@@ -10,6 +9,8 @@ import * as run from './run.js';
 import * as commands from './commands.js';
 import * as drop from './drop.js';
 import { exit } from 'process';
+import { Solana, solanaWeb3 } from '@quicknode/sdk';
+const { PublicKey, Connection } = solanaWeb3;
 dotenv.config({ path: './.env' });
 
 //------------------------------------------------------------
@@ -28,11 +29,12 @@ async function main() {
     const rpcs = process.env.RPCS?.split(',') || [];
     const rpc = rpcs[Math.floor(Math.random() * rpcs?.length)];
     global.connection = new Connection(rpc, 'confirmed');
+    global.endpoint = new Solana({ endpointUrl: rpc });
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
 
-    common.log(`Using RPC: ${rpc}`);
+    common.log(`Using RPC: ${rpc}\n`);
     program
         .version('1.0.0')
         .description('Solana Buy Bot CLI');
@@ -186,10 +188,9 @@ async function main() {
                 throw new InvalidOptionArgumentError('Not a number.');
             return parsedValue;
         })
-        .option('-k --keep', 'Sell the token after warming up', false)
         .action((options) => {
-            const { from, to, list, min, max, keep } = options;
-            commands.warmup(keys_cnt, from, to, list, min, max, keep);
+            const { from, to, list, min, max } = options;
+            commands.warmup(keys_cnt, from, to, list, min, max);
         });
 
     program
@@ -277,7 +278,7 @@ async function main() {
 
     program
         .command('spl-collect')
-        .alias('ct')
+        .alias('sc')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
@@ -359,8 +360,26 @@ async function main() {
         .action(commands.promote);
 
     program
+        .command('create-token')
+        .alias('ct')
+        .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
+        .argument('<keypair_path>', 'Path to the keypair file')
+        .option('-m, --mint <keypair_path>', 'Path to the mint keypair file')
+        .option('-b, --buy <number>', 'Amount of SOL to buy the token', (value) => {
+            const parsedValue = parseFloat(value);
+            if (isNaN(parsedValue) || parsedValue <= 0)
+                throw new InvalidOptionArgumentError('Not a number.');
+            return parsedValue;
+        })
+        .description('Create a token')
+        .action((cid, keypair_path, options) => {
+            const { mint, buy } = options;
+            commands.create_token(cid, keypair_path, buy, mint);
+        });
+
+    program
         .command('drop')
-        .alias('d')
+        .alias('dr')
         .argument('<airdrop>', 'Percent of tokens to be airdroped', (value) => {
             const parsedValue = parseInt(value);
             if (isNaN(parsedValue))
@@ -412,7 +431,6 @@ async function main() {
     if (!process.argv.slice(2).length) {
         program.outputHelp();
     }
-
 }
 
 main().catch(console.error);

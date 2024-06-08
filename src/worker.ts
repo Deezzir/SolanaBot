@@ -2,8 +2,9 @@ import { parentPort, workerData } from 'worker_threads';
 import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey } from '@solana/web3.js';
 import * as common from './common.js';
 import * as trade from './trade.js';
+import { Solana } from '@quicknode/sdk';
 
-const SLIPPAGE = 1.5;
+const SLIPPAGE = 2.0;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.05;
@@ -12,7 +13,7 @@ let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPCS?.split(',') || [];
-global.connection = new Connection(RPCS[WORKER_CONFIG.id % RPCS?.length], 'confirmed');
+global.endpoint = new Solana({ endpointUrl: RPCS[WORKER_CONFIG.id % RPCS?.length] });
 
 
 var WORKER_KEYPAIR: Keypair;
@@ -53,7 +54,7 @@ const buy = async () => {
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await connection.getLatestBlockhashAndContext('finalized');
+                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -63,7 +64,7 @@ const buy = async () => {
                     continue;
                 }
 
-                transactions.push(trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, true)
+                transactions.push(trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, 'high')
                     .then(async (sig) => {
                         try {
                             const balance_change = await trade.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
@@ -75,7 +76,7 @@ const buy = async () => {
                         MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`);
                     })
                     .catch((e) => {
-                        //parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
+                        parentPort?.postMessage(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                         MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
                     }));
 
@@ -106,7 +107,7 @@ const sell = async () => {
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await connection.getLatestBlockhashAndContext('finalized');
+                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -117,7 +118,7 @@ const sell = async () => {
                 }
 
                 if (MINT_METADATA.raydium_pool === null) {
-                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, true)
+                    transactions.push(trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, context, JITOTIP, SLIPPAGE, 'extreme')
                         .then((sig) => {
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
@@ -128,7 +129,7 @@ const sell = async () => {
                         }));
                 } else {
                     const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    transactions.push(trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, context, SLIPPAGE, true)
+                    transactions.push(trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, context, SLIPPAGE, 'extreme')
                         .then((sig) => {
                             sold = true;
                             const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;

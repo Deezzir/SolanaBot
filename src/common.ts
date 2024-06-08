@@ -13,6 +13,8 @@ export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
 
+export type Priority = "low" | "medium" | "high" | "extreme"
+
 export interface BotConfig {
     thread_cnt: number;
     buy_interval: number;

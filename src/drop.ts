@@ -4,7 +4,7 @@ import { Keypair, PublicKey, RpcResponseAndContext, Signer, TransactionInstructi
 import * as trade from "./trade.js";
 import { readFileSync } from "fs";
 import dotenv from "dotenv";
-import { TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createTransferInstruction, getAccount } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, createTransferInstruction, getAccount } from "@solana/spl-token";
 dotenv.config();
 
 const RECORDS_PER_ITERATION = 10;
@@ -49,7 +49,7 @@ async function send_tokens(
         token_amount
     ));
 
-    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, priority);
+    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, 'low');
 }
 
 
@@ -193,7 +193,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await connection.getLatestBlockhashAndContext('finalized');
+                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {

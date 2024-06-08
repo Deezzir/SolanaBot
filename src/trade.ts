@@ -42,13 +42,13 @@ const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-eng
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
-const PRIORITY_UNITS = 100000;
-const PRIORITY_MICRO_LAMPORTS = 500000;
+const PRIORITY_UNITS = 3;
+const PRIORITY_MICRO_LAMPORTS = 666666;
 const MAX_RETRIES = 2;
 
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
-        let account_info = await getAccount(global.connection, account);
+        let account_info = await getAccount(global.endpoint.connection, account);
         if (account_info && account_info.isInitialized) return true;
     } catch (error) {
         if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
@@ -75,7 +75,7 @@ export async function fetch_mint(mint: string): Promise<common.TokenMeta> {
 export async function fetch_random_mints(count: number): Promise<common.TokenMeta[]> {
     const limit = 50;
     const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
-    return fetch(`${FETCH_MINT_API_URL}/coins/?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC`)
+    return fetch(`${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`)
         .then(response => response.json())
         .then(data => {
             if (!data || data.statusCode !== undefined) return [] as common.TokenMeta[];
@@ -90,28 +90,30 @@ export async function fetch_random_mints(count: number): Promise<common.TokenMet
 
 export async function get_token_supply(mint: PublicKey): Promise<bigint> {
     try {
-        const mint_1 = await getMint(global.connection, mint, 'confirmed');
+        const mint_1 = await getMint(global.endpoint.connection, mint, 'confirmed');
         return mint_1.supply;
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
-        return BigInt(1000000000000000);
+        return BigInt(1_000_000_000 * 10 ** 6);
     }
 }
 
 export async function get_balance(pubkey: PublicKey): Promise<number> {
-    return await global.connection.getBalance(pubkey);
+    return await global.endpoint.connection.getBalance(pubkey);
 }
 
 const isError = <T>(value: T | Error): value is Error => {
     return value instanceof Error;
 };
 
-export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number, priority: boolean = false): Promise<String> {
+export async function create_and_send_tipped_tx(
+    instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: common.Priority = 'medium'
+): Promise<String> {
     try {
         const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, RESERVE_KEYPAIR);
-        const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
-
-        if (priority) instructions_add_priority(instructions);
+        instructions = await instructions_add_priority(instructions, payer, priority);
 
         instructions.unshift(SystemProgram.transfer({
             fromPubkey: payer.publicKey,
@@ -121,7 +123,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
 
         const versioned_tx = new VersionedTransaction(new TransactionMessage({
             payerKey: payer.publicKey,
-            recentBlockhash: blockhash,
+            recentBlockhash: context.value.blockhash,
             instructions: instructions.filter(Boolean),
         }).compileToV0Message());
         versioned_tx.sign(signers);
@@ -132,11 +134,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
         if (!isError(bundle)) {
             try {
                 const resp = await c.sendBundle(bundle);
-                await global.connection.confirmTransaction({
-                    blockhash,
-                    lastValidBlockHeight,
-                    signature
-                }, 'confirmed');
+                await check_transaction_status(signature, context);
                 return signature;
             } catch (e) {
                 throw new Error(`Failed to send a bundle: ${e}`);
@@ -150,125 +148,84 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
     }
 }
 
-async function isBlockhashExpired(lastValidBlockHeight: number): Promise<boolean> {
-    let currentBlockHeight = (await global.connection.getBlockHeight('finalized'));
+async function is_blockhash_expired(lastValidBlockHeight: number): Promise<boolean> {
+    let currentBlockHeight = (await global.endpoint.connection.getBlockHeight('confirmed'));
     return (currentBlockHeight > lastValidBlockHeight - 150);
+}
+
+async function check_transaction_status(signature: string, context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>): Promise<void> {
+    const max_retries = 30;
+    const retry_interval = 1500;
+
+    while (true) {
+        const { value: status } = await global.endpoint.connection.getSignatureStatus(signature);
+
+        if (status) {
+            if ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') && status.err === null) {
+                return;
+            }
+            if (status.err) throw new Error('Transaction failed');
+        }
+
+        const is_expired = await is_blockhash_expired(context.value.lastValidBlockHeight);
+        if (is_expired) throw new Error('Blockhash has expired.');
+
+        await common.sleep(retry_interval);
+    }
+
+    throw new Error('Transaction status check exceeded maximum retries.');
+}
+
+async function instructions_add_priority(instructions: TransactionInstruction[], payer: Signer, level: common.Priority): Promise<TransactionInstruction[]> {
+    // const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
+    //     units: PRIORITY_UNITS,
+    // });
+    // const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
+    //     microLamports: PRIORITY_MICRO_LAMPORTS,
+    // });
+    // instructions.unshift(priority_fee);
+    // instructions.unshift(modify_cu, priority_fee);
+
+    const transaction = new Transaction().add(...instructions);
+    let optimized_tx: Transaction;
+
+    optimized_tx = await global.endpoint.prepareSmartTransaction({
+        transaction,
+        feeLevel: level,
+        payerPublicKey: payer.publicKey,
+    })
+
+    return optimized_tx.instructions;
 }
 
 export async function create_and_send_tx(
     instructions: TransactionInstruction[], payer: Signer, signers: Signer[],
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    max_retries: number = 5, priority: boolean = false
+    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    max_retries: number = 5, priority: common.Priority = 'medium'
 ): Promise<String> {
-    // const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
+    instructions = await instructions_add_priority(instructions, payer, priority);
 
-    if (priority) instructions_add_priority(instructions);
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: payer.publicKey,
-        recentBlockhash: context.value.blockhash,
+        recentBlockhash: ctx.value.blockhash,
         instructions: instructions.filter(Boolean),
     }).compileToV0Message());
 
     versioned_tx.sign(signers);
 
-    const signature = await global.connection.sendTransaction(versioned_tx);
-    // ,{
-    //     skipPreflight: false,
-    //     maxRetries: max_retries,
-    // });
+    const signature = await global.endpoint.connection.sendTransaction(versioned_tx, {
+        skipPreflight: true,
+        preflightCommitment: 'confirmed',
+        // maxRetries: max_retries,
+    });
 
-    let hashExpired = false;
-    let txSuccess = false;
-    while (!hashExpired && !txSuccess) {
-        const { value: status } = await global.connection.getSignatureStatus(signature);
-
-        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) && status.err === null) {
-            txSuccess = true;
-            break;
-        }
-
-        if (status && status.err) {
-            throw new Error(`Transaction failed`);
-        }
-
-        hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
-
-        if (hashExpired) {
-            throw new Error('Blockhash has expired.');
-        }
-
-        await common.sleep(2000);
-    }
-
-    return signature;
-
-    // try {
-    //     const signature = await global.connection.sendTransaction(versioned_tx, {
-    //         skipPreflight: false,
-    //         maxRetries: max_retries,
-    //     })
-    //     await global.connection.confirmTransaction({
-    //         blockhash,
-    //         lastValidBlockHeight,
-    //         signature
-    //     }, 'confirmed');
-    //     return signature;
-    // } catch (err) {
-    //     throw new Error(`Max retries reached, failed to send the transaction: ${err}`);
-    // }
-}
-
-async function create_and_send_vtx(
-    tx: VersionedTransaction, signers: Signer[],
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    max_retries: number = 5, priority: boolean = false
-): Promise<String> {
-    // const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash();
-
-    tx.sign(signers);
-
-    const rawTransaction = tx.serialize();
-    const signature = await global.connection.sendRawTransaction(rawTransaction);
-    // ,{
-    //     skipPreflight: false,
-    //     maxRetries: max_retries,
-    // });
-
-    let hashExpired = false;
-    let txSuccess = false;
-    while (!hashExpired && !txSuccess) {
-        const { value: status } = await global.connection.getSignatureStatus(signature);
-
-        if (status && ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) && status.err === null) {
-            txSuccess = true;
-            break;
-        }
-
-        if (status && status.err) {
-            throw new Error(`Transaction failed`);
-        }
-
-        hashExpired = await isBlockhashExpired(context.value.lastValidBlockHeight);
-
-        if (hashExpired) {
-            throw new Error('Blockhash has expired.');
-        }
-
-        await common.sleep(2000);
-    }
-
-    // await global.connection.confirmTransaction({
-    //     blockhash,
-    //     lastValidBlockHeight,
-    //     signature
-    // }, 'confirmed');
-
+    await check_transaction_status(signature, ctx);
     return signature;
 }
 
 export async function get_balance_change(signature: string, address: PublicKey): Promise<number> {
     try {
-        const tx_details = await global.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        const tx_details = await global.endpoint.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
         if (!tx_details)
             throw new Error(`[ERROR] Transaction not found: ${signature}`);
         const balance_index = tx_details?.transaction.message.getAccountKeys().staticAccountKeys.findIndex((i) => i.equals(address));
@@ -303,21 +260,10 @@ export async function check_has_balances(keys: Uint8Array[], min_balance: number
     }
 }
 
-function instructions_add_priority(instructions: TransactionInstruction[]): void {
-    const modify_cu = ComputeBudgetProgram.setComputeUnitLimit({
-        units: PRIORITY_UNITS,
-    });
-    const priority_fee = ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: PRIORITY_MICRO_LAMPORTS,
-    });
-    instructions.unshift(priority_fee);
-    // instructions.unshift(modify_cu, priority_fee);
-}
-
 export async function send_lamports(
     lamports: number, sender: Signer, receiver: PublicKey,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    max: boolean = false, priority: boolean = false
+    max: boolean = false, priority: common.Priority = 'medium'
 ): Promise<String> {
     const max_retries = MAX_RETRIES;
 
@@ -329,20 +275,6 @@ export async function send_lamports(
     }));
 
     return await create_and_send_tx(instructions, sender, [sender], context, max_retries, priority);
-}
-
-export async function get_tx_fee(tx: Transaction): Promise<number> {
-    try {
-        const repsonse = await global.connection.getFeeForMessage(
-            tx.compileMessage(),
-            'confirmed'
-        );
-        if (!repsonse || !repsonse.value) return 0;
-        return repsonse.value;
-    } catch (err) {
-        common.error(`[ERROR] Failed to get the transaction fee: ${err}`);
-        return 0;
-    }
 }
 
 export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
@@ -358,14 +290,14 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
 }
 
 export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> {
-    const metaplex = Metaplex.make(global.connection);
+    const metaplex = Metaplex.make(global.endpoint.connection);
 
     const metaplex_acc = metaplex
         .nfts()
         .pdas()
         .metadata({ mint });
 
-    const metaplex_acc_info = await global.connection.getAccountInfo(metaplex_acc);
+    const metaplex_acc_info = await global.endpoint.connection.getAccountInfo(metaplex_acc);
 
     if (metaplex_acc_info) {
         const token = await metaplex.nfts().findByMint({ mintAddress: mint });
@@ -380,17 +312,14 @@ export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> 
     throw new Error(`Failed to get the token metadata.`);
 }
 
-async function check_assoc_token_addr(assoc_address: PublicKey): Promise<boolean> {
-    const accountInfo = await global.connection.getAccountInfo(assoc_address);
-    return accountInfo !== null;
-}
-
-function get_token_amount_raw(amount: number, token: common.TokenMeta): number {
+function get_token_amount_raw(amount: number, token: Partial<common.TokenMeta>): number {
+    if (!token.total_supply || !token.market_cap) return 0;
     const sup = Number(token.total_supply);
     return Math.round(amount * sup / token.market_cap);
 }
 
-function get_solana_amount_raw(amount: number, token: common.TokenMeta): number {
+function get_solana_amount_raw(amount: number, token: Partial<common.TokenMeta>): number {
+    if (!token.total_supply || !token.market_cap) return 0;
     const sup = Number(token.total_supply);
     return amount * token.market_cap / (sup * 1_000_000);
 }
@@ -426,7 +355,7 @@ function sell_data(sol_amount: number, token_amount: number, slippage: number): 
 export async function get_token_balance(pubkey: PublicKey, mint: PublicKey): Promise<TokenAmount> {
     try {
         const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
-        const account_info = await global.connection.getTokenAccountBalance(assoc_addres);
+        const account_info = await global.endpoint.connection.getTokenAccountBalance(assoc_addres);
         return account_info.value;
     } catch (err) {
         return {
@@ -440,7 +369,7 @@ export async function get_token_balance(pubkey: PublicKey, mint: PublicKey): Pro
 export async function send_tokens(
     token_amount: number, sender: PublicKey, receiver: PublicKey, owner: Signer,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    priority: boolean = false
+    priority: common.Priority = 'medium'
 ): Promise<String> {
     const max_retries = MAX_RETRIES;
 
@@ -458,19 +387,19 @@ export async function send_tokens(
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
     const max_retries = MAX_RETRIES;
     try {
-        let account = await getOrCreateAssociatedTokenAccount(global.connection, payer, mint, owner, false, 'confirmed', { maxRetries: max_retries, skipPreflight: false });
+        let account = await getOrCreateAssociatedTokenAccount(global.endpoint.connection, payer, mint, owner, false, 'confirmed', { maxRetries: max_retries, skipPreflight: false });
         return account.address;
     } catch (err) {
         throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
     }
 }
 
-export async function buy_token(
-    sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta,
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    tip: number = 0.1, slippage: number = 0.05, priority: boolean = false
-): Promise<String> {
-    const max_retries = MAX_RETRIES;
+export async function get_buy_token_instructions(
+    sol_amount: number, buyer: Signer, mint_meta: Partial<common.TokenMeta>, slippage: number = 0.05
+): Promise<TransactionInstruction[]> {
+    if (!mint_meta.mint || !mint_meta.bonding_curve || !mint_meta.associated_bonding_curve) {
+        throw new Error(`[ERROR]: Failed to get the mint meta.`);
+    }
 
     const mint = new PublicKey(mint_meta.mint);
     const bonding_curve = new PublicKey(mint_meta.bonding_curve);
@@ -479,10 +408,10 @@ export async function buy_token(
     const token_amount = get_token_amount_raw(sol_amount, mint_meta);
     const instruction_data = buy_data(sol_amount, token_amount, slippage);
     const assoc_address = await calc_assoc_token_addr(buyer.publicKey, mint);
-    const is_assoc = await check_assoc_token_addr(assoc_address);
+    const exists = await check_account_exists(assoc_address);
 
     let instructions: TransactionInstruction[] = [];
-    if (!is_assoc) {
+    if (!exists) {
         instructions.push(createAssociatedTokenAccountInstruction(
             buyer.publicKey,
             assoc_address,
@@ -510,16 +439,30 @@ export async function buy_token(
         programId: TRADE_PROGRAM_ID,
         data: instruction_data,
     }));
+    return instructions;
+}
+
+export async function buy_token(
+    sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    tip: number = 0.1, slippage: number = 0.05, priority: common.Priority = 'medium'
+): Promise<String> {
+    const max_retries = MAX_RETRIES;
+    let instructions = await get_buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
     return await create_and_send_tx(instructions, buyer, [buyer], context, max_retries, priority);
-    return await create_and_send_tipped_tx(instructions, buyer, [buyer], tip, priority);
+    return await create_and_send_tipped_tx(instructions, buyer, [buyer], tip, context, priority);
 }
 
 export async function sell_token(
-    token_amount: TokenAmount, seller: Signer, mint_meta: common.TokenMeta,
+    token_amount: TokenAmount, seller: Signer, mint_meta: Partial<common.TokenMeta>,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    tip: number = 0.1, slippage: number = 0.05, priority: boolean = false
+    tip: number = 0.1, slippage: number = 0.05, priority: common.Priority = 'medium'
 ): Promise<String> {
     const max_retries = MAX_RETRIES;
+
+    if (!mint_meta.mint || !mint_meta.bonding_curve || !mint_meta.associated_bonding_curve) {
+        throw new Error(`[ERROR]: Failed to get the mint meta.`);
+    }
 
     const mint = new PublicKey(mint_meta.mint);
     const bonding_curve = new PublicKey(mint_meta.bonding_curve);
@@ -555,7 +498,7 @@ export async function sell_token(
         data: instruction_data,
     }));
     return await create_and_send_tx(instructions, seller, [seller], context, max_retries, priority);
-    return await create_and_send_tipped_tx(instructions, seller, [seller], tip, priority);
+    return await create_and_send_tipped_tx(instructions, seller, [seller], tip, context, priority);
 }
 
 function create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
@@ -576,15 +519,11 @@ function create_data(token_name: string, token_ticker: string, meta_link: string
     return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
 }
 
-export async function create_token(
-    creator: Signer, meta: common.IPFSMetadata, cid: string,
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    priority: boolean = false
-): Promise<[String, PublicKey]> {
-    const max_retries = MAX_RETRIES;
+export async function get_create_token_instructions(
+    creator: Signer, meta: common.IPFSMetadata, cid: string, mint: Keypair,
+): Promise<TransactionInstruction[]> {
     const meta_link = `${common.IPFS}${cid}`;
-    const instruction_data = create_data(meta.name, meta.symbol, meta_link)
-    const mint = Keypair.generate();
+    const instruction_data = create_data(meta.name, meta.symbol, meta_link);
     const [bonding] = PublicKey.findProgramAddressSync([BONDING_ADDR, mint.publicKey.toBuffer()], TRADE_PROGRAM_ID);
     const [assoc_bonding] = PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
     const [metaplex] = PublicKey.findProgramAddressSync([META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()], METAPLEX_TOKEN_META);
@@ -611,8 +550,67 @@ export async function create_token(
         data: instruction_data,
     }));
 
-    // const sig = await create_and_send_tipped_tx(instructions, creater, [creater, mint], 30_000_000, priority);
+    return instructions;
+}
+
+export async function create_token_with_buy(creator: Signer, meta: common.IPFSMetadata, cid: string,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: common.Priority = 'medium', mint: Keypair = Keypair.generate(), sol_amount?: number
+): Promise<[String, String, PublicKey]> {
+    const max_retries = MAX_RETRIES;
+    let instructions = await get_create_token_instructions(creator, meta, cid, mint);
+
+    const token_meta: Partial<common.TokenMeta> = {
+        mint: mint.publicKey.toString(),
+        bonding_curve: instructions[0].keys[2].pubkey.toString(),
+        associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
+        market_cap: 27.967381664,
+        total_supply: BigInt(1000000000000000),
+    };
+
+    if (sol_amount && sol_amount > 0) {
+        const buy_instructions = await get_buy_token_instructions(sol_amount, creator, token_meta, 0.05);
+        instructions = instructions.concat(buy_instructions);
+    }
+
+    let create_sig: String;
+    let sell_sig: String;
+
+    try {
+        create_sig = await create_and_send_tx(instructions, creator, [creator, mint], context, max_retries, priority);
+    } catch (err) {
+        throw new Error(`Failed to create the token: ${err}`);
+    }
+
+    while (true) {
+        try {
+            const token_amount: TokenAmount = {
+                uiAmount: 10000,
+                amount: (10000 * 10 ** 6).toString(),
+                decimals: 6,
+            }
+            const sell_context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+            sell_sig = await sell_token(token_amount, creator, token_meta, sell_context, 0.1, 0.5, priority);
+            break;
+        } catch (err) {
+            // throw new Error(`Failed to sell the token: ${err}, Create signature: ${create_sig}`);
+            await common.sleep(200);
+        }
+    }
+
+    return [create_sig, sell_sig, mint.publicKey];
+}
+
+export async function create_token(
+    creator: Signer, meta: common.IPFSMetadata, cid: string,
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
+    priority: common.Priority = 'medium'
+): Promise<[String, PublicKey]> {
+    const max_retries = MAX_RETRIES;
+    const mint = Keypair.generate();
+    const instructions = await get_create_token_instructions(creator, meta, cid, mint);
     const sig = await create_and_send_tx(instructions, creator, [creator, mint], context, max_retries, priority);
+    // const sig = await create_and_send_tipped_tx(instructions, creater, [creater, mint], 30_000_000, priority);
     return [sig, mint.publicKey];
 }
 
@@ -651,43 +649,55 @@ export async function swap_jupiter(
     ).json();
 
     const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
-    var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+    var tx = VersionedTransaction.deserialize(swapTransactionBuf);
+    tx.sign([wallet.payer]);
 
-    return await create_and_send_vtx(transaction, [wallet.payer], context, max_retries, priority);
+    const rawTransaction = tx.serialize();
+    const signature = await global.endpoint.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+    });
+
+    await check_transaction_status(signature, context);
+    return signature;
 }
 
 export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
-    const token_accounts = await global.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
+    const token_accounts = await global.endpoint.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
-    const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => acc.data.mint);
+    const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => {
+        const mint = acc.data.mint;
+        const balance = Number(acc.data.amount) / 10 ** 6;
+        common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()}`);
+        return acc.data.mint
+    });
+
     const accounts = deserialized.filter((acc) => acc.data.amount === BigInt(0));
 
     for (const chunk of common.chunks(accounts, 15)) {
-        let success = false;
-        while (!success) {
-            const { blockhash, lastValidBlockHeight } = await global.connection.getLatestBlockhash('finalized');
+        while (true) {
+            const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
 
-            const txn = new Transaction();
-            txn.feePayer = owner.publicKey;
-            txn.recentBlockhash = blockhash;
+            const tx = new Transaction();
+            tx.feePayer = owner.publicKey;
+            tx.recentBlockhash = context.value.blockhash;
             for (const account of chunk) {
-                txn.add(createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey));
+                tx.add(createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey));
             }
 
-            const signedTransaction = await owner.signTransaction(txn);
-            const serializedTransaction = signedTransaction.serialize();
+            tx.sign(owner.payer);
 
             try {
-                const signature = await global.connection.sendRawTransaction(serializedTransaction);
-                await global.connection.confirmTransaction({
-                    blockhash,
-                    lastValidBlockHeight,
-                    signature
-                }, 'confirmed');
-                common.log(`${chunk.length} accounts closed: ${signature}`);
-                success = true;
+                const signature = await global.endpoint.sendSmartTransaction({
+                    transaction: tx,
+                    keyPair: owner.payer,
+                    feeLevel: 'low',
+                });
+                await check_transaction_status(signature, context);
+                common.log(`${chunk.length} accounts closed | Signature ${signature}`);
+                break;
             } catch (err) {
-                common.error(`Failed to close accounts, retrying...`);
+                common.error(`Failed to close accounts: ${err}, retrying...`);
             }
         }
     }
@@ -731,14 +741,14 @@ async function calc_raydium_amounts(
     };
 };
 
-async function create_swap_acc_intsruction(seller: Signer, token_acc: PublicKey, lamports: number = 0): Promise<TransactionInstruction[]> {
+async function get_swap_acc_intsruction(seller: Signer, token_acc: PublicKey, lamports: number = 0): Promise<TransactionInstruction[]> {
     let instructions: TransactionInstruction[] = [];
     instructions.push(SystemProgram.createAccountWithSeed({
         seed: SWAP_SEED,
         basePubkey: seller.publicKey,
         fromPubkey: seller.publicKey,
         newAccountPubkey: token_acc,
-        lamports: await global.connection.getMinimumBalanceForRentExemption(165) + lamports,
+        lamports: await global.endpoint.connection.getMinimumBalanceForRentExemption(165) + lamports,
         space: 165,
         programId: TOKEN_PROGRAM_ID,
     }));
@@ -756,7 +766,7 @@ async function create_swap_acc_intsruction(seller: Signer, token_acc: PublicKey,
 async function create_raydium_swap_tx(
     amount: TokenAmount, seller: Signer, token_buy: PublicKey, pool_keys: LiquidityPoolKeys, pool_info: LiquidityPoolInfo,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    slippage: number, priority: boolean
+    slippage: number, priority: common.Priority
 ) {
     const max_retries = MAX_RETRIES;
     const raw_amount_in = parseInt(amount.amount, 10);
@@ -785,10 +795,10 @@ async function create_raydium_swap_tx(
             );
         }
         token_in_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
-        instructions = instructions.concat(await create_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
+        instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
     } else {
         token_out_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
-        instructions = instructions.concat(await create_swap_acc_intsruction(seller, token_out_acc));
+        instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_out_acc));
         token_in_acc = await calc_assoc_token_addr(seller.publicKey, token_in);
     }
     instructions.push(new TransactionInstruction({
@@ -831,10 +841,10 @@ async function create_raydium_swap_tx(
 };
 
 async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys | undefined> {
-    const ammAccount = await global.connection.getAccountInfo(amm);
+    const ammAccount = await global.endpoint.connection.getAccountInfo(amm);
     if (ammAccount) {
         const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(ammAccount.data);
-        const marketAccount = await global.connection.getAccountInfo(poolState.marketId);
+        const marketAccount = await global.endpoint.connection.getAccountInfo(poolState.marketId);
         if (marketAccount) {
             const marketState = MARKET_STATE_LAYOUT_V3.decode(marketAccount.data);
             const marketAuthority = PublicKey.createProgramAddressSync(
@@ -877,11 +887,11 @@ async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys |
 export async function swap_raydium(
     amount: TokenAmount, seller: Signer, amm: PublicKey, swap_to: PublicKey,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    slippage: number = 0.05, priority: boolean = false
+    slippage: number = 0.05, priority: common.Priority = 'medium'
 ): Promise<String> {
     const pool_keys = await get_raydium_poolkeys(amm);
     if (pool_keys) {
-        const pool_info = await Liquidity.fetchInfo({ connection: global.connection, poolKeys: pool_keys });
+        const pool_info = await Liquidity.fetchInfo({ connection: global.endpoint.connection, poolKeys: pool_keys });
         const raw_slippage = slippage * 100;
         return create_raydium_swap_tx(amount, seller, swap_to, pool_keys, pool_info, context, raw_slippage, priority);
     }
