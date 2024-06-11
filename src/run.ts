@@ -32,6 +32,12 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 filter: value => common.validate_int(value, 1, keys_cnt) ? parseInt(value, 10) : value
             },
             {
+                type: 'confirm',
+                name: 'is_bump',
+                message: 'Do you want to use the Bump Orders?',
+                default: false
+            },
+            {
                 type: 'input',
                 name: 'buy_interval',
                 message: 'Enter the interval between each buy in seconds:',
@@ -190,11 +196,11 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         let mint: PublicKey;
         LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
         common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
-        SUBSCRIPTION_ID = global.endpoint.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
+        SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
             if (logs && logs.includes('Program log: Create')) {
                 try {
-                    const tx = await global.endpoint.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+                    const tx = await global.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
                     if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
 
                     const inner_instructions = tx.meta.innerInstructions;
@@ -244,7 +250,7 @@ export async function wait_drop_unsub(): Promise<void> {
     if (SUBSCRIPTION_ID !== undefined) {
         if (LOGS_STOP_FUNCTION) LOGS_STOP_FUNCTION();
         if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
-        global.endpoint.connection.removeOnLogsListener(SUBSCRIPTION_ID)
+        global.connection.removeOnLogsListener(SUBSCRIPTION_ID)
             .then(() => SUBSCRIPTION_ID = undefined)
             .catch(err => common.error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
     }

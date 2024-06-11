@@ -25,7 +25,6 @@ const DB_CLIENT = new MongoClient(MONGO_URI, {
 async function send_tokens(
     token_amount: number, mint: PublicKey, sender: PublicKey, receiver: PublicKey, payer: Signer,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-    priority: boolean = false
 ): Promise<String> {
     let instructions: TransactionInstruction[] = []
 
@@ -49,7 +48,7 @@ async function send_tokens(
         token_amount
     ));
 
-    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, 'low');
+    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, { level: 'low' });
 }
 
 
@@ -193,7 +192,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+                const context = await global.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -211,7 +210,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
                 // const receiver_assoc_addr = await trade.create_assoc_token_account(drop, receiver, mint_meta.mint);
 
                 console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`);
-                transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop, context, true)
+                transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop, context)
                     .then((signature) => {
                         console.log(`Transaction completed for ${xUsername}, signature: ${signature}`)
                         db_updates.push({

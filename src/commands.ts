@@ -77,7 +77,7 @@ export async function create_token(cid: string, keypair_path: string, dev_buy?: 
     }
 
     try {
-        const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+        const context = await global.connection.getLatestBlockhashAndContext('confirmed');
         const [sig, sig_sell, mint_addr] = await trade.create_token_with_buy(creator, meta, cid, context, 'low', mint, dev_buy)
         common.log(`Create Signature: ${sig.toString().padEnd(88, ' ')} | Sell Signature: ${sig_sell.toString().padEnd(88, ' ')}\nMint: ${mint_addr}`)
     } catch (err) {
@@ -107,7 +107,7 @@ export async function promote(times: number, cid: string, keypair_path: string):
     let lastValidHeight = 0;
 
     while (count > 0) {
-        const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+        const context = await global.connection.getLatestBlockhashAndContext('confirmed');
         const last = context.value.lastValidBlockHeight;
 
         if (lastValidHeight !== last) {
@@ -169,9 +169,9 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender_p
         return;
     }
 
-    const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
 
-    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, context, true)
+    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, context, false, 'high')
         .then(signature => common.log(`Transaction completed, signature: ${signature}`))
         .catch(error => common.error(`Transaction failed: ${error.message}`));
 }
@@ -224,7 +224,7 @@ export async function sell_token_once(mint: PublicKey, keypair_path: string): Pr
 
     common.log(`Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
 
-    const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
 
     if (mint_meta.raydium_pool === null) {
         trade.sell_token(token_amount, seller, mint_meta, context, 0.01, 0.5, 'high')
@@ -270,7 +270,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
         return;
     }
 
-    const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
 
     if (mint_meta.raydium_pool === null) {
         trade.buy_token(amount, buyer, mint_meta, context, 0.01, 0.5, 'medium')
@@ -349,7 +349,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
             let bought = false;
             while (buy_attempts > 0 && !bought) {
                 try {
-                    const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+                    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
                     const signature = await trade.buy_token(amount, buyer, mint_meta, context, 0.001, 0.5, 'medium');
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     bought = true;
@@ -374,7 +374,7 @@ export async function warmup(keys_cnt: number, from?: number, to?: number, list?
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${file})...`);
-                    const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+                    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
                     const signature = await trade.sell_token(balance, buyer, mint_meta, context, 0.001, 0.5, 'medium');
                     common.log(`Transaction completed for ${file}, signature: ${signature}`);
                     break;
@@ -398,7 +398,7 @@ export async function collect(address: PublicKey, reserve: boolean): Promise<voi
     let lastValidHeight = 0;
 
     while (count > 0) {
-        const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+        const context = await global.connection.getLatestBlockhashAndContext('confirmed');
         const last = context.value.lastValidBlockHeight;
 
         if (lastValidHeight !== last) {
@@ -445,7 +445,7 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey): Promi
         let lastValidHeight = 0;
 
         while (count > 0) {
-            const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+            const context = await global.connection.getLatestBlockhashAndContext('confirmed');
             const last = context.value.lastValidBlockHeight;
 
             if (lastValidHeight !== last) {
@@ -505,7 +505,7 @@ export async function sell_token(mint: PublicKey, list?: number[]): Promise<void
             const token_amount = await trade.get_token_balance(seller.publicKey, mint);
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) { count--; continue };
 
-            const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+            const context = await global.connection.getLatestBlockhashAndContext('confirmed');
             const last = context.value.lastValidBlockHeight;
 
             if (lastValidHeight !== last) {
@@ -567,7 +567,7 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
     let lastValidHeight = 0;
 
     while (count > 0) {
-        const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+        const context = await global.connection.getLatestBlockhashAndContext('confirmed');
         const last = context.value.lastValidBlockHeight;
 
         if (lastValidHeight !== last) {

@@ -8,14 +8,13 @@ const SLIPPAGE = 2.0;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.05;
-const TRADE_ITERATIONS = 1;
 let JITOTIP = 0.1;
 
 const WORKER_CONFIG = workerData as common.WorkerConfig;
 const RPCS = process.env.RPCS?.split(',') || [];
-global.endpoint = new Solana({ endpointUrl: RPCS[WORKER_CONFIG.id % RPCS?.length] });
+global.connection = new Connection(RPCS[WORKER_CONFIG.id % RPCS?.length], 'confirmed');
 
-
+var TRADE_ITERATIONS = 3;
 var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;
 var IS_DONE = false;
@@ -24,6 +23,7 @@ var CURRENT_BUY_AMOUNT = 0;
 var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
+var IS_BUMP = false;
 
 function sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
@@ -54,7 +54,7 @@ const buy = async () => {
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+                const context = await global.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -84,7 +84,12 @@ const buy = async () => {
             }
             await Promise.allSettled(transactions);
 
-            CURRENT_BUY_AMOUNT = (WORKER_CONFIG.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
+            if (IS_BUMP) {
+                CURRENT_SPENDINGS -= amount;
+                CURRENT_BUY_AMOUNT = MIN_BUY;
+            } else {
+                CURRENT_BUY_AMOUNT = (WORKER_CONFIG.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
+            }
         } catch (e) {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Error buying the token (${e}), retrying...`);
         }
@@ -107,7 +112,7 @@ const sell = async () => {
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await global.endpoint.connection.getLatestBlockhashAndContext('confirmed');
+                const context = await global.connection.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -170,6 +175,13 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
             } else {
                 MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Spend limit reached...`);
             }
+
+            if (IS_BUMP) {
+                const { promise, cancel } = sleep(5);
+                CANCEL_SLEEP = cancel;
+                await promise;
+                await sell();
+            }
         } else {
             MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Mint metadata not available`);
         }
@@ -201,6 +213,9 @@ async function main() {
     spend_limit -= MIN_BALANCE_THRESHOLD * LAMPORTS_PER_SOL;
     WORKER_CONFIG.inputs.spend_limit = spend_limit / LAMPORTS_PER_SOL;
 
+    IS_BUMP = WORKER_CONFIG.inputs.is_bump;
+    TRADE_ITERATIONS = IS_BUMP ? 1 : TRADE_ITERATIONS;
+
     parentPort?.postMessage(`[Worker ${workerData.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
 
     parentPort?.on('message', async (msg) => {
@@ -209,6 +224,7 @@ async function main() {
             CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONFIG.inputs.start_buy, std).toFixed(5));
             if (CURRENT_BUY_AMOUNT > WORKER_CONFIG.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONFIG.inputs.spend_limit;
             if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
+            if (IS_BUMP) CURRENT_BUY_AMOUNT = MIN_BUY;
             await control_loop();
             parentPort?.postMessage(`[Worker ${workerData.id}] Finished`);
             process.exit(0);

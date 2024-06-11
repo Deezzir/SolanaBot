@@ -21,6 +21,7 @@ export interface BotConfig {
     spend_limit: number;
     start_buy: number;
     mcap_threshold: number;
+    is_bump: boolean;
     action: Action;
     token_name: string;
     token_ticker: string;
