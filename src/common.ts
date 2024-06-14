@@ -12,8 +12,22 @@ dotenv.config();
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
+const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
-export type Priority = "low" | "medium" | "high" | "extreme"
+export enum PriorityLevel {
+    MIN = "Min",
+    LOW = "Low",
+    MEDIUM = "Medium",
+    HIGH = "High",
+    VERY_HIGH = "VeryHigh",
+    UNSAFE_MAX = "UnsafeMax",
+    DEFAULT = "Default"
+}
+
+export type PriorityOptions = {
+    accounts?: string[];
+    priority_level: PriorityLevel;
+}
 
 export interface BotConfig {
     thread_cnt: number;
@@ -404,4 +418,33 @@ export function setup_readline(): void {
 
 export function round_two(num: number): number {
     return Math.round((num + Number.EPSILON) * 100) / 100;
+}
+
+export async function fetch_mint(mint: string): Promise<TokenMeta> {
+    return fetch(`${FETCH_MINT_API_URL}/coins/${mint}`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return {} as TokenMeta;
+            return data as TokenMeta;
+        })
+        .catch(err => {
+            error(`[ERROR] Failed fetching the mint: ${err}`);
+            return {} as TokenMeta;
+        });
+}
+
+export async function fetch_random_mints(count: number): Promise<TokenMeta[]> {
+    const limit = 50;
+    const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
+    return fetch(`${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return [] as TokenMeta[];
+            const shuffled = data.sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, count) as TokenMeta[];
+        })
+        .catch(err => {
+            error(`[ERROR] Failed fetching the mints: ${err}`);
+            return [] as TokenMeta[];
+        });
 }

@@ -9,8 +9,8 @@ import * as run from './run.js';
 import * as commands from './commands.js';
 import * as drop from './drop.js';
 import { exit } from 'process';
-import { Solana } from '@quicknode/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { Helius } from "helius-sdk";
 dotenv.config({ path: './.env' });
 
 //------------------------------------------------------------
@@ -27,17 +27,16 @@ async function main() {
     let workers = new Array<common.WorkerPromise>();
     const keys_cnt = await common.count_keys(trade.KEYS_DIR) - 1;
 
-    const rpcs = process.env.RPCS?.split(',') || [];
-    const rpc = rpcs[Math.floor(Math.random() * rpcs?.length)];
-
-    global.connection = new Connection(rpc, 'confirmed');
-    global.endpoint = new Solana({ endpointUrl: rpc });
+    const helius_rpc = process.env.RPC || '';
+    global.connection = new Connection(helius_rpc, 'confirmed');
+    global.helius_connection = new Helius(process.env.HELIUS_API_KEY || '');
 
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
 
-    common.log(`Using RPC: ${rpc}\n`);
+    common.log(`Using RPC: ${helius_rpc}\n`);
+
     program
         .version('1.0.0')
         .description('Solana Buy Bot CLI');

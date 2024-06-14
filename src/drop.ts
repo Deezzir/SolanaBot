@@ -48,7 +48,9 @@ async function send_tokens(
         token_amount
     ));
 
-    return await trade.create_and_send_tx(instructions, payer, [payer], context, 1, { level: 'low' });
+    return await trade.create_and_send_tx(instructions, [payer],
+        { priority_level: common.PriorityLevel.MEDIUM, accounts: ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'] }
+    );
 }
 
 
@@ -179,7 +181,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
         let records = await collection?.find({ tx: null }).limit(RECORDS_PER_ITERATION).toArray();
         if (!records || records.length === 0) {
             console.log("No records to process");
-            return;
+            return; ``
         }
 
         const drop_assoc_addr = await trade.calc_assoc_token_addr(drop.publicKey, mint_meta.mint);
@@ -207,7 +209,6 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
                 const token_amount = record.tokensToSend;
                 const xUsername = record.xUsername;
                 const token_amount_raw = token_amount * (10 ** mint_meta.token_decimals);
-                // const receiver_assoc_addr = await trade.create_assoc_token_account(drop, receiver, mint_meta.mint);
 
                 console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`);
                 transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop, context)

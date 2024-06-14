@@ -115,7 +115,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                     message: 'Enter the mint public key:',
                     validate: async (input) => {
                         if (!common.is_valid_pubkey(input)) return "Please enter a valid public key.";
-                        const meta = await trade.fetch_mint(input);
+                        const meta = await common.fetch_mint(input);
                         if (Object.keys(meta).length === 0) return "Failed fetching the mint data with the public key.";
                         return true;
                     },
@@ -198,7 +198,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
         SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
-            if (logs && logs.includes('Program log: Create')) {
+            if (logs && logs.includes('Program log: Instruction: Create')) {
                 try {
                     const tx = await global.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
                     if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
