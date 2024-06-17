@@ -145,7 +145,7 @@ async function get_priority_fee(priority: common.PriorityOptions): Promise<numbe
             priorityLevel: priority.priority_level,
         }
     });
-    return response.priorityFeeEstimate || 0;
+    return Math.floor(response.priorityFeeEstimate || 0);
 }
 
 async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[],) {
