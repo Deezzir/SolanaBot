@@ -349,8 +349,20 @@ export async function send_tokens(
 
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
     try {
-        let account = await getOrCreateAssociatedTokenAccount(global.connection, payer, mint, owner, false, 'confirmed', { skipPreflight: false, preflightCommitment: 'confirmed' });
-        return account.address;
+        const assoc_address = await calc_assoc_token_addr(owner, mint);
+        if (!(await check_account_exists(assoc_address))) {
+            let instructions: TransactionInstruction[] = [];
+            instructions.push(
+                createAssociatedTokenAccountInstruction(
+                    payer.publicKey,
+                    assoc_address,
+                    owner,
+                    mint
+                )
+            );
+            await create_and_send_smart_tx(instructions, [payer]);
+        }
+        return assoc_address;
     } catch (err) {
         throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
     }

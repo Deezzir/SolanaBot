@@ -292,7 +292,7 @@ async function main() {
             return new PublicKey(value);
         })
         .description('Collect all the token by the mint from the accounts to the provided address')
-        .action(commands.collect_token);
+        .action((mint, address) => commands.collect_token(mint, address));
 
     program
         .command('topup')
