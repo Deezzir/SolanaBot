@@ -4,7 +4,7 @@ import * as common from './common.js';
 import * as trade from './trade.js';
 import { Helius } from 'helius-sdk';
 
-const SLIPPAGE = 2.0;
+const SLIPPAGE = 0.25;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.05;

@@ -9,7 +9,7 @@ import path from 'path';
 import { Wallet } from '@project-serum/anchor';
 dotenv.config({ path: './.env' });
 
-const META_UPDATE_INTERVAL = 1000;
+const META_UPDATE_INTERVAL = 500;
 
 export async function clean(keys_cnt: number): Promise<void> {
     common.log('Cleaning all the accounts...\n');

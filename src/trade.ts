@@ -293,7 +293,7 @@ function get_solana_amount_raw(amount: number, token: Partial<common.TokenMeta>)
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {
     const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 + slippage) + lamports * (1 + slippage) / 1000);
+    return Math.round(lamports * (1 + slippage));
 }
 
 function calc_slippage_down(sol_amount: number, slippage: number): number {
