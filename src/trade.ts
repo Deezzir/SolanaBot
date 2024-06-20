@@ -548,7 +548,7 @@ export async function create_token_with_buy(
         mint: mint.publicKey.toString(),
         bonding_curve: instructions[0].keys[2].pubkey.toString(),
         associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
-        market_cap: 27.967381664,
+        market_cap: 27.95,
         total_supply: BigInt(1000000000000000),
     };
 

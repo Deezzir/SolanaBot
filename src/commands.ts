@@ -556,6 +556,7 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
                     bonding_curve: bonding.toString(),
                     associated_bonding_curve: assoc_bonding.toString(),
                     market_cap: 27.95,
+                    total_supply: BigInt(1000000000000000)
                 };
                 run.worker_post_message(workers, 'mint', default_mint_meta);
             }
