@@ -1,6 +1,7 @@
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext, ComputeBudgetInstruction, ComputeBudgetProgram, Commitment } from '@solana/web3.js';
-import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddress, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext, ComputeBudgetProgram, Commitment } from '@solana/web3.js';
+import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddress, getMint } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
+import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
 import BN, { max } from 'bn.js';
@@ -8,8 +9,6 @@ import * as common from './common.js';
 import * as jito from 'jito-ts';
 import path from 'path';
 import bs58 from 'bs58';
-import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
-import { UiTransactionEncoding } from 'helius-sdk';
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
 export const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
@@ -40,7 +39,6 @@ const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-eng
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
-const PRIORITY_MICRO_LAMPORTS = 666666;
 const MAX_RETRIES = 2;
 
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
@@ -498,13 +496,21 @@ function create_data(token_name: string, token_ticker: string, meta_link: string
     return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
 }
 
+export function calc_token_bonding_curve(mint: PublicKey): [PublicKey, number] {
+    return PublicKey.findProgramAddressSync([BONDING_ADDR, mint.toBuffer()], TRADE_PROGRAM_ID);
+}
+
+export function calc_token_assoc_bonding_curve(mint: PublicKey, bonding: PublicKey): [PublicKey, number] {
+    return PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
+}
+
 export async function get_create_token_instructions(
     creator: Signer, meta: common.IPFSMetadata, cid: string, mint: Keypair,
 ): Promise<TransactionInstruction[]> {
     const meta_link = `${common.IPFS}${cid}`;
     const instruction_data = create_data(meta.name, meta.symbol, meta_link);
-    const [bonding] = PublicKey.findProgramAddressSync([BONDING_ADDR, mint.publicKey.toBuffer()], TRADE_PROGRAM_ID);
-    const [assoc_bonding] = PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
+    const [bonding] = calc_token_bonding_curve(mint.publicKey);
+    const [assoc_bonding] = calc_token_assoc_bonding_curve(mint.publicKey, bonding);
     const [metaplex] = PublicKey.findProgramAddressSync([META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()], METAPLEX_TOKEN_META);
 
     let instructions: TransactionInstruction[] = [];

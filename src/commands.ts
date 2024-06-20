@@ -545,6 +545,19 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
             if (mint_meta.usd_market_cap) {
                 common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
                 run.worker_post_message(workers, 'mint', mint_meta);
+            } else {
+                common.log(`[Main Worker] No MCAP data available, using the default values`);
+                const [bonding] = trade.calc_token_bonding_curve(mint);
+                const [assoc_bonding] = trade.calc_token_assoc_bonding_curve(mint, bonding);
+                const default_mint_meta: Partial<common.TokenMeta> = {
+                    mint: mint.toString(),
+                    symbol: 'Unknown',
+                    raydium_pool: null,
+                    bonding_curve: bonding.toString(),
+                    associated_bonding_curve: assoc_bonding.toString(),
+                    market_cap: 27.95,
+                };
+                run.worker_post_message(workers, 'mint', default_mint_meta);
             }
         }
     }
