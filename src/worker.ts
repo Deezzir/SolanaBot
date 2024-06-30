@@ -52,8 +52,11 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         }
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`);
         return true;
-    } catch (error) {
+    } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
+        if (error instanceof Error && error.message.includes('Simulation failed')) {
+            await sleep(0.5).promise;
+        }
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Failed to buy the token (${error}), retrying...`);
         return false;
     }

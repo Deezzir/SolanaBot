@@ -1,10 +1,10 @@
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext, ComputeBudgetProgram, Commitment } from '@solana/web3.js';
 import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddress, getMint } from '@solana/spl-token';
 import { Metaplex } from "@metaplex-foundation/js";
-import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
+import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID, MarketV2 } from '@raydium-io/raydium-sdk';
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
-import BN, { max } from 'bn.js';
+import BN from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import path from 'path';
@@ -172,7 +172,7 @@ export async function create_and_send_tx(
     versioned_tx.sign(signers);
 
     const signature = await global.connection.sendTransaction(versioned_tx, {
-        skipPreflight: true,
+        skipPreflight: false,
         preflightCommitment: 'confirmed',
         // maxRetries: MAX_RETRIES,
     });
@@ -540,8 +540,8 @@ export async function get_create_token_instructions(
 
 export async function create_token_with_buy(
     creator: Signer, meta: common.IPFSMetadata, cid: string,
-    mint: Keypair = Keypair.generate(), sol_amount?: number, priority?: common.PriorityLevel
-): Promise<[String, String, PublicKey]> {
+    mint: Keypair = Keypair.generate(), sol_amount?: number, priority: common.PriorityLevel = common.PriorityLevel.MEDIUM
+): Promise<[String, PublicKey]> {
     let instructions = await get_create_token_instructions(creator, meta, cid, mint);
 
     const token_meta: Partial<common.TokenMeta> = {
@@ -558,31 +558,16 @@ export async function create_token_with_buy(
     }
 
     let create_sig: String;
-    let sell_sig: String;
 
     try {
-        create_sig = await create_and_send_smart_tx(instructions, [creator]);
+        const priority_options = { priority_level: priority, accounts: [TRADE_PROGRAM_ID.toString()] };
+        create_sig = await create_and_send_tx(instructions, [creator, mint], priority_options);
         common.log(`Token created | Signature: ${create_sig}`);
     } catch (err) {
         throw new Error(`${err}`);
     }
 
-    while (true) {
-        try {
-            const token_amount: TokenAmount = {
-                uiAmount: 10000,
-                amount: (10000 * 10 ** 6).toString(),
-                decimals: 6,
-            }
-            sell_sig = await sell_token(token_amount, creator, token_meta, 0.5, priority);
-            break;
-        } catch (err) {
-            // throw new Error(`Failed to sell the token: ${err}, Create signature: ${create_sig}`);
-            await common.sleep(200);
-        }
-    }
-
-    return [create_sig, sell_sig, mint.publicKey];
+    return [create_sig, mint.publicKey];
 }
 
 export async function create_token(

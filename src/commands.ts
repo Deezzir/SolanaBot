@@ -77,8 +77,8 @@ export async function create_token(cid: string, keypair_path: string, dev_buy?: 
     }
 
     try {
-        const [sig, sig_sell, mint_addr] = await trade.create_token_with_buy(creator, meta, cid, mint, dev_buy)
-        common.log(`Create Signature: ${sig.toString().padEnd(88, ' ')} | Sell Signature: ${sig_sell.toString().padEnd(88, ' ')}\nMint: ${mint_addr}`)
+        const [sig, mint_addr] = await trade.create_token_with_buy(creator, meta, cid, mint, dev_buy)
+        common.log(`Create Signature: ${sig.toString().padEnd(88, ' ')}\nMint: ${mint_addr}`)
     } catch (err) {
         common.error('[ERROR] Failed to create token: ' + err);
     }
