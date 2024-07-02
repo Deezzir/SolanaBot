@@ -15,7 +15,7 @@ const RPC = process.env.RPC || '';
 global.connection = new Connection(RPC, 'confirmed');
 global.helius_connection = new Helius(process.env.HELIUS_API_KEY || '');
 
-var TRADE_ITERATIONS = 3;
+var TRADE_ITERATIONS = 2;
 var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;
 var IS_DONE = false;
@@ -56,6 +56,8 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
         if (error instanceof Error && error.message.includes('Simulation failed')) {
             await sleep(0.5).promise;
+            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Simulation failed, retrying...`);
+            return false;
         }
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Failed to buy the token (${error}), retrying...`);
         return false;
@@ -163,6 +165,7 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
             }
             if (CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
                 await buy();
+                if (WORKER_CONF.inputs.is_once) break;
             } else {
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
             }

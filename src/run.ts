@@ -38,6 +38,12 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 default: false
             },
             {
+                type: 'confirm',
+                name: 'is_once',
+                message: 'Do you want to buy only once?',
+                default: false
+            },
+            {
                 type: 'input',
                 name: 'buy_interval',
                 message: 'Enter the interval between each buy in seconds:',
