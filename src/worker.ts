@@ -78,7 +78,7 @@ const buy = async () => {
         let transactions = [];
         let count = TRADE_ITERATIONS;
         while (count > 0) {
-            const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
+            const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
             transactions.push(
                 process_buy_tx(buy_promise, amount).then(result => {
                     if (result) bought = true;
@@ -135,7 +135,7 @@ const sell = async () => {
 
             while (count > 0 && balance !== undefined) {
                 if (MINT_METADATA.raydium_pool === null) {
-                    const sell_promise = trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
+                    const sell_promise = trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -143,7 +143,7 @@ const sell = async () => {
                     );
                 } else {
                     const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    const sell_promise = trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
+                    const sell_promise = trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
