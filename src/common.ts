@@ -36,7 +36,7 @@ export interface BotConfig {
     start_buy: number;
     mcap_threshold: number;
     is_bump: boolean;
-    is_once: boolean;
+    is_buy_once: boolean;
     action: Action;
     token_name: string;
     token_ticker: string;

@@ -34,7 +34,6 @@ async function main() {
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
-
     common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
@@ -174,7 +173,7 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${trade.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
@@ -182,12 +181,16 @@ async function main() {
             const parsedValue = parseInt(value);
             if (isNaN(parsedValue))
                 throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
             return parsedValue;
         })
         .option('-M, --max <value>', 'Maximum amount of tokens for each key', (value) => {
             const parsedValue = parseInt(value);
             if (isNaN(parsedValue))
                 throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 1 || parsedValue > 50)
+                throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50')
             return parsedValue;
         })
         .action((options) => {
@@ -250,7 +253,7 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${trade.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
@@ -267,6 +270,8 @@ async function main() {
             const parsedValue = parseFloat(value);
             if (isNaN(parsedValue))
                 throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 0)
+                throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
             return parsedValue;
         })
         .argument('<address>', 'Public address of the receiver', (value) => {
@@ -300,6 +305,8 @@ async function main() {
             const parsedValue = parseFloat(value);
             if (isNaN(parsedValue))
                 throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 0)
+                throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
             return parsedValue;
         })
         .argument('<keypair_path>', 'Path to the keypair file')
@@ -315,7 +322,7 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${trade.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path) || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
@@ -354,6 +361,8 @@ async function main() {
             const parsedValue = parseInt(value);
             if (isNaN(parsedValue))
                 throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
             return parsedValue;
         })
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')

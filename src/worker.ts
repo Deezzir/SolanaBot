@@ -8,14 +8,14 @@ const SLIPPAGE = 0.25;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.05;
-let JITOTIP = 0.1;
 
 const WORKER_CONF = workerData as common.WorkerConfig;
 const RPC = process.env.RPC || '';
 global.connection = new Connection(RPC, 'confirmed');
 global.helius_connection = new Helius(process.env.HELIUS_API_KEY || '');
 
-var TRADE_ITERATIONS = 2;
+var MAX_RETRIES = 5;
+var TRADE_ITERATIONS = 1;
 var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;
 var IS_DONE = false;
@@ -26,7 +26,11 @@ var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 var IS_BUMP = false;
 
-function sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
+async function sleep(seconds: number) {
+    return new Promise(resolve => setTimeout(resolve, seconds * 1000));
+}
+
+function control_sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
     let cancel: () => void = () => { };
 
@@ -55,7 +59,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
     } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
         if (error instanceof Error && error.message.includes('Simulation failed')) {
-            await sleep(0.5).promise;
+            await sleep(0.5);
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Simulation failed, retrying...`);
             return false;
         }
@@ -74,14 +78,14 @@ const buy = async () => {
         let transactions = [];
         let count = TRADE_ITERATIONS;
         while (count > 0) {
-            const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+            const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
             transactions.push(
                 process_buy_tx(buy_promise, amount).then(result => {
                     if (result) bought = true;
                 })
             );
             count--;
-            await sleep(0.5).promise;
+            await sleep(1);
         }
         await Promise.allSettled(transactions);
 
@@ -101,7 +105,7 @@ async function process_sell_tx(promise: Promise<String>, balance: TokenAmount) {
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sold ${ui_amount} tokens. Signature: ${sig}`);
         return true;
     } catch (e) {
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, retrying...`);
+        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, ${e} retrying...`);
         return false;
     }
 }
@@ -111,18 +115,27 @@ const sell = async () => {
     let sold: boolean = false;
     while (!sold) {
         try {
-            const balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
-            if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell`);
-                break;
+            let get_balance_retry = 0;
+            let balance: TokenAmount | undefined = undefined;
+
+            while (get_balance_retry < MAX_RETRIES) {
+                balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
+                if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
+                get_balance_retry++;
+                if (get_balance_retry < MAX_RETRIES) MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
+                if (get_balance_retry === MAX_RETRIES) {
+                    MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
+                    sold = true;
+                }
+                await sleep(1);
             }
 
             let transactions = [];
             let count = TRADE_ITERATIONS;
 
-            while (count > 0) {
+            while (count > 0 && balance !== undefined) {
                 if (MINT_METADATA.raydium_pool === null) {
-                    const sell_promise = trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -130,7 +143,7 @@ const sell = async () => {
                     );
                 } else {
                     const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    const sell_promise = trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, SLIPPAGE, common.PriorityLevel.VERY_HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -138,7 +151,7 @@ const sell = async () => {
                     );
                 }
                 count--;
-                await sleep(0.5).promise;
+                await sleep(1);
             }
             await Promise.allSettled(transactions);
         } catch (e) {
@@ -148,105 +161,117 @@ const sell = async () => {
 }
 
 const control_loop = async () => new Promise<void>(async (resolve) => {
-    while (!IS_DONE) {
-        if (MINT_METADATA !== undefined && MINT_METADATA !== null && Object.keys(MINT_METADATA).length !== 0) {
-            if (WORKER_CONF.inputs.mcap_threshold <= MINT_METADATA.usd_market_cap) {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
-                START_SELL = true;
-                break;
-            }
-            // if (MINT_METADATA.usd_market_cap >= 45000) {
-            //     CURRENT_BUY_AMOUNT = MIN_BUY;
-            //     JITOTIP = 0.05;
-            // }
-            if (MINT_METADATA.raydium_pool !== null) {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Raydium pool detected, skipping...`);
-                continue;
-            }
-            if (CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD) {
-                await buy();
-                if (WORKER_CONF.inputs.is_once) break;
-            } else {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
-            }
+    const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.inputs.mcap_threshold;
+    const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
+    const process = async () => {
+        if (should_sell()) {
+            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
+            START_SELL = true;
+            return true;
+        }
 
-            if (IS_BUMP) {
-                const { promise, cancel } = sleep(5);
-                CANCEL_SLEEP = cancel;
-                await promise;
-                await sell();
-            }
+        // if (MINT_METADATA.usd_market_cap >= 45000) CURRENT_BUY_AMOUNT = MIN_BUY;
+
+        if (MINT_METADATA.raydium_pool !== null) {
+            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Raydium pool detected, skipping...`);
+            await sleep(1);
+            return false;
+        }
+
+        if (should_buy()) {
+            await buy();
+            if (WORKER_CONF.inputs.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.inputs.spend_limit;
+        } else {
+            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
+        }
+
+        if (IS_BUMP) {
+            await sleep(1);
+            await sell();
+        }
+
+        return false;
+    };
+
+    while (!IS_DONE) {
+        if (MINT_METADATA && Object.keys(MINT_METADATA).length !== 0) {
+            if (await process()) break;
         } else {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Mint metadata not available`);
         }
 
-        const sleep_for = common.normal_random(WORKER_CONF.inputs.buy_interval, 5);
+        const sleep_for = common.normal_random(WORKER_CONF.inputs.buy_interval, 0.5 * WORKER_CONF.inputs.buy_interval);
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
         parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+
         if (!IS_DONE) {
-            const { promise, cancel } = sleep(sleep_for);
+            const { promise, cancel } = control_sleep(sleep_for);
             CANCEL_SLEEP = cancel;
             await promise;
         }
         MESSAGE_BUFFER = [];
     }
-    if (START_SELL)
-        await sell();
+
+    if (START_SELL) await sell();
+
     parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
     resolve();
 });
 
 async function main() {
     WORKER_KEYPAIR = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
-    const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey);
-    let spend_limit = WORKER_CONF.inputs.spend_limit * LAMPORTS_PER_SOL;
+    const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
+    const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
 
-    if (balance < spend_limit)
-        spend_limit = balance;
-
-    spend_limit -= MIN_BALANCE_THRESHOLD * LAMPORTS_PER_SOL;
-    WORKER_CONF.inputs.spend_limit = spend_limit / LAMPORTS_PER_SOL;
-
+    WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
     IS_BUMP = WORKER_CONF.inputs.is_bump;
     TRADE_ITERATIONS = IS_BUMP ? 1 : TRADE_ITERATIONS;
 
     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
 
     parentPort?.on('message', async (msg) => {
-        if (msg.command === 'buy') {
-            const std = WORKER_CONF.inputs.start_buy * 0.05;
-            CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONF.inputs.start_buy, std).toFixed(5));
-            if (CURRENT_BUY_AMOUNT > WORKER_CONF.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.inputs.spend_limit;
-            if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
-            if (IS_BUMP) CURRENT_BUY_AMOUNT = MIN_BUY;
-            await control_loop();
-            parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
-            process.exit(0);
-        }
-        if (msg.command === 'sell') {
-            if (!START_SELL) {
-                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);
-                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
-                IS_DONE = true;
-                START_SELL = true;
-            }
-        }
-        if (msg.command === 'collect') {
-            if (!IS_DONE) {
-                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received collect command from the main thread`);
-                IS_DONE = true;
-                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
-            }
-        }
-        if (msg.command === 'stop') {
-            if (!IS_DONE) {
-                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Stopped by the main thread`);
-                IS_DONE = true;
-                if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
-            }
-        }
-        if (msg.command === 'mint') {
-            MINT_METADATA = msg.data;
+        switch (msg.command) {
+            case 'buy':
+                const std = WORKER_CONF.inputs.start_buy * 0.05;
+                CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONF.inputs.start_buy, std).toFixed(5));
+
+                if (CURRENT_BUY_AMOUNT > WORKER_CONF.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.inputs.spend_limit;
+                if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
+                if (IS_BUMP) CURRENT_BUY_AMOUNT = MIN_BUY;
+
+                await control_loop();
+
+                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
+                process.exit(0)
+                break;
+            case 'sell':
+                if (!START_SELL) {
+                    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);
+                    if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
+                    IS_DONE = true;
+                    START_SELL = true;
+                }
+                break;
+            case 'collect':
+                if (!IS_DONE) {
+                    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received collect command from the main thread`);
+                    IS_DONE = true;
+                    if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
+                }
+                break;
+            case 'stop':
+                if (!IS_DONE) {
+                    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Stopped by the main thread`);
+                    IS_DONE = true;
+                    if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
+                }
+                break;
+            case 'mint':
+                MINT_METADATA = msg.data;
+                break;
+            default:
+                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Unknown command from the main thread: ${msg.command}`);
+                break;
         }
     });
 }

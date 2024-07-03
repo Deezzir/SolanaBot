@@ -57,7 +57,7 @@ export async function create_token(cid: string, keypair_path: string, dev_buy?: 
     try {
         creator = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
         const balance = await trade.get_balance(creator.publicKey) / LAMPORTS_PER_SOL;
-        common.log(`Creator address: ${creator.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
+        common.log(`Dev address: ${creator.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
 
         if (dev_buy && dev_buy > balance) {
             common.error(`[ERROR] Creator balance is not enough to buy ${dev_buy} SOL`);
@@ -66,19 +66,23 @@ export async function create_token(cid: string, keypair_path: string, dev_buy?: 
 
         if (mint_keypair_path) {
             mint = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(mint_keypair_path, 'utf8'))));
-            common.log(`Mint address: ${mint.publicKey.toString()}`);
+            common.log(`Custom Mint address: ${mint.publicKey.toString()}`);
         }
 
         meta = await common.fetch_ipfs_json(cid) as common.IPFSMetadata;
-        common.log(`Token name: ${meta.name} | Symbol: ${meta.symbol}\n`);
+        common.log(`Token name: ${meta.name} | Symbol: ${meta.symbol}`);
     } catch (err) {
         common.error('[ERROR] Failed to process: ' + err);
         return;
     }
 
+    common.log(`Token Meta: ${JSON.stringify(meta, null, 2)}`)
+    console.log(`Dev Buy: ${dev_buy || 0}\n`);
+
     try {
         const [sig, mint_addr] = await trade.create_token_with_buy(creator, meta, cid, mint, dev_buy)
-        common.log(`Create Signature: ${sig.toString().padEnd(88, ' ')}\nMint: ${mint_addr}`)
+        common.log(`Token created | Signature: ${sig}`);
+        common.log(`Mint address: ${mint_addr}`);
     } catch (err) {
         common.error('[ERROR] Failed to create token: ' + err);
     }
@@ -110,7 +114,7 @@ export async function promote(times: number, cid: string, keypair_path: string):
             .catch(error => common.error(`Transaction failed: ${error.message}`)));
 
         count--;
-        await common.sleep(500);
+        await common.sleep(100);
     }
 
     await Promise.allSettled(transactions);
@@ -157,9 +161,6 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender_p
         common.error(`[ERROR] Sender balance is not enough to transfer ${amount} SOL`);
         return;
     }
-
-    const context = await global.connection.getLatestBlockhashAndContext('confirmed');
-
     trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, common.PriorityLevel.VERY_HIGH)
         .then(signature => common.log(`Transaction completed, signature: ${signature}`))
         .catch(error => common.error(`Transaction failed: ${error.message}`));
@@ -220,7 +221,7 @@ export async function sell_token_once(mint: PublicKey, keypair_path: string): Pr
     } else {
         let success = false;
         const amm = new PublicKey(mint_meta.raydium_pool);
-        trade.swap_raydium(token_amount, seller, amm, trade.SOL_MINT, 0.5)
+        trade.swap_raydium(token_amount, seller, amm, trade.SOL_MINT, 1.5)
             .then(signature => {
                 common.log(`Raydium Transaction completed, signature: ${signature}`);
                 success = true;
@@ -269,7 +270,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, keypair_pa
             amount: (amount * LAMPORTS_PER_SOL).toString(),
             decimals: 9,
         };
-        trade.swap_raydium(token_amount, buyer, amm, mint, 0.5)
+        trade.swap_raydium(token_amount, buyer, amm, mint, 1.5)
             .then(signature => {
                 common.log(`Raydium Transaction completed, signature: ${signature}`);
                 success = true;
@@ -399,7 +400,7 @@ export async function collect(address: PublicKey, reserve: boolean): Promise<voi
             .catch(error => common.error(`Transaction failed for ${file}: ${error.message}`)));
 
         count--;
-        await common.sleep(500);
+        await common.sleep(100);
     }
 
     await Promise.allSettled(transactions);
@@ -436,7 +437,7 @@ export async function collect_token(mint: PublicKey, receiver: PublicKey): Promi
                 .catch(error => common.error(`Transaction failed for ${file}: ${error.message}`)));
 
             count--;
-            await common.sleep(500);
+            await common.sleep(100);
         }
 
         await Promise.allSettled(transactions);
@@ -482,7 +483,7 @@ export async function sell_token(mint: PublicKey, list?: number[]): Promise<void
                     .catch(error => common.error(`Transaction failed for ${file}: ${error.message}`)));
             }
             count--;
-            await common.sleep(500);
+            await common.sleep(100);
         }
 
         await Promise.allSettled(transactions);
@@ -532,7 +533,7 @@ export async function topup(amount: number, keypair_path: string, keys_cnt: numb
             .catch(error => common.error(`Transaction failed for ${file}: ${error.message}`)));
 
         count--;
-        await common.sleep(500);
+        await common.sleep(100);
     }
     await Promise.allSettled(transactions);
 }
@@ -576,7 +577,7 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
             await worker_update_mint(workers, bot_config.mint);
             const interval = setInterval(async () => { if (bot_config.mint) worker_update_mint(workers, bot_config.mint) }, META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(workers, 'buy') }, 500);
+            setTimeout(() => { run.worker_post_message(workers, 'buy') }, 2000);
             await run.wait_for_workers(workers);
             clearInterval(interval);
 

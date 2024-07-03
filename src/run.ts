@@ -39,7 +39,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
             },
             {
                 type: 'confirm',
-                name: 'is_once',
+                name: 'is_buy_once',
                 message: 'Do you want to buy only once?',
                 default: false
             },

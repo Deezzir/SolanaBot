@@ -174,7 +174,7 @@ export async function create_and_send_tx(
     const signature = await global.connection.sendTransaction(versioned_tx, {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
-        // maxRetries: MAX_RETRIES,
+        maxRetries: MAX_RETRIES,
     });
 
     await check_transaction_status(signature, ctx);
@@ -249,7 +249,7 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
     let ata = await getAssociatedTokenAddress(
         mint,
         owner,
-        false
+        true
     );
     return ata;
 }
@@ -277,16 +277,16 @@ export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> 
     throw new Error(`Failed to get the token metadata.`);
 }
 
-function get_token_amount_raw(amount: number, token: Partial<common.TokenMeta>): number {
+function get_token_amount_raw(sol_amount: number, token: Partial<common.TokenMeta>): number {
     if (!token.total_supply || !token.market_cap) return 0;
     const sup = Number(token.total_supply);
-    return Math.round(amount * sup / token.market_cap);
+    return Math.round(sol_amount * sup / (token.market_cap + sol_amount));
 }
 
-function get_solana_amount_raw(amount: number, token: Partial<common.TokenMeta>): number {
+function get_solana_amount_raw(token_amount: number, token: Partial<common.TokenMeta>): number {
     if (!token.total_supply || !token.market_cap) return 0;
     const sup = Number(token.total_supply);
-    return amount * token.market_cap / (sup * 1_000_000);
+    return token_amount * token.market_cap / (sup * 1_000_000);
 }
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {
@@ -381,6 +381,8 @@ export async function get_buy_token_instructions(
     const instruction_data = buy_data(sol_amount, token_amount, slippage);
     const assoc_address = await calc_assoc_token_addr(buyer.publicKey, mint);
     const exists = await check_account_exists(assoc_address);
+    // TODO: Create account in advance
+    // TODO: Make a transfer to bloxroute for obfuscation
 
     let instructions: TransactionInstruction[] = [];
     if (!exists) {
@@ -549,7 +551,7 @@ export async function create_token_with_buy(
         bonding_curve: instructions[0].keys[2].pubkey.toString(),
         associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
         market_cap: 27.95,
-        total_supply: BigInt(1000000000000000),
+        total_supply: BigInt(1_000_000_000_000_000), // 1 * 10**9 * 10**6
     };
 
     if (sol_amount && sol_amount > 0) {
@@ -562,7 +564,6 @@ export async function create_token_with_buy(
     try {
         const priority_options = { priority_level: priority, accounts: [TRADE_PROGRAM_ID.toString()] };
         create_sig = await create_and_send_tx(instructions, [creator, mint], priority_options);
-        common.log(`Token created | Signature: ${create_sig}`);
     } catch (err) {
         throw new Error(`${err}`);
     }
