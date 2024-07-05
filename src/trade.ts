@@ -43,7 +43,7 @@ const MAX_RETRIES = 2;
 
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
-        let account_info = await getAccount(global.connection, account);
+        let account_info = await getAccount(global.CONNECTION, account);
         if (account_info && account_info.isInitialized) return true;
     } catch (error) {
         if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
@@ -56,7 +56,7 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
 
 export async function get_token_supply(mint: PublicKey): Promise<bigint> {
     try {
-        const mint_1 = await getMint(global.connection, mint, 'confirmed');
+        const mint_1 = await getMint(global.CONNECTION, mint, 'confirmed');
         return mint_1.supply;
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
@@ -65,7 +65,7 @@ export async function get_token_supply(mint: PublicKey): Promise<bigint> {
 }
 
 export async function get_balance(pubkey: PublicKey): Promise<number> {
-    return await global.connection.getBalance(pubkey);
+    return await global.CONNECTION.getBalance(pubkey);
 }
 
 function is_bundle_error<T>(value: T | Error): value is Error {
@@ -75,7 +75,7 @@ function is_bundle_error<T>(value: T | Error): value is Error {
 export async function create_and_send_tipped_tx(
     instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
     try {
-        const ctx = await global.connection.getLatestBlockhashAndContext('confirmed');
+        const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
 
         const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, RESERVE_KEYPAIR);
 
@@ -113,14 +113,14 @@ export async function create_and_send_tipped_tx(
 }
 
 async function is_blockhash_expired(lastValidBlockHeight: number): Promise<boolean> {
-    let currentBlockHeight = (await global.connection.getBlockHeight('confirmed'));
+    let currentBlockHeight = (await global.CONNECTION.getBlockHeight('confirmed'));
     return (currentBlockHeight > lastValidBlockHeight - 150);
 }
 
 async function check_transaction_status(signature: string, context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>): Promise<void> {
     const retry_interval = 2000;
     while (true) {
-        const { value: status } = await global.connection.getSignatureStatus(signature);
+        const { value: status } = await global.CONNECTION.getSignatureStatus(signature);
 
         if (status) {
             if ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') && status.err === null) {
@@ -137,7 +137,7 @@ async function check_transaction_status(signature: string, context: RpcResponseA
 }
 
 async function get_priority_fee(priority: common.PriorityOptions): Promise<number> {
-    const response = await global.helius_connection.rpc.getPriorityFeeEstimate({
+    const response = await global.HELIUS_CONNECTION.rpc.getPriorityFeeEstimate({
         accountKeys: priority.accounts,
         options: {
             priorityLevel: priority.priority_level,
@@ -147,14 +147,14 @@ async function get_priority_fee(priority: common.PriorityOptions): Promise<numbe
 }
 
 async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[],) {
-    return await global.helius_connection.rpc.sendSmartTransaction(instructions, signers, [], { skipPreflight: true, preflightCommitment: 'confirmed' });
+    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], { skipPreflight: true, preflightCommitment: 'confirmed' });
 }
 
 export async function create_and_send_tx(
     instructions: TransactionInstruction[], signers: Signer[], priority?: common.PriorityOptions
 ): Promise<String> {
     if (signers.length === 0) throw new Error(`[ERROR] No signers provided.`);
-    const ctx = await global.connection.getLatestBlockhashAndContext('confirmed');
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
 
     if (priority) {
         const fee = await get_priority_fee(priority);
@@ -171,7 +171,7 @@ export async function create_and_send_tx(
 
     versioned_tx.sign(signers);
 
-    const signature = await global.connection.sendTransaction(versioned_tx, {
+    const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
         maxRetries: MAX_RETRIES,
@@ -183,7 +183,7 @@ export async function create_and_send_tx(
 
 export async function get_balance_change(signature: string, address: PublicKey): Promise<number> {
     try {
-        const tx_details = await global.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        const tx_details = await global.CONNECTION.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
         if (!tx_details)
             throw new Error(`[ERROR] Transaction not found: ${signature}`);
         const balance_index = tx_details?.transaction.message.getAccountKeys().staticAccountKeys.findIndex((i) => i.equals(address));
@@ -255,14 +255,14 @@ export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): 
 }
 
 export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> {
-    const metaplex = Metaplex.make(global.connection);
+    const metaplex = Metaplex.make(global.CONNECTION);
 
     const metaplex_acc = metaplex
         .nfts()
         .pdas()
         .metadata({ mint });
 
-    const metaplex_acc_info = await global.connection.getAccountInfo(metaplex_acc);
+    const metaplex_acc_info = await global.CONNECTION.getAccountInfo(metaplex_acc);
 
     if (metaplex_acc_info) {
         const token = await metaplex.nfts().findByMint({ mintAddress: mint });
@@ -320,7 +320,7 @@ function sell_data(sol_amount: number, token_amount: number, slippage: number): 
 export async function get_token_balance(pubkey: PublicKey, mint: PublicKey, commitment: Commitment = 'finalized'): Promise<TokenAmount> {
     try {
         const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
-        const account_info = await global.connection.getTokenAccountBalance(assoc_addres, commitment);
+        const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
         return account_info.value;
     } catch (err) {
         return {
@@ -620,9 +620,9 @@ export async function swap_jupiter(
     var tx = VersionedTransaction.deserialize(swapTransactionBuf);
     tx.sign([wallet.payer]);
 
-    const signature = await connection.sendRawTransaction(tx.serialize())
-    const latestBlockHash = await connection.getLatestBlockhash()
-    await connection.confirmTransaction({
+    const signature = await CONNECTION.sendRawTransaction(tx.serialize())
+    const latestBlockHash = await CONNECTION.getLatestBlockhash()
+    await CONNECTION.confirmTransaction({
         blockhash: latestBlockHash.blockhash,
         lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
         signature: signature
@@ -631,7 +631,7 @@ export async function swap_jupiter(
 }
 
 export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
-    const token_accounts = await global.connection.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
+    const token_accounts = await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
     const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => {
         const mint = acc.data.mint;
@@ -705,7 +705,7 @@ async function get_swap_acc_intsruction(seller: Signer, token_acc: PublicKey, la
         basePubkey: seller.publicKey,
         fromPubkey: seller.publicKey,
         newAccountPubkey: token_acc,
-        lamports: await global.connection.getMinimumBalanceForRentExemption(165) + lamports,
+        lamports: await global.CONNECTION.getMinimumBalanceForRentExemption(165) + lamports,
         space: 165,
         programId: TOKEN_PROGRAM_ID,
     }));
@@ -803,10 +803,10 @@ async function create_raydium_swap_tx(
 };
 
 async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys | undefined> {
-    const ammAccount = await global.connection.getAccountInfo(amm);
+    const ammAccount = await global.CONNECTION.getAccountInfo(amm);
     if (ammAccount) {
         const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(ammAccount.data);
-        const marketAccount = await global.connection.getAccountInfo(poolState.marketId);
+        const marketAccount = await global.CONNECTION.getAccountInfo(poolState.marketId);
         if (marketAccount) {
             const marketState = MARKET_STATE_LAYOUT_V3.decode(marketAccount.data);
             const marketAuthority = PublicKey.createProgramAddressSync(
@@ -852,7 +852,7 @@ export async function swap_raydium(
 ): Promise<String> {
     const pool_keys = await get_raydium_poolkeys(amm);
     if (pool_keys) {
-        const pool_info = await Liquidity.fetchInfo({ connection: global.connection, poolKeys: pool_keys });
+        const pool_info = await Liquidity.fetchInfo({ connection: global.CONNECTION, poolKeys: pool_keys });
         const raw_slippage = slippage * 100;
         return create_raydium_swap_tx(amount, seller, swap_to, pool_keys, pool_info, raw_slippage, priority);
     }

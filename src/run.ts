@@ -202,11 +202,11 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         let mint: PublicKey;
         LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
         common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
-        SUBSCRIPTION_ID = global.connection.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
+        SUBSCRIPTION_ID = global.CONNECTION.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
             if (logs && logs.includes('Program log: Instruction: Create')) {
                 try {
-                    const tx = await global.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+                    const tx = await global.CONNECTION.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
                     if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
 
                     const inner_instructions = tx.meta.innerInstructions;
@@ -256,7 +256,7 @@ export async function wait_drop_unsub(): Promise<void> {
     if (SUBSCRIPTION_ID !== undefined) {
         if (LOGS_STOP_FUNCTION) LOGS_STOP_FUNCTION();
         if (FETCH_STOP_FUNCTION) FETCH_STOP_FUNCTION();
-        global.connection.removeOnLogsListener(SUBSCRIPTION_ID)
+        global.CONNECTION.removeOnLogsListener(SUBSCRIPTION_ID)
             .then(() => SUBSCRIPTION_ID = undefined)
             .catch(err => common.error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
     }
@@ -266,18 +266,19 @@ export async function start_workers(config: common.BotConfig, workers: common.Wo
     const keys = await common.get_keys(config.thread_cnt + 1, keys_dir, 1);
     if (keys.length === 0) {
         common.error('[ERROR] No keys available.');
-        global.rl.close();
+        global.RL.close();
     }
     if (!trade.check_has_balances(keys)) {
         common.error('[ERROR] First, topup the specified accounts.');
-        global.rl.close();
+        global.RL.close();
     }
+
     common.log('[Main Worker] Starting the workers...');
     for (let i = 0; i < config.thread_cnt; i++) {
         const key = keys.at(i);
         if (!key) {
             common.error(`[ERROR] Failed to get the key at index ${i}`);
-            global.rl.close();
+            global.RL.close();
         }
         const data: common.WorkerConfig = {
             secret: key ?? new Uint8Array(),

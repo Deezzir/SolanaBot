@@ -7,12 +7,12 @@ import { Helius } from 'helius-sdk';
 const SLIPPAGE = 0.25;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
-const MIN_BUY = 0.05;
+const MIN_BUY = 0.005;
 
 const WORKER_CONF = workerData as common.WorkerConfig;
 const RPC = process.env.RPC || '';
-global.connection = new Connection(RPC, 'confirmed');
-global.helius_connection = new Helius(process.env.HELIUS_API_KEY || '');
+global.CONNECTION = new Connection(RPC, 'confirmed');
+global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
 var MAX_RETRIES = 5;
 var TRADE_ITERATIONS = 1;
@@ -127,8 +127,10 @@ const sell = async () => {
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
                     sold = true;
                 }
-                await sleep(1);
+                await sleep(5);
             }
+
+            if (sold) break;
 
             let transactions = [];
             let count = TRADE_ITERATIONS;

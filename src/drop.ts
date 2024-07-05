@@ -194,7 +194,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
             let lastValidHeight = 0;
 
             while (count > 0) {
-                const context = await global.connection.getLatestBlockhashAndContext('confirmed');
+                const context = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -259,7 +259,7 @@ async function airdrop(percent: number, ui_balance: number, mint_meta: common.Mi
     console.log(`Airdrop | Total token amount of ${mint_meta.token_symbol}: ${airdrop_amount} | Record count: ${airdrop_count}`);
 
     common.setup_readline();
-    await new Promise<void>(resolve => global.rl.question('Press ENTER to start the airdrop...', () => resolve()));
+    await new Promise<void>(resolve => global.RL.question('Press ENTER to start the airdrop...', () => resolve()));
 
     console.log(`\nStarting Airdrop...`);
     await update_airdrop_balance(airdrop_amount);
@@ -279,7 +279,7 @@ async function presale(percent: number, ui_balance: number, mint_meta: common.Mi
         `Presale | Total Amount ${mint_meta.token_symbol}: ${presale_tokens} | Total SOL: ${presale_sol} | Record count: ${presale_count}`
     );
 
-    await new Promise<void>(resolve => global.rl.question('Press ENTER to start the presale...', () => resolve()));
+    await new Promise<void>(resolve => global.RL.question('Press ENTER to start the presale...', () => resolve()));
 
     console.log(`\nStarting Presale drop...`);
     await update_presale_balance(presale_tokens, presale_sol);
@@ -308,7 +308,7 @@ export async function drop(airdrop_percent: number, mint: PublicKey, keypair_pat
 
     try {
         await connect_db();
-        if (global.rl === undefined) common.setup_readline();
+        if (global.RL === undefined) common.setup_readline();
 
         if (presale_percent !== 0) await presale(presale_percent, ui_balance, mint_meta, drop);
         if (airdrop_percent !== 0) await airdrop(airdrop_percent, ui_balance, mint_meta, drop);

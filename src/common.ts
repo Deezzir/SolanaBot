@@ -221,14 +221,14 @@ export function log(message: string): void {
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
     console.log(message);
-    if (global.rl !== undefined) global.rl.prompt(true);
+    if (global.RL !== undefined) global.RL.prompt(true);
 }
 
 export function error(message: string): void {
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
     console.error(message);
-    if (global.rl !== undefined) global.rl.prompt(true);
+    if (global.RL !== undefined) global.RL.prompt(true);
 }
 
 export function filter_keys(files: string[]): string[] {
@@ -411,7 +411,7 @@ export async function create_metadata(meta: IPFSMetadata, image_path: string): P
 }
 
 export function setup_readline(): void {
-    global.rl = createInterface({
+    global.RL = createInterface({
         input: process.stdin,
         output: process.stdout
     });

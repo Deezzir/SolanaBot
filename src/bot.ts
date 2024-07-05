@@ -23,13 +23,13 @@ async function main() {
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
     let bot_config: common.BotConfig;
-    global.START_COLLECT = false;
     let workers = new Array<common.WorkerPromise>();
     const keys_cnt = await common.count_keys(trade.KEYS_DIR) - 1;
-
     const helius_rpc = process.env.RPC || '';
-    global.connection = new Connection(helius_rpc, 'confirmed');
-    global.helius_connection = new Helius(process.env.HELIUS_API_KEY || '');
+
+    global.START_COLLECT = false;
+    global.CONNECTION = new Connection(helius_rpc, 'confirmed');
+    global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
     const program = new Command();
 
@@ -69,18 +69,18 @@ async function main() {
                 bot_config = config;
                 console.table(common.BotConfigDisplay(bot_config));
                 common.setup_readline();
-                await new Promise<void>(resolve => global.rl.question('Press ENTER to start the bot...', () => resolve()));
+                await new Promise<void>(resolve => global.RL.question('Press ENTER to start the bot...', () => resolve()));
             } else {
                 bot_config = await run.get_config(keys_cnt);
                 common.clear_lines_up(1);
                 if (!bot_config) return;
             }
 
-            if (global.rl === undefined) common.setup_readline();
-            global.rl.setPrompt('Command (stop/config/collect/sell/set)> ');
-            global.rl.prompt(true);
+            if (global.RL === undefined) common.setup_readline();
+            global.RL.setPrompt('Command (stop/config/collect/sell/set)> ');
+            global.RL.prompt(true);
 
-            global.rl.on('line', async (line) => {
+            global.RL.on('line', async (line) => {
                 moveCursor(process.stdout, 0, -1);
                 clearLine(process.stdout, 0);
                 switch (line.trim().split(' ')[0]) {
@@ -129,7 +129,7 @@ async function main() {
                         common.log(`Unknown command: ${line.trim()}`);
                         break;
                 }
-                global.rl.prompt(true);
+                global.RL.prompt(true);
             }).on('close', () => {
                 common.log('[Main Worker] Stopping the bot...');
                 cursorTo(process.stdout, 0);
@@ -137,7 +137,7 @@ async function main() {
                 process.exit(0);
             });
             await commands.start(bot_config, workers)
-            global.rl.close();
+            global.RL.close();
         });
 
     program

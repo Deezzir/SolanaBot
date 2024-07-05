@@ -585,10 +585,10 @@ export async function start(bot_config: common.BotConfig, workers: common.Worker
                 await collect_token(bot_config.mint, bot_config.collect_address);
         } else {
             common.error('[ERROR] Token not found. Exiting...');
-            global.rl.close();
+            global.RL.close();
         }
     } catch (error) {
         common.error(`[ERROR] ${error}`);
-        global.rl.close();
+        global.RL.close();
     }
 }

@@ -5,9 +5,9 @@ import { Solana } from "@quicknode/sdk";
 import { Helius } from 'helius-sdk';
 
 declare global {
-    var rl: Interface;
-    var connection: Connection;
-    var helius_connection: Helius;
+    var RL: Interface;
+    var CONNECTION: Connection;
+    var HELIUS_CONNECTION: Helius;
     var START_COLLECT: boolean;
 }
 
