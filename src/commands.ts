@@ -124,6 +124,7 @@ export async function spl_balance(mint: PublicKey, keys_cnt: number): Promise<vo
     try {
         common.log(`Getting the token balance of the keys by the mint ${mint.toString()}...`);
         const { token_name, token_symbol } = await trade.get_token_meta(mint);
+        const supply = parseInt((await trade.get_token_supply(mint)).toString());
         common.log(`Token name: ${token_name} | Symbol: ${token_symbol}\n`);
 
         if (keys_cnt === 0) {
@@ -140,10 +141,10 @@ export async function spl_balance(mint: PublicKey, keys_cnt: number): Promise<vo
             const keypair = Keypair.fromSecretKey(key);
             const balance = await trade.get_token_balance(keypair.publicKey, mint);
             const ui_balance = balance.uiAmount || 0;
+            const key_alloc = (ui_balance / (supply / 1_000_000)) * 100;
             total += ui_balance;
-            common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${ui_balance.toFixed(2)} ${token_symbol} ${key_path === trade.RESERVE_KEY_PATH ? '| (Reserve)' : ''}`);
+            common.log(`File: ${file.padEnd(10, ' ')} | Address: ${keypair.publicKey.toString().padEnd(44, ' ')} | Allocation: ${key_alloc.toFixed(2)}% | Balance: ${ui_balance.toFixed(2)} ${token_symbol}`);
         }
-        const supply = parseInt((await trade.get_token_supply(mint)).toString());
         const allocation = (total / (supply / 1_000_000)) * 100;
 
         common.log(`\nTotal balance: ${total} ${token_symbol}`);
