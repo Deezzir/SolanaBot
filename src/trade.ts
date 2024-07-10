@@ -7,18 +7,7 @@ import { Wallet } from '@project-serum/anchor';
 import BN from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
-import path from 'path';
 import bs58 from 'bs58';
-
-export const KEYS_DIR = process.env.KEYS_DIR || './keys';
-export const RESERVE_KEY_FILE = process.env.RESERVE_KEY_FILE || 'key0.json';
-export const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
-
-const RESERVE_KEYPAIR = common.get_keypair(RESERVE_KEY_PATH);
-if (!RESERVE_KEYPAIR) {
-    common.error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
-    process.exit(1);
-}
 
 const SWAP_SEED = 'swap';
 
@@ -76,10 +65,9 @@ function is_bundle_error<T>(value: T | Error): value is Error {
 };
 
 export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
-    if (!RESERVE_KEYPAIR) throw new Error(`[ERROR] Reserve keypair not found.`);
     try {
         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, RESERVE_KEYPAIR);
+        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, common.RESERVE_KEYPAIR);
 
         instructions.unshift(SystemProgram.transfer({
             fromPubkey: payer.publicKey,

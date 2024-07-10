@@ -9,6 +9,17 @@ import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
 dotenv.config();
 
+export const KEYS_DIR = process.env.KEYS_DIR || './keys';
+export const RESERVE_KEY_FILE = process.env.RESERVE_KEY_FILE || 'key0.json';
+export const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
+
+const reserve_keypair = get_keypair(RESERVE_KEY_PATH);
+if (!reserve_keypair) {
+    error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
+    process.exit(1);
+}
+export const RESERVE_KEYPAIR = reserve_keypair;
+
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
@@ -18,6 +29,7 @@ export type Key = {
     file_name: string;
     keypair: Keypair;
     index: number;
+    is_reserve: boolean;
 };
 
 export enum PriorityLevel {
@@ -270,11 +282,12 @@ export async function get_keys(keys_dir: string, from?: number, to?: number): Pr
     try {
         const files = natural_sort(await readdir(keys_dir));
         return filter_keys(files).slice(from, to)
-            .map(file => {
+            .map(file_name => {
                 return {
-                    file_name: file,
-                    keypair: get_keypair(path.join(keys_dir, file)),
-                    index: extract_index(file)
+                    file_name: file_name,
+                    keypair: get_keypair(path.join(keys_dir, file_name)),
+                    index: extract_index(file_name),
+                    is_reserve: file_name === RESERVE_KEY_FILE
                 };
             })
             .filter((key) => key.keypair !== undefined) as Key[]

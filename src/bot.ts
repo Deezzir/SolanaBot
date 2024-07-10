@@ -19,12 +19,12 @@ dotenv.config({ path: './.env' });
 
 
 async function main() {
-    if (!existsSync(trade.RESERVE_KEY_PATH))
+    if (!existsSync(common.RESERVE_KEY_PATH))
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
     let bot_config: common.BotConfig;
     let workers = new Array<common.WorkerPromise>();
-    const keys = await common.get_keys(trade.KEYS_DIR);
+    const keys = await common.get_keys(common.KEYS_DIR);
     const keys_cnt = keys.length;
     const helius_rpc = process.env.RPC || '';
 
@@ -173,7 +173,7 @@ async function main() {
             return parseInt(value, 10);
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
-            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
             if (!existsSync(key_path))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
@@ -278,7 +278,7 @@ async function main() {
             return new PublicKey(value);
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
-            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
             if (!existsSync(key_path))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
@@ -373,7 +373,7 @@ async function main() {
             return parseInt(value, 10);
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
-            const key_path = `${trade.KEYS_DIR}/key${value}.json`;
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
             if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];

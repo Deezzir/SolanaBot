@@ -158,10 +158,9 @@ export async function balance(keys: common.Key[]): Promise<void> {
     }
     let total = 0;
     for (const key of keys) {
-        const is_reserve = key.file_name === trade.RESERVE_KEY_FILE;
         const balance = await trade.get_balance(key.keypair.publicKey) / LAMPORTS_PER_SOL;
         total += balance;
-        common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${is_reserve ? '| (Reserve)' : ''}`);
+        common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key.is_reserve ? '| (Reserve)' : ''}`);
     }
 
     common.log(`\nTotal balance: ${total} SOL`);
@@ -351,7 +350,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, collect_r
     let transactions = [];
 
     for (const key of keys) {
-        if (!collect_reserve && key.file_name === trade.RESERVE_KEY_FILE) continue;
+        if (!collect_reserve && key.is_reserve) continue;
 
         const sender = key.keypair;
         const amount = await trade.get_balance(sender.publicKey);
@@ -370,7 +369,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, collect_r
 
 export async function collect_token(keys: common.Key[], mint: PublicKey, receiver: PublicKey, collect_reserve: boolean): Promise<void> {
     common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
-    const reserve_keypair = common.get_keypair(trade.RESERVE_KEY_PATH);
+    const reserve_keypair = common.RESERVE_KEYPAIR
     if (!reserve_keypair) throw new Error('Unreachable');
 
     try {
@@ -379,7 +378,7 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
         let transactions = [];
 
         for (const key of keys) {
-            if (!collect_reserve && key.file_name === trade.RESERVE_KEY_FILE) continue;
+            if (!collect_reserve && key.is_reserve) continue;
 
             const sender = key.keypair;
             const token_amount = await trade.get_token_balance(sender.publicKey, mint);
