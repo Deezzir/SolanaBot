@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import path, { basename } from 'path';
 import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
-import { PublicKey } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
 dotenv.config();
@@ -13,6 +13,12 @@ export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
+
+export type Key = {
+    file_name: string;
+    keypair: Keypair;
+    index: number;
+};
 
 export enum PriorityLevel {
     MIN = "Min",
@@ -105,7 +111,7 @@ export enum Action {
 export const ActionStrings = ['Sell', 'Collect'];
 
 export interface WorkerConfig {
-    secret: Uint8Array;
+    keypair: Keypair;
     id: number;
     inputs: BotConfig;
 }
@@ -245,13 +251,36 @@ export async function count_keys(keys_dir: string): Promise<number> {
     }
 }
 
-export function get_key(file_path: string): Uint8Array | undefined {
+export function get_keypair(file_path: string): Keypair | undefined {
     try {
         const content = readFileSync(file_path, 'utf8');
-        return new Uint8Array(JSON.parse(content));
+        return Keypair.fromSecretKey(new Uint8Array(JSON.parse(content)));
     } catch (err) {
         error(`[ERROR] failed to read key file: ${err} (${file_path})`);
         return undefined;
+    }
+}
+
+export async function get_keys(keys_dir: string, from?: number, to?: number): Promise<Key[]> {
+    const extract_index = (value: string): number => {
+        const match = value.match(/\d+/);
+        return match ? parseInt(match[0], 10) : 0;
+    }
+
+    try {
+        const files = natural_sort(await readdir(keys_dir));
+        return filter_keys(files).slice(from, to)
+            .map(file => {
+                return {
+                    file_name: file,
+                    keypair: get_keypair(path.join(keys_dir, file)),
+                    index: extract_index(file)
+                };
+            })
+            .filter((key) => key.keypair !== undefined) as Key[]
+    } catch (err) {
+        error(`[ERROR] failed to process keys: ${err}`);
+        return [];
     }
 }
 
@@ -262,18 +291,6 @@ export const chunks = <T>(array: T[], chunkSize = 10): T[][] => {
     }
     return res;
 };
-
-export async function get_keys(to: number, keys_dir: string, from: number = 0): Promise<Uint8Array[]> {
-    try {
-        const files = natural_sort(await readdir(keys_dir));
-        return filter_keys(files).slice(from, to)
-            .map(file => get_key(path.join(keys_dir, file)))
-            .filter((key): key is Uint8Array => key !== undefined) as Uint8Array[];
-    } catch (err) {
-        error(`[ERROR] failed to process keys: ${err}`);
-        return [];
-    }
-}
 
 export async function clear_lines_up(lines: number): Promise<void> {
     process.stdout.moveCursor(0, -lines);

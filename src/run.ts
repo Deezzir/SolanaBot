@@ -17,6 +17,14 @@ let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
 export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
+    // if (message === 'buy') {
+    //     for (let i = 0; i < workers.length; i++) {
+    //         common.log(`[Main Worker] Sending the buy command to worker ${i + 1}`);
+    //         workers[i].worker.postMessage({ command: `buy${i + 1}`, data });
+    //         await common.sleep(Math.floor(Math.random() * 10000) + 10000);
+    //     }
+    //     return;
+    // }
     workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
 }
 
@@ -262,35 +270,35 @@ export async function wait_drop_unsub(): Promise<void> {
     }
 }
 
-export async function start_workers(config: common.BotConfig, workers: common.WorkerPromise[], keys_dir: string): Promise<void> {
-    const keys = await common.get_keys(config.thread_cnt + 1, keys_dir, 1);
-    if (keys.length === 0) {
+export async function start_workers(keys: common.Key[], config: common.BotConfig, workers: common.WorkerPromise[]): Promise<void> {
+    if (keys.length === 0 || keys.length < config.thread_cnt) {
         common.error('[ERROR] No keys available.');
         global.RL.close();
     }
+
+    keys = keys.slice(1, config.thread_cnt + 1);
+
     if (!trade.check_has_balances(keys)) {
         common.error('[ERROR] First, topup the specified accounts.');
         global.RL.close();
+        return;
     }
 
     common.log('[Main Worker] Starting the workers...');
-    for (let i = 0; i < config.thread_cnt; i++) {
-        const key = keys.at(i);
-        if (!key) {
-            common.error(`[ERROR] Failed to get the key at index ${i}`);
-            global.RL.close();
-        }
+
+    for (const key of keys) {
         const data: common.WorkerConfig = {
-            secret: key ?? new Uint8Array(),
-            id: i + 1,
+            keypair: key.keypair,
+            id: key.index,
             inputs: config
         };
+
         const worker = new Worker(WORKER_PATH, { workerData: data });
         const promise = new Promise<void>((resolve, reject) => {
             worker.on('message', (msg) => common.log(msg));
-            worker.on('error', (err) => { common.error(`[Worker ${i}] encountered error: ${err}`); reject() });
+            worker.on('error', (err) => { common.error(`[Worker ${key.index}] encountered error: ${err}`); reject() });
             worker.on('exit', (code) => {
-                if (code !== 0) reject(new Error(`[Worker ${i}] Stopped with exit code ${code}`));
+                if (code !== 0) reject(new Error(`[Worker ${key.index}] Stopped with exit code ${code}`));
                 else resolve();
             }
             );

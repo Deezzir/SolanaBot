@@ -78,12 +78,24 @@ const buy = async () => {
         let transactions = [];
         let count = TRADE_ITERATIONS;
         while (count > 0) {
-            const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
-            transactions.push(
-                process_buy_tx(buy_promise, amount).then(result => {
-                    if (result) bought = true;
-                })
-            );
+            if (MINT_METADATA.raydium_pool === null) {
+                const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                transactions.push(
+                    process_buy_tx(buy_promise, amount).then(result => {
+                        if (result) bought = true;
+                    })
+                );
+            } else {
+                const amm = new PublicKey(MINT_METADATA.raydium_pool);
+                const mint = new PublicKey(MINT_METADATA.mint);
+                const sol_amount = trade.get_sol_token_amount(amount);
+                const buy_promise = trade.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, SLIPPAGE, common.PriorityLevel.HIGH)
+                transactions.push(
+                    process_buy_tx(buy_promise, amount).then(result => {
+                        if (result) bought = true;
+                    })
+                );
+            }
             count--;
             await sleep(1);
         }
@@ -172,14 +184,6 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
             return true;
         }
 
-        // if (MINT_METADATA.usd_market_cap >= 45000) CURRENT_BUY_AMOUNT = MIN_BUY;
-
-        if (MINT_METADATA.raydium_pool !== null) {
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Raydium pool detected, skipping...`);
-            await sleep(1);
-            return false;
-        }
-
         if (should_buy()) {
             await buy();
             if (WORKER_CONF.inputs.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.inputs.spend_limit;
@@ -221,7 +225,7 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
 });
 
 async function main() {
-    WORKER_KEYPAIR = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
+    WORKER_KEYPAIR = WORKER_CONF.keypair;
     const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
 
@@ -234,6 +238,7 @@ async function main() {
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
             case 'buy':
+                // case `buy${WORKER_CONF.id}`:
                 const std = WORKER_CONF.inputs.start_buy * 0.05;
                 CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONF.inputs.start_buy, std).toFixed(5));
 
@@ -245,7 +250,6 @@ async function main() {
 
                 parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
                 process.exit(0)
-                break;
             case 'sell':
                 if (!START_SELL) {
                     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);

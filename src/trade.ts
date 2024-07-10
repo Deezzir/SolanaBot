@@ -11,11 +11,14 @@ import path from 'path';
 import bs58 from 'bs58';
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
-export const RESERVE_KEY_PATH = path.join(KEYS_DIR, process.env.RESERVE_KEY_PATH || 'key0.json');
+export const RESERVE_KEY_FILE = process.env.RESERVE_KEY_FILE || 'key0.json';
+export const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
 
-const RESERVE = common.get_key(RESERVE_KEY_PATH);
-if (!RESERVE) throw new Error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
-const RESERVE_KEYPAIR = Keypair.fromSecretKey(RESERVE);
+const RESERVE_KEYPAIR = common.get_keypair(RESERVE_KEY_PATH);
+if (!RESERVE_KEYPAIR) {
+    common.error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
+    process.exit(1);
+}
 
 const SWAP_SEED = 'swap';
 
@@ -72,11 +75,10 @@ function is_bundle_error<T>(value: T | Error): value is Error {
     return value instanceof Error;
 };
 
-export async function create_and_send_tipped_tx(
-    instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
+export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
+    if (!RESERVE_KEYPAIR) throw new Error(`[ERROR] Reserve keypair not found.`);
     try {
         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-
         const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, RESERVE_KEYPAIR);
 
         instructions.unshift(SystemProgram.transfer({
@@ -198,15 +200,15 @@ export async function get_balance_change(signature: string, address: PublicKey):
     }
 }
 
-export async function check_has_balances(keys: Uint8Array[], min_balance: number = 0): Promise<boolean> {
+export async function check_has_balances(keys: common.Key[], min_balance: number = 0): Promise<boolean> {
     let ok = true;
 
     try {
         for (const key of keys) {
-            const keypair = Keypair.fromSecretKey(key);
-            const balance = await get_balance(keypair.publicKey) / LAMPORTS_PER_SOL;
+            const holder = key.keypair
+            const balance = await get_balance(holder.publicKey) / LAMPORTS_PER_SOL;
             if (balance <= min_balance) {
-                common.error(`Address: ${keypair.publicKey.toString().padEnd(44, ' ')} has no balance.`);
+                common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance.`);
                 ok = false;
             }
         }
@@ -857,4 +859,23 @@ export async function swap_raydium(
         return create_raydium_swap_tx(amount, seller, swap_to, pool_keys, pool_info, raw_slippage, priority);
     }
     throw new Error(`Failed to get the pool keys.`);
+}
+
+export function get_sol_token_amount(amount: number): TokenAmount {
+    return {
+        uiAmount: amount,
+        amount: (amount * LAMPORTS_PER_SOL).toString(),
+        decimals: 9,
+    } as TokenAmount;
+}
+
+export function get_token_amount_by_percent(token_amount: TokenAmount, percent: number): TokenAmount {
+    if (percent < 0 || percent > 100) throw new Error(`Invalid percent: ${percent}`);
+    if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
+    if (percent === 100) return token_amount;
+    return {
+        uiAmount: Math.floor(token_amount.uiAmount * percent / 100),
+        amount: (BigInt(token_amount.amount) * BigInt(percent) / BigInt(100)).toString(),
+        decimals: token_amount.decimals,
+    } as TokenAmount;
 }

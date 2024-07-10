@@ -24,7 +24,8 @@ async function main() {
 
     let bot_config: common.BotConfig;
     let workers = new Array<common.WorkerPromise>();
-    const keys_cnt = await common.count_keys(trade.KEYS_DIR) - 1;
+    const keys = await common.get_keys(trade.KEYS_DIR);
+    const keys_cnt = keys.length;
     const helius_rpc = process.env.RPC || '';
 
     global.START_COLLECT = false;
@@ -34,10 +35,10 @@ async function main() {
     const program = new Command();
 
     common.log(figlet.textSync('Solana Buy Bot', { horizontalLayout: 'full' }));
-    common.log(`Using RPC: ${helius_rpc}\n`);
+    // common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
-        .version('1.0.0')
+        .version('2.0.0')
         .description('Solana Buy Bot CLI');
 
     program
@@ -71,7 +72,7 @@ async function main() {
                 common.setup_readline();
                 await new Promise<void>(resolve => global.RL.question('Press ENTER to start the bot...', () => resolve()));
             } else {
-                bot_config = await run.get_config(keys_cnt);
+                bot_config = await run.get_config(keys_cnt - 1);
                 common.clear_lines_up(1);
                 if (!bot_config) return;
             }
@@ -136,7 +137,7 @@ async function main() {
                 clearLine(process.stdout, 0);
                 process.exit(0);
             });
-            await commands.start(bot_config, workers)
+            await commands.start(keys, bot_config, workers)
             global.RL.close();
         });
 
@@ -144,7 +145,7 @@ async function main() {
         .command('balance')
         .alias('b')
         .description('Get the balance of the accounts')
-        .action(() => commands.balance(keys_cnt));
+        .action(() => commands.balance(keys));
 
     program
         .command('spl-balance')
@@ -155,7 +156,7 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value)
         })
-        .action((mint) => commands.spl_balance(mint, keys_cnt));
+        .action((mint) => commands.spl_balance(keys, mint));
 
     program
         .command('warmup')
@@ -173,7 +174,7 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${trade.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
@@ -195,22 +196,22 @@ async function main() {
         })
         .action((options) => {
             const { from, to, list, min, max } = options;
-            commands.warmup(keys_cnt, from, to, list, min, max);
+            commands.warmup(keys, from, to, list, min, max);
         });
 
     program
         .command('collect')
         .alias('c')
-        .argument('<address>', 'Public address of the receiver', (value) => {
+        .argument('<receiver>', 'Public address of the receiver', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
         .option('-r, --reserve', 'Collect from the reserve account as well')
         .description('Collect all the SOL from the accounts to the provided address')
-        .action((address, options) => {
+        .action((receiver, options) => {
             const { reserve } = options;
-            commands.collect(address, reserve);
+            commands.collect(keys, receiver, reserve);
         });
 
     program
@@ -227,9 +228,17 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<buyer_path>', 'Path to the keypair file', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Buyer file does not exist.');
+            const buyer_keypair = common.get_keypair(value);
+            if (!buyer_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return buyer_keypair;
+        })
         .description('Buy the token once with the provided amount')
-        .action(commands.buy_token_once);
+        .action((amount, mint, buyer) => {
+            commands.buy_token_once(amount, mint, buyer);
+        });
 
     program
         .command('spl-sell-once')
@@ -239,9 +248,26 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<seller_path>', 'Path to the keypair file', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Seller file does not exist.');
+            const seller_keypair = common.get_keypair(value);
+            if (!seller_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return seller_keypair;
+        })
+        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
+            const parsedValue = parseFloat(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 0.0 || parsedValue > 100.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
+            return parsedValue;
+        })
         .description('Sell the token once with the provided amount')
-        .action(commands.sell_token_once);
+        .action((mint, seller, options) => {
+            const { percent } = options;
+            commands.sell_token_once(mint, seller, percent);
+        });
 
     program
         .command('spl-sell')
@@ -253,14 +279,22 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${trade.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
+        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
+            const parsedValue = parseFloat(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 0.0 || parsedValue > 100.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
+            return parsedValue;
+        })
         .description('Sell all the token by the mint from the accounts')
         .action((mint, options) => {
-            let { list } = options;
-            commands.sell_token(mint, list);
+            const { list, percent } = options;
+            commands.sell_token(mint, list, percent);
         });
 
     program
@@ -274,14 +308,22 @@ async function main() {
                 throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
             return parsedValue;
         })
-        .argument('<address>', 'Public address of the receiver', (value) => {
+        .argument('<receiver>', 'Public address of the receiver', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<sender_path>', 'Path to the keypair file', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Sender file does not exist.');
+            const sender_keypair = common.get_keypair(value);
+            if (!sender_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return sender_keypair;
+        })
         .description('Transfer SOL from the specified keypair to the receiver')
-        .action(commands.transfer_sol);
+        .action((amount, receiver, sender) => {
+            commands.transfer_sol(amount, receiver, sender);
+        });
 
     program
         .command('spl-collect')
@@ -291,13 +333,17 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<address>', 'Public address of the receiver', (value) => {
+        .argument('<receiver>', 'Public address of the receiver', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
+        .option('-r, --reserve', 'Collect from the reserve account as well')
         .description('Collect all the token by the mint from the accounts to the provided address')
-        .action((mint, address) => commands.collect_token(mint, address));
+        .action((mint, receiver, options) => {
+            const { reserve } = options;
+            commands.collect_token(keys, mint, receiver, reserve);
+        });
 
     program
         .command('topup')
@@ -309,7 +355,13 @@ async function main() {
                 throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
             return parsedValue;
         })
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<sender_path>', 'Path to the keypair file of the sender', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Sender file does not exist.');
+            const sender_keypair = common.get_keypair(value);
+            if (!sender_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return sender_keypair;
+        })
         .option('-f, --from <value>', 'Topup starting from the provided index', (value) => {
             if (!common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(1 - ${keys_cnt}).`);
@@ -328,15 +380,15 @@ async function main() {
         })
         .alias('t')
         .description('Topup the accounts with SOL using the provided keypair')
-        .action((amount, keypair_path, options) => {
+        .action((amount, sender, options) => {
             const { from, to, list } = options;
-            commands.topup(amount, keypair_path, keys_cnt, from, to, list);
+            commands.topup(keys, amount, sender, from, to, list);
         });
 
     program
         .command('metadata')
         .alias('m')
-        .argument('<json>', 'Path to the JSON file', (value) => {
+        .argument('<json_path>', 'Path to the JSON file', (value) => {
             if (!existsSync(value))
                 throw new InvalidOptionArgumentError('Config file does not exist.');
             const json = common.read_json(value);
@@ -349,9 +401,9 @@ async function main() {
             return value;
         })
         .description('Upload the metadata of the token using the provided JSON file')
-        .action(async (json, image_path) => {
+        .action(async (json_path, image_path) => {
             console.log('Uploading metadata...');
-            console.log(`CID: ${await common.create_metadata(json, image_path)}`);
+            console.log(`CID: ${await common.create_metadata(json_path, image_path)}`);
         });
 
     program
@@ -366,16 +418,36 @@ async function main() {
             return parsedValue;
         })
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<creator_path>', 'Path to the keypair file of the creator', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Creator file does not exist.');
+            const creator_keypair = common.get_keypair(value);
+            if (!creator_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return creator_keypair;
+        })
         .description('Create promotion tokens using the provided keypair')
-        .action(commands.promote);
+        .action((count, cid, creator) => {
+            commands.promote(count, cid, creator);
+        });
 
     program
         .command('create-token')
         .alias('ct')
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
-        .argument('<keypair_path>', 'Path to the keypair file')
-        .option('-m, --mint <keypair_path>', 'Path to the mint keypair file')
+        .argument('<creator_path>', 'Path to the keypair file of the creator', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Creator file does not exist.');
+            const creator_keypair = common.get_keypair(value);
+            if (!creator_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return creator_keypair;
+        })
+        .option('-m, --mint <mint_path>', 'Path to the mint keypair file', (value) => {
+            if (!existsSync(value))
+                throw new InvalidOptionArgumentError('Mint file does not exist.');
+            const mint_keypair = common.get_keypair(value);
+            if (!mint_keypair) throw new InvalidOptionArgumentError('Invalid keypair file.');
+            return mint_keypair;
+        })
         .option('-b, --buy <number>', 'Amount of SOL to buy the token', (value) => {
             const parsedValue = parseFloat(value);
             if (isNaN(parsedValue) || parsedValue <= 0)
@@ -383,9 +455,9 @@ async function main() {
             return parsedValue;
         })
         .description('Create a token')
-        .action((cid, keypair_path, options) => {
+        .action((cid, creator, options) => {
             const { mint, buy } = options;
-            commands.create_token(cid, keypair_path, buy, mint);
+            commands.create_token(cid, creator, buy, mint);
         });
 
     program
@@ -404,7 +476,13 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<keypair_path>', 'Path to the keypair file')
+        .argument('<drop_path>', 'Path to the keypair file of the dropper', (value) => {
+            if (!existsSync(value))
+                throw new InvalidArgumentError('Dropper file does not exist.');
+            const dropper_keypair = common.get_keypair(value);
+            if (!dropper_keypair) throw new InvalidArgumentError('Invalid keypair file.');
+            return dropper_keypair;
+        })
         .option('-p, --presale <number>', 'Turn on the presale', (value) => {
             const parsedValue = parseInt(value);
             if (isNaN(parsedValue))
@@ -414,9 +492,9 @@ async function main() {
             return parsedValue;
         })
         .description('Do the drop')
-        .action(async (airdrop, mint, keypair_path, options) => {
+        .action(async (airdrop, mint, drop, options) => {
             const { presale } = options;
-            await drop.drop(airdrop, mint, keypair_path, presale);
+            await drop.drop(airdrop, mint, drop, presale);
         });
 
     program

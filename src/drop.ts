@@ -287,17 +287,15 @@ async function presale(percent: number, ui_balance: number, mint_meta: common.Mi
     console.log(`Presale drop completed`);
 }
 
-export async function drop(airdrop_percent: number, mint: PublicKey, keypair_path: string, presale_percent: number = 0): Promise<void> {
+export async function drop(airdrop_percent: number, mint: PublicKey, drop: Keypair, presale_percent: number = 0): Promise<void> {
     console.log(`Dropping the mint ${mint.toString()}...`);
     console.log(`Airdrop percent: ${airdrop_percent}% | Presale percent: ${presale_percent}%`);
 
     const mint_meta = await trade.get_token_meta(mint);
     console.log(`Token name: ${mint_meta.token_name} | Symbol: ${mint_meta.token_symbol}\n`);
 
-    let drop: Keypair;
     let ui_balance: number = 0;
     try {
-        drop = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keypair_path, 'utf8'))));
         const balance = await trade.get_token_balance(drop.publicKey, mint);
         ui_balance = Math.floor(balance.uiAmount || 0);
         console.log(`Drop address: ${drop.publicKey.toString()} | Balance: ${ui_balance} ${mint_meta.token_symbol}\n`);
