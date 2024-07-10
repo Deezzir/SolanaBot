@@ -294,7 +294,7 @@ async function main() {
         .description('Sell all the token by the mint from the accounts')
         .action((mint, options) => {
             const { list, percent } = options;
-            commands.sell_token(mint, list, percent);
+            commands.sell_token(keys, mint, list, percent);
         });
 
     program
