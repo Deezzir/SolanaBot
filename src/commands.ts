@@ -284,6 +284,12 @@ export async function warmup(keys: common.Key[], from?: number, to?: number, key
         const buyer = key.keypair
         let mints = [];
 
+        const balance = await trade.get_balance(buyer.publicKey);
+        if (balance === 0) {
+            common.error(`No balance for ${buyer.publicKey.toString().padEnd(44, ' ')} (${key.file_name}), skipping...`);
+            continue;
+        }
+
         while (true) {
             mints = (await common.fetch_random_mints(token_cnts[i])).filter(i => !i.raydium_pool);
             if (mints.length === token_cnts[i]) break;
