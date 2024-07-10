@@ -21,8 +21,6 @@ export async function clean(keys: common.Key[]): Promise<void> {
     let unsold_set: string[] = []
 
     for (const key of keys) {
-        if (!key) continue;
-
         const wallet = new Wallet(key.keypair);
 
         const balance = await trade.get_balance(wallet.publicKey);

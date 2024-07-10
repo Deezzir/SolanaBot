@@ -501,7 +501,7 @@ async function main() {
         .command('clean')
         .alias('cl')
         .description('Clean the accounts')
-        .action(commands.clean);
+        .action(() => commands.clean(keys));
 
     program
         .command('clear-drop')
