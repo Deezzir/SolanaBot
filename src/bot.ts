@@ -2,9 +2,7 @@ import figlet from 'figlet';
 import dotenv from 'dotenv'
 import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'commander';
 import { existsSync, } from 'fs';
-import { clearLine, cursorTo, moveCursor } from 'readline';
 import * as common from './common.js';
-import * as trade from './trade.js';
 import * as run from './run.js';
 import * as commands from './commands.js';
 import * as drop from './drop.js';
@@ -23,7 +21,7 @@ async function main() {
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
     let bot_config: common.BotConfig;
-    let workers = new Array<common.WorkerPromise>();
+    let workers = new Array<common.WorkerJob>();
     const keys = await common.get_keys(common.KEYS_DIR);
     const keys_cnt = keys.length;
     const helius_rpc = process.env.RPC || '';
@@ -49,94 +47,18 @@ async function main() {
             if (!existsSync(value))
                 throw new InvalidOptionArgumentError('Config file does not exist.');
             const json = common.read_json(value);
-            if (!json) throw new InvalidOptionArgumentError('Invalid JSON format.');
+            if (!json)
+                throw new InvalidOptionArgumentError('Invalid JSON format.');
             return json as common.BotConfig;
         })
         .action(async (options) => {
-            let selling = false;
-            let stopping = false;
             let { config } = options;
-
-            if (config) {
-                config.collect_address = new PublicKey(config.collect_address);
-                if (config.mint) {
-                    config.mint = new PublicKey(config.mint);
-                } else if (config.token_name && config.token_ticker) {
-                    common.log('Sniping mint address...');
-                } else {
-                    console.error('Invalid config file.');
-                    exit(1);
-                }
-                bot_config = config;
-                console.table(common.BotConfigDisplay(bot_config));
-                common.setup_readline();
-                await new Promise<void>(resolve => global.RL.question('Press ENTER to start the bot...', () => resolve()));
-            } else {
-                bot_config = await run.get_config(keys_cnt - 1);
-                common.clear_lines_up(1);
-                if (!bot_config) return;
+            const bot_config = await run.setup_config(config, keys_cnt);
+            if (!bot_config) {
+                common.error('[ERROR] Invalid configuration.');
+                exit(1);
             }
-
-            if (global.RL === undefined) common.setup_readline();
-            global.RL.setPrompt('Command (stop/config/collect/sell/set)> ');
-            global.RL.prompt(true);
-
-            global.RL.on('line', async (line) => {
-                moveCursor(process.stdout, 0, -1);
-                clearLine(process.stdout, 0);
-                switch (line.trim().split(' ')[0]) {
-                    case 'stop':
-                        if (!stopping) {
-                            if (workers.length > 0) {
-                                run.worker_post_message(workers, 'stop');
-                                stopping = true;
-                            }
-                        } else {
-                            common.log('[Main Worker] Stopping is already in progress...');
-                        }
-                        break;
-                    case 'config':
-                        if (bot_config !== undefined)
-                            console.table(common.BotConfigDisplay(bot_config));
-                        break;
-                    case 'collect':
-                        if (!global.START_COLLECT) {
-                            run.worker_post_message(workers, 'collect');
-                            global.START_COLLECT = true;
-                        } else {
-                            common.log('[Main Worker] Collecting is already in progress...');
-                        }
-                        break;
-                    case 'sell':
-                        if (!selling) {
-                            if (workers.length > 0) {
-                                run.worker_post_message(workers, 'sell');
-                                selling = true;
-                            }
-                        } else {
-                            common.log('[Main Worker] Selling is already in progress...');
-                        }
-                        break;
-                    case 'set':
-                        const args = line.trim().split(' ');
-                        if (args.length < 3) {
-                            common.log('Invalid command. Example: set action buy');
-                            break;
-                        }
-                        const [, key, value] = args;
-                        common.update_bot_config(bot_config, key, value);
-                        break;
-                    default:
-                        common.log(`Unknown command: ${line.trim()}`);
-                        break;
-                }
-                global.RL.prompt(true);
-            }).on('close', () => {
-                common.log('[Main Worker] Stopping the bot...');
-                cursorTo(process.stdout, 0);
-                clearLine(process.stdout, 0);
-                process.exit(0);
-            });
+            run.setup_cmd_interface(workers, bot_config)
             await commands.start(keys, bot_config, workers)
             global.RL.close();
         });
@@ -374,7 +296,7 @@ async function main() {
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${common.KEYS_DIR}/key${value}.json`;
-            if (!existsSync(key_path)) // || !common.validate_int(value, 1, keys_cnt))
+            if (!existsSync(key_path))
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })

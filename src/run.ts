@@ -5,6 +5,7 @@ import bs58 from 'bs58';
 import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import { CreateMetadataAccountV3InstructionData, getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 import * as common from './common.js';
+import { clearLine, cursorTo, moveCursor } from 'readline';
 import * as trade from './trade.js';
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
@@ -15,7 +16,7 @@ var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
-export async function worker_post_message(workers: common.WorkerPromise[], message: string, data: any = {}): Promise<void> {
+export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
     // if (message === 'buy') {
     //     for (let i = 0; i < workers.length; i++) {
@@ -140,7 +141,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
         }
 
         await common.clear_lines_up(Object.keys(answers).length + 1);
-        console.table(common.BotConfigDisplay(answers));
+        console.table(common.bot_conf_display(answers));
         const prompt = await inquirer.prompt([
             {
                 type: 'confirm',
@@ -170,7 +171,6 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
 
     search.push(new Promise<PublicKey | null>(async (resolve, reject) => {
         common.log('[Main Worker] Waiting for the new token drop using Websocket...');
-        let lastCoins: common.TokenMeta[] = [];
         const socket = io(FETCH_MINT_API_URL, {
             path: "/socket.io/",
             query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
@@ -181,27 +181,13 @@ export async function wait_drop_sub(token_name: string, token_ticker: string, st
         socket.on("disconnect", () => { });
 
         socket.prependAny(async (_, ...obj) => {
-            let currentDate = Date.now();
-            let token = obj[0];
-            let createdDate = (token.created_timestamp + 50000 + (Math.floor(Math.random() * 5)));
-
-            if (createdDate >= currentDate) {
-                lastCoins = lastCoins.sort((a, b) => b.created_timestamp - a.created_timestamp);
-                if (!lastCoins.some(e => e.mint === token.mint)) {
-                    lastCoins.push(token);
-                    lastCoins = lastCoins.sort((a, b) => b.created_timestamp - a.created_timestamp);
-
-                    if (token.name.toLowerCase() === token_name.toLowerCase() && token.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
-                        LOGS_STOP_FUNCTION = null
-                        await wait_drop_unsub();
-                        common.log(`[Main Worker] Found the mint using Websocket`);
-                        socket.disconnect();
-                        resolve(new PublicKey(token.mint));
-                    }
-                }
-            }
-            if (lastCoins.length >= 20) {
-                lastCoins.pop();
+            let token = obj[0] as common.TokenMeta;
+            if (token.name.toLowerCase() === token_name.toLowerCase() && token.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
+                LOGS_STOP_FUNCTION = null
+                await wait_drop_unsub();
+                common.log(`[Main Worker] Found the mint using Websocket`);
+                socket.disconnect();
+                resolve(new PublicKey(token.mint));
             }
         });
     }));
@@ -270,18 +256,18 @@ export async function wait_drop_unsub(): Promise<void> {
     }
 }
 
-export async function start_workers(keys: common.Key[], config: common.BotConfig, workers: common.WorkerPromise[]): Promise<void> {
+export async function start_workers(keys: common.Key[], config: common.BotConfig, workers: common.WorkerJob[]): Promise<boolean> {
+    keys = keys.filter((key) => !key.is_reserve);
+
     if (keys.length === 0 || keys.length < config.thread_cnt) {
         common.error('[ERROR] No keys available.');
         global.RL.close();
     }
 
-    keys = keys.slice(1, config.thread_cnt + 1);
-
     if (!trade.check_has_balances(keys)) {
         common.error('[ERROR] First, topup the specified accounts.');
         global.RL.close();
-        return;
+        return false;
     }
 
     common.log('[Main Worker] Starting the workers...');
@@ -305,9 +291,11 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
         });
         workers.push({ worker: worker, promise: promise });
     }
+
+    return true;
 }
 
-export async function wait_for_workers(workers: common.WorkerPromise[]): Promise<void> {
+export async function wait_for_workers(workers: common.WorkerJob[]): Promise<void> {
     let promises = workers.map(w => w.promise);
     try {
         await Promise.all(promises);
@@ -315,4 +303,92 @@ export async function wait_for_workers(workers: common.WorkerPromise[]): Promise
     } catch (err) {
         common.error(`[ERROR] One of the workers encountered an error`);
     }
+}
+
+export function setup_cmd_interface(workers: common.WorkerJob[], bot_config: common.BotConfig) {
+    if (global.RL === undefined) common.setup_readline();
+    global.RL.setPrompt('Command (stop/config/collect/sell/set)> ');
+    global.RL.prompt(true);
+
+    let selling = false;
+    let stopping = false;
+
+    global.RL.on('line', async (line) => {
+        moveCursor(process.stdout, 0, -1);
+        clearLine(process.stdout, 0);
+        switch (line.trim().split(' ')[0]) {
+            case 'stop':
+                if (!stopping) {
+                    if (workers.length > 0) {
+                        worker_post_message(workers, 'stop');
+                        stopping = true;
+                    }
+                } else {
+                    common.log('[Main Worker] Stopping is already in progress...');
+                }
+                break;
+            case 'config':
+                if (bot_config !== undefined)
+                    console.table(common.bot_conf_display(bot_config));
+                break;
+            case 'collect':
+                if (!global.START_COLLECT) {
+                    worker_post_message(workers, 'collect');
+                    global.START_COLLECT = true;
+                } else {
+                    common.log('[Main Worker] Collecting is already in progress...');
+                }
+                break;
+            case 'sell':
+                if (!selling) {
+                    if (workers.length > 0) {
+                        worker_post_message(workers, 'sell');
+                        selling = true;
+                    }
+                } else {
+                    common.log('[Main Worker] Selling is already in progress...');
+                }
+                break;
+            case 'set':
+                const args = line.trim().split(' ');
+                if (args.length < 3) {
+                    common.log('Invalid command. Example: set action buy');
+                    break;
+                }
+                const [, key, value] = args;
+                common.update_bot_config(bot_config, key, value);
+                break;
+            default:
+                common.log(`Unknown command: ${line.trim()}`);
+                break;
+        }
+        global.RL.prompt(true);
+    }).on('close', () => {
+        common.log('[Main Worker] Stopping the bot...');
+        cursorTo(process.stdout, 0);
+        clearLine(process.stdout, 0);
+        process.exit(0);
+    });
+}
+
+export async function setup_config(config: common.BotConfig, keys_cnt: number): Promise<common.BotConfig | undefined> {
+    if (config) {
+        config.collect_address = new PublicKey(config.collect_address);
+        if (config.mint) {
+            config.mint = new PublicKey(config.mint);
+        } else if (config.token_name && config.token_ticker) {
+            common.log('Sniping mint address...');
+        } else {
+            console.error('Invalid config file.');
+            process.exit(1);
+        }
+        console.table(common.bot_conf_display(config));
+        common.setup_readline();
+        await new Promise<void>(resolve => global.RL.question('Press ENTER to start the bot...', () => resolve()));
+    } else {
+        config = await get_config(keys_cnt - 1);
+        common.clear_lines_up(1);
+        if (!config) return;
+    }
+    return config;
 }

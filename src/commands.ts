@@ -486,8 +486,8 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     await Promise.allSettled(transactions);
 }
 
-export async function start(keys: common.Key[], bot_config: common.BotConfig, workers: common.WorkerPromise[]): Promise<void> {
-    const worker_update_mint = async (workers: common.WorkerPromise[], mint: PublicKey) => {
+export async function start(keys: common.Key[], bot_config: common.BotConfig, workers: common.WorkerJob[]): Promise<void> {
+    const worker_update_mint = async (workers: common.WorkerJob[], mint: PublicKey) => {
         const mint_meta = await common.fetch_mint(mint.toString());
         mint_meta.total_supply = await trade.get_token_supply(mint);
         if (Object.keys(mint_meta).length !== 0) {
@@ -513,7 +513,12 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
     }
 
     common.log('[Main Worker] Starting the bot...');
-    await run.start_workers(keys, bot_config, workers);
+    const ok = await run.start_workers(keys, bot_config, workers);
+    if (!ok) {
+        common.error('[ERROR] Failed to start the workers. Exiting...');
+        global.RL.close();
+        return;
+    }
 
     try {
         const timestamp = Date.now();

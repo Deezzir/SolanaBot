@@ -97,17 +97,6 @@ export type IPFSResponse = {
     delegates: string[],
 }
 
-export function BotConfigDisplay(config: BotConfig) {
-    return {
-        ...config,
-        action: ActionStrings[config.action],
-        token_name: config.token_name ? config.token_name : 'N/A',
-        token_ticker: config.token_ticker ? config.token_ticker : 'N/A',
-        collect_address: config.collect_address.toString(),
-        mint: config.mint ? config.mint.toString() : 'N/A'
-    };
-}
-
 export enum Method {
     Wait = 0,
     Snipe = 1,
@@ -122,25 +111,25 @@ export enum Action {
 
 export const ActionStrings = ['Sell', 'Collect'];
 
-export interface WorkerConfig {
+export type WorkerConfig = {
     keypair: Keypair;
     id: number;
     inputs: BotConfig;
 }
 
-export interface WorkerPromise {
+export type WorkerJob = {
     worker: Worker;
     promise: Promise<void>;
 }
 
-export interface MintMeta {
+export type MintMeta = {
     token_name: string;
     token_symbol: string;
     token_decimals: number;
     mint: PublicKey
 }
 
-export interface TokenMeta {
+export type TokenMeta = {
     mint: string;
     name: string;
     symbol: string;
@@ -168,6 +157,17 @@ export interface TokenMeta {
     market_id: string | null;
     inverted: boolean | null;
     usd_market_cap: number;
+}
+
+export function bot_conf_display(config: BotConfig) {
+    return {
+        ...config,
+        action: ActionStrings[config.action],
+        token_name: config.token_name ? config.token_name : 'N/A',
+        token_ticker: config.token_ticker ? config.token_ticker : 'N/A',
+        collect_address: config.collect_address.toString(),
+        mint: config.mint ? config.mint.toString() : 'N/A'
+    };
 }
 
 export function update_bot_config(config: BotConfig, key: string, value: string): void {
@@ -297,7 +297,7 @@ export async function get_keys(keys_dir: string, from?: number, to?: number): Pr
     }
 }
 
-export const chunks = <T>(array: T[], chunkSize = 10): T[][] => {
+export function chunks<T>(array: T[], chunkSize = 10): T[][] {
     let res: T[][] = [];
     for (let currentChunk = 0; currentChunk < array.length; currentChunk += chunkSize) {
         res.push(array.slice(currentChunk, currentChunk + chunkSize));

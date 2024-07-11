@@ -192,14 +192,23 @@ export async function check_has_balances(keys: common.Key[], min_balance: number
     let ok = true;
 
     try {
-        for (const key of keys) {
-            const holder = key.keypair
-            const balance = await get_balance(holder.publicKey) / LAMPORTS_PER_SOL;
-            if (balance <= min_balance) {
-                common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance.`);
+        const balance_checks = keys.map(async (key) => {
+            const holder = key.keypair;
+            try {
+                const lamports = await get_balance(holder.publicKey);
+                const sol_balance = lamports / LAMPORTS_PER_SOL;
+                if (sol_balance <= min_balance) {
+                    common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (${key.file_name})`);
+                    ok = false;
+                }
+            } catch (err) {
+                common.error(`Failed to get the balance: ${err} for '${key.file_name}'`);
                 ok = false;
             }
-        }
+        });
+
+        await Promise.all(balance_checks);
+
         if (!ok) common.error('[ERROR] Some accounts are empty.');
         return ok;
     } catch (err) {
