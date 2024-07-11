@@ -112,14 +112,14 @@ export enum Action {
 export const ActionStrings = ['Sell', 'Collect'];
 
 export type WorkerConfig = {
-    keypair: Keypair;
+    secret: Uint8Array;
     id: number;
     inputs: BotConfig;
 }
 
 export type WorkerJob = {
     worker: Worker;
-    promise: Promise<void>;
+    job: Promise<void>;
 }
 
 export type MintMeta = {

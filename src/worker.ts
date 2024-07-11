@@ -8,15 +8,16 @@ const SLIPPAGE = 0.25;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.005;
+const MAX_RETRIES = 5;
+const TRADE_ITERATIONS = 1;
 
-const WORKER_CONF = workerData as common.WorkerConfig;
+const WORKER_CONF: common.WorkerConfig = workerData as common.WorkerConfig;
+const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
+const IS_BUMP: boolean = WORKER_CONF.inputs.is_bump;
 const RPC = process.env.RPC || '';
 global.CONNECTION = new Connection(RPC, 'confirmed');
 global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
-var MAX_RETRIES = 5;
-var TRADE_ITERATIONS = 1;
-var WORKER_KEYPAIR: Keypair;
 var MINT_METADATA: common.TokenMeta;
 var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
@@ -24,7 +25,6 @@ var CURRENT_BUY_AMOUNT = 0;
 var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
-var IS_BUMP = false;
 
 async function sleep(seconds: number) {
     return new Promise(resolve => setTimeout(resolve, seconds * 1000));
@@ -70,9 +70,10 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
 
 const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-    const amount = CURRENT_BUY_AMOUNT > 0 ? CURRENT_BUY_AMOUNT : MIN_BUY; // parseFloat(common.normal_random(CURRENT_BUY_AMOUNT, 0.02).toFixed(2));
+
+    const amount = parseFloat((CURRENT_BUY_AMOUNT > 0 ? CURRENT_BUY_AMOUNT : MIN_BUY).toFixed(5));
     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Buying ${amount} SOL of the token '${MINT_METADATA.symbol}'`);
-    let bought: boolean = false;
+    let bought = false;
 
     while (!IS_DONE && !bought) {
         let transactions = [];
@@ -124,7 +125,7 @@ async function process_sell_tx(promise: Promise<String>, balance: TokenAmount) {
 
 const sell = async () => {
     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Started selling the token`);
-    let sold: boolean = false;
+    let sold = false;
     while (!sold) {
         try {
             let get_balance_retry = 0;
@@ -225,13 +226,9 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
 });
 
 async function main() {
-    WORKER_KEYPAIR = WORKER_CONF.keypair;
     const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
-
     WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
-    IS_BUMP = WORKER_CONF.inputs.is_bump;
-    TRADE_ITERATIONS = IS_BUMP ? 1 : TRADE_ITERATIONS;
 
     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
 
@@ -240,7 +237,7 @@ async function main() {
             case 'buy':
                 // case `buy${WORKER_CONF.id}`:
                 const std = WORKER_CONF.inputs.start_buy * 0.05;
-                CURRENT_BUY_AMOUNT = parseFloat(common.normal_random(WORKER_CONF.inputs.start_buy, std).toFixed(5));
+                CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.inputs.start_buy, std);
 
                 if (CURRENT_BUY_AMOUNT > WORKER_CONF.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.inputs.spend_limit;
                 if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;

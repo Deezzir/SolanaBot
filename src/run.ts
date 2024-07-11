@@ -2,7 +2,7 @@ import inquirer from 'inquirer';
 import { Worker } from 'worker_threads';
 import io from "socket.io-client";
 import bs58 from 'bs58';
-import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
+import { Keypair, PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import { CreateMetadataAccountV3InstructionData, getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 import * as common from './common.js';
 import { clearLine, cursorTo, moveCursor } from 'readline';
@@ -257,7 +257,7 @@ export async function wait_drop_unsub(): Promise<void> {
 }
 
 export async function start_workers(keys: common.Key[], config: common.BotConfig, workers: common.WorkerJob[]): Promise<boolean> {
-    keys = keys.filter((key) => !key.is_reserve);
+    keys = keys.filter((key) => !key.is_reserve).slice(0, config.thread_cnt);
 
     if (keys.length === 0 || keys.length < config.thread_cnt) {
         common.error('[ERROR] No keys available.');
@@ -274,29 +274,29 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
 
     for (const key of keys) {
         const data: common.WorkerConfig = {
-            keypair: key.keypair,
+            secret: key.keypair.secretKey,
             id: key.index,
             inputs: config
         };
 
         const worker = new Worker(WORKER_PATH, { workerData: data });
-        const promise = new Promise<void>((resolve, reject) => {
+        const job = new Promise<void>((resolve, reject) => {
             worker.on('message', (msg) => common.log(msg));
-            worker.on('error', (err) => { common.error(`[Worker ${key.index}] encountered error: ${err}`); reject() });
+            worker.on('error', (err) => { common.error(`[Worker ${key.index}] Encountered error: ${err}`); reject() });
             worker.on('exit', (code) => {
-                if (code !== 0) reject(new Error(`[Worker ${key.index}] Stopped with exit code ${code}`));
+                if (code !== 0) reject(new Error(`[Worker ${key.index}]Stopped with exit code ${code} `));
                 else resolve();
             }
             );
         });
-        workers.push({ worker: worker, promise: promise });
+        workers.push({ worker: worker, job: job });
     }
 
     return true;
 }
 
 export async function wait_for_workers(workers: common.WorkerJob[]): Promise<void> {
-    let promises = workers.map(w => w.promise);
+    let promises = workers.map(w => w.job);
     try {
         await Promise.all(promises);
         common.log('[Main Worker] All workers have finished executing');
@@ -359,7 +359,7 @@ export function setup_cmd_interface(workers: common.WorkerJob[], bot_config: com
                 common.update_bot_config(bot_config, key, value);
                 break;
             default:
-                common.log(`Unknown command: ${line.trim()}`);
+                common.log(`Unknown command: ${line.trim()} `);
                 break;
         }
         global.RL.prompt(true);
