@@ -16,16 +16,20 @@ var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
-export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}): Promise<void> {
+export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}, interval: number = 0): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
-    // if (message === 'buy') {
-    //     for (let i = 0; i < workers.length; i++) {
-    //         common.log(`[Main Worker] Sending the buy command to worker ${i + 1}`);
-    //         workers[i].worker.postMessage({ command: `buy${i + 1}`, data });
-    //         await common.sleep(Math.floor(Math.random() * 10000) + 10000);
-    //     }
-    //     return;
-    // }
+    if (message === 'buy') {
+        for (let i = 0; i < workers.length; i++) {
+            common.log(`[Main Worker] Sending the buy command to worker ${i + 1}`);
+            workers[i].worker.postMessage({ command: `buy${i + 1}`, data });
+            if (interval > 0) {
+                const min_interval = interval;
+                const max_interval = Math.ceil(interval * 1.5);
+                await common.sleep(Math.floor(Math.random() * (max_interval - min_interval)) + min_interval);
+            }
+        }
+        return;
+    }
     workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
 }
 
@@ -51,6 +55,13 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 name: 'is_buy_once',
                 message: 'Do you want to buy only once?',
                 default: false
+            },
+            {
+                type: 'number',
+                name: 'start_interval',
+                message: 'Enter the start interval in seconds:',
+                default: 0,
+                validate: value => common.validate_int(value, 0) ? true : 'Please enter a valid number greater than or equal to 0.',
             },
             {
                 type: 'input',
@@ -163,7 +174,7 @@ function decode_metaplex_instr(data: string): [CreateMetadataAccountV3Instructio
     return decoded;
 }
 
-export async function wait_drop_sub(token_name: string, token_ticker: string, start_timestamp: number): Promise<PublicKey | null> {
+export async function wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
     let name = token_name.toLowerCase();
     let ticker = token_ticker.toLowerCase();
 
@@ -260,8 +271,9 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
     keys = keys.filter((key) => !key.is_reserve).slice(0, config.thread_cnt);
 
     if (keys.length === 0 || keys.length < config.thread_cnt) {
-        common.error('[ERROR] No keys available.');
+        common.error(`[ERROR] The number of keys doesn't match the number of threads`);
         global.RL.close();
+        return false;
     }
 
     if (!trade.check_has_balances(keys)) {

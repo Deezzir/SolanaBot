@@ -55,6 +55,7 @@ export interface BotConfig {
     mcap_threshold: number;
     is_bump: boolean;
     is_buy_once: boolean;
+    start_interval: number;
     action: Action;
     token_name: string;
     token_ticker: string;
@@ -201,6 +202,18 @@ export function update_bot_config(config: BotConfig, key: string, value: string)
                 config.collect_address = new PublicKey(value);
             else
                 error('Invalid return public key.');
+            break;
+        case 'is_bump':
+            config.is_bump = value === 'true';
+            break;
+        case 'is_buy_once':
+            config.is_buy_once = value === 'true';
+            break;
+        case 'start_interval':
+            if (validate_int(value, 0))
+                config.start_interval = parseInt(value, 10);
+            else
+                error('Invalid start interval.');
             break;
         case 'mcap_threshold':
             if (validate_int(value, 5000))

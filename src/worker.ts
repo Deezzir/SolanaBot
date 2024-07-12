@@ -234,8 +234,8 @@ async function main() {
 
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
-            case 'buy':
-                // case `buy${WORKER_CONF.id}`:
+            // case 'buy':
+            case `buy${WORKER_CONF.id}`:
                 const std = WORKER_CONF.inputs.start_buy * 0.05;
                 CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.inputs.start_buy, std);
 

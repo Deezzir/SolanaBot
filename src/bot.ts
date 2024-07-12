@@ -20,7 +20,6 @@ async function main() {
     if (!existsSync(common.RESERVE_KEY_PATH))
         throw new Error("No reserve key available. Please create the 'key0.json' first.");
 
-    let bot_config: common.BotConfig;
     let workers = new Array<common.WorkerJob>();
     const keys = await common.get_keys(common.KEYS_DIR);
     const keys_cnt = keys.length;
@@ -36,7 +35,7 @@ async function main() {
     // common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
-        .version('2.0.0')
+        .version('2.1.0')
         .description('Solana Buy Bot CLI');
 
     program
@@ -89,7 +88,7 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
             return parseInt(value, 10);
         })
-        .option('-t --to <value>', 'Warmup ending at the provided index', (value) => {
+        .option('-t, --to <value>', 'Warmup ending at the provided index', (value) => {
             if (!common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
             return parseInt(value, 10);
@@ -129,11 +128,26 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-r, --reserve', 'Collect from the reserve account as well')
+        .option('-f, --from <value>', 'Collect SOL starting from the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-t, --to <value>', 'Collect SOL ending at the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+        })
         .description('Collect all the SOL from the accounts to the provided address')
         .action((receiver, options) => {
-            const { reserve } = options;
-            commands.collect(keys, receiver, reserve);
+            const { from, to, list } = options;
+            commands.collect(keys, receiver, from, to, list);
         });
 
     program
@@ -192,12 +206,58 @@ async function main() {
         });
 
     program
+        .command('spl-buy')
+        .alias('bt')
+        .argument('<amount>', 'Amount to buy in SOL', (value) => {
+            const parsedValue = parseFloat(value);
+            if (isNaN(parsedValue))
+                throw new InvalidArgumentError('Not a number.');
+            return parsedValue;
+        })
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value))
+                throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .option('-f, --from <value>', 'Buy tokens starting from the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-t, --to <value>', 'Buy tokens ending at the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+        })
+        .description('Buy the token by the mint from the accounts')
+        .action((amount, mint, options) => {
+            const { from, to, list } = options;
+            commands.buy_token(keys, amount, mint, from, to, list);
+        });
+
+    program
         .command('spl-sell')
         .alias('st')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
+        })
+        .option('-f, --from <value>', 'Sell tokens starting from the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-t, --to <value>', 'Sell tokens ending at the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
         })
         .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
             const key_path = `${common.KEYS_DIR}/key${value}.json`;
@@ -215,8 +275,8 @@ async function main() {
         })
         .description('Sell all the token by the mint from the accounts')
         .action((mint, options) => {
-            const { list, percent } = options;
-            commands.sell_token(keys, mint, list, percent);
+            const { from, to, list, percent } = options;
+            commands.sell_token(keys, mint, from, to, list, percent);
         });
 
     program
@@ -260,11 +320,26 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-r, --reserve', 'Collect from the reserve account as well')
+        .option('-f, --from <value>', 'Collect tokens starting from the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-t, --to <value>', 'Collect tokens ending at the provided index', (value) => {
+            if (!common.validate_int(value, 1, keys_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range (1-${keys_cnt}).`);
+            return parseInt(value, 10);
+        })
+        .option('-l, --list <keys...>', 'Specify the list of key files', (value, prev: any) => {
+            const key_path = `${common.KEYS_DIR}/key${value}.json`;
+            if (!existsSync(key_path))
+                throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
+            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+        })
         .description('Collect all the token by the mint from the accounts to the provided address')
         .action((mint, receiver, options) => {
-            const { reserve } = options;
-            commands.collect_token(keys, mint, receiver, reserve);
+            const { from, to, list } = options;
+            commands.collect_token(keys, mint, receiver, from, to, list);
         });
 
     program
@@ -289,7 +364,7 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(1 - ${keys_cnt}).`);
             return parseInt(value, 10);
         })
-        .option('-t --to <value>', 'Topup ending at the provided index', (value) => {
+        .option('-t, --to <value>', 'Topup ending at the provided index', (value) => {
             if (!common.validate_int(value, 1, keys_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(1 - ${keys_cnt}).`);
             return parseInt(value, 10);
@@ -300,11 +375,12 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
+        .option('-s, --spider', 'Topup the account using the spider')
         .alias('t')
         .description('Topup the accounts with SOL using the provided keypair')
         .action((amount, sender, options) => {
-            const { from, to, list } = options;
-            commands.topup(keys, amount, sender, from, to, list);
+            const { from, to, list, spider } = options;
+            commands.topup(keys, amount, sender, spider, from, to, list);
         });
 
     program
@@ -383,6 +459,12 @@ async function main() {
         });
 
     program
+        .command('clean')
+        .alias('cl')
+        .description('Clean the accounts')
+        .action(() => commands.clean(keys));
+
+    program
         .command('drop')
         .alias('dr')
         .argument('<airdrop>', 'Percent of tokens to be airdroped', (value) => {
@@ -418,12 +500,6 @@ async function main() {
             const { presale } = options;
             await drop.drop(airdrop, mint, drop, presale);
         });
-
-    program
-        .command('clean')
-        .alias('cl')
-        .description('Clean the accounts')
-        .action(() => commands.clean(keys));
 
     program
         .command('clear-drop')
