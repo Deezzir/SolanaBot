@@ -35,7 +35,7 @@ async function main() {
     // common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
-        .version('2.1.0')
+        .version('2.2.0')
         .description('Solana Buy Bot CLI');
 
     program
