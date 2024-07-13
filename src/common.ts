@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync, statSync } from 'fs';
 import { readdir } from 'fs/promises';
 import dotenv from 'dotenv';
 import path, { basename } from 'path';
@@ -284,6 +284,47 @@ export function get_keypair(file_path: string): Keypair | undefined {
         error(`[ERROR] failed to read key file: ${err} (${file_path})`);
         return undefined;
     }
+}
+
+export async function get_rescue_keys(keys_dir: string, keys_list: Key[] = []): Promise<Key[]> {
+    const is_valid_key_path = (file_path: string): boolean => {
+        if (path.extname(file_path) !== '.json') return false;
+        if (!/^key\d+_\d+\.json$/.test(path.basename(file_path))) return false;
+        return true;
+    }
+
+    const extract_index = (value: string): number => {
+        const match = value.match(/(\d+)_(\d+)/);
+        if (!match || match.length !== 3) return 0;
+        return parseInt(match[1] + match[2], 10);
+    }
+
+    try {
+        const files = readdirSync(keys_dir);
+
+        files.forEach(file => {
+            const file_path = path.join(keys_dir, file);
+            const stat = statSync(file_path);
+
+            if (stat.isDirectory()) {
+                get_rescue_keys(file_path, keys_list);
+            } else if (stat.isFile() && is_valid_key_path(file_path)) {
+                const keypair = get_keypair(file_path);
+                if (!keypair) return;
+                keys_list.push({
+                    file_name: file,
+                    keypair: keypair,
+                    index: extract_index(file),
+                    is_reserve: false
+                });
+            }
+        });
+        return keys_list;
+    } catch (err) {
+        error(`[ERROR] failed to read keys directory: ${err}`);
+        return []
+    }
+
 }
 
 export async function get_keys(keys_dir: string, from?: number, to?: number): Promise<Key[]> {

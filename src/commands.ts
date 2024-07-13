@@ -8,6 +8,7 @@ import { Wallet } from '@project-serum/anchor';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
+const INTERVAL = 50;
 
 export async function clean(keys: common.Key[]): Promise<void> {
     common.log('Cleaning all the accounts...\n');
@@ -99,7 +100,7 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
             .catch(error => common.error(`Transaction failed: ${error.message}`)));
 
         count--;
-        await common.sleep(100);
+        await common.sleep(INTERVAL);
     }
 
     await Promise.allSettled(transactions);
@@ -378,7 +379,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
             .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
             .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
 
-        await common.sleep(50);
+        await common.sleep(INTERVAL);
     }
 
     await Promise.allSettled(transactions);
@@ -414,7 +415,7 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
                 .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
 
-            await common.sleep(50);
+            await common.sleep(INTERVAL);
         }
 
         await Promise.allSettled(transactions);
@@ -460,7 +461,7 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
                     .then(signature => common.log(`Raydium Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Raydium Transaction failed for ${key.file_name}: ${error.message}`)));
             }
-            await common.sleep(50);
+            await common.sleep(INTERVAL);
         }
 
         await Promise.allSettled(transactions);
@@ -508,7 +509,7 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
-            await common.sleep(50);
+            await common.sleep(INTERVAL);
         }
 
         await Promise.allSettled(transactions);
@@ -550,12 +551,11 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
                 .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
 
-            await common.sleep(50);
+            await common.sleep(INTERVAL);
         }
         await Promise.allSettled(transactions);
     } else {
-        throw new Error('NOT IMPLEMENTED');
-        // await spider.run_spider_transfer(keys, amount, payer);
+        await spider.run_spider_transfer(keys, amount, payer);
     }
 }
 
