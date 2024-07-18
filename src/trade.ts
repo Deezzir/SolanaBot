@@ -48,8 +48,8 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
 
 export async function get_token_supply(mint: PublicKey): Promise<bigint> {
     try {
-        const mint_1 = await getMint(global.CONNECTION, mint, 'confirmed');
-        return mint_1.supply;
+        const mint_data = await getMint(global.CONNECTION, mint, 'confirmed');
+        return mint_data.supply;
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
         return BigInt(1_000_000_000 * 10 ** 6);
@@ -575,7 +575,10 @@ export async function create_token(
 ): Promise<[String, PublicKey]> {
     const mint = Keypair.generate();
     const instructions = await get_create_token_instructions(creator, meta, cid, mint);
-    const sig = await create_and_send_smart_tx(instructions, [creator]);
+    const sig = await create_and_send_tx(
+        instructions, [creator, mint],
+        { priority_level: priority || common.PriorityLevel.MEDIUM, accounts: ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'] }
+    );
     return [sig, mint.publicKey];
 }
 

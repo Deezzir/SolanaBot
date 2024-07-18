@@ -168,6 +168,7 @@ export function bot_conf_display(config: BotConfig) {
         token_name: config.token_name ? config.token_name : 'N/A',
         token_ticker: config.token_ticker ? config.token_ticker : 'N/A',
         collect_address: config.collect_address.toString(),
+        start_interval: config.start_interval ? config.start_interval : 0,
         mint: config.mint ? config.mint.toString() : 'N/A'
     };
 }

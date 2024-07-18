@@ -95,7 +95,7 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
     let transactions = [];
 
     while (count > 0) {
-        transactions.push(trade.create_token(creator, meta, cid)
+        transactions.push(trade.create_token(creator, meta, cid, common.PriorityLevel.LOW)
             .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
             .catch(error => common.error(`Transaction failed: ${error.message}`)));
 
