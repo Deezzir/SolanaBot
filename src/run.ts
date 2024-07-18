@@ -19,8 +19,7 @@ let FETCH_STOP_FUNCTION: (() => void) | null = null;
 export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}, interval_seconds: number = 0): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
     if (message === 'buy') {
-        for (let i = 0; i < workers.length; i++) {
-            const worker = workers[i];
+        for (const worker of workers) {
             common.log(`[Main Worker] Sending the buy command to worker ${worker.index}`);
             worker.worker.postMessage({ command: `buy${worker.index}`, data });
             if (interval_seconds > 0) {
