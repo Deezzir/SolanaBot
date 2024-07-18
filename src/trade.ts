@@ -144,7 +144,6 @@ export async function create_and_send_tx(
     instructions: TransactionInstruction[], signers: Signer[], priority?: common.PriorityOptions
 ): Promise<String> {
     if (signers.length === 0) throw new Error(`[ERROR] No signers provided.`);
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
 
     if (priority) {
         const fee = await get_priority_fee(priority);
@@ -152,6 +151,7 @@ export async function create_and_send_tx(
             microLamports: fee,
         }));
     }
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
 
     const versioned_tx = new VersionedTransaction(new TransactionMessage({
         payerKey: signers[0].publicKey,
