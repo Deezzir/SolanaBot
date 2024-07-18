@@ -16,15 +16,16 @@ var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
 
-export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}, interval: number = 0): Promise<void> {
+export async function worker_post_message(workers: common.WorkerJob[], message: string, data: any = {}, interval_seconds: number = 0): Promise<void> {
     if (message === 'stop') await wait_drop_unsub();
     if (message === 'buy') {
         for (let i = 0; i < workers.length; i++) {
-            common.log(`[Main Worker] Sending the buy command to worker ${i + 1}`);
-            workers[i].worker.postMessage({ command: `buy${i + 1}`, data });
-            if (interval > 0) {
-                const min_interval = interval;
-                const max_interval = Math.ceil(interval * 1.5);
+            const worker = workers[i];
+            common.log(`[Main Worker] Sending the buy command to worker ${worker.index}`);
+            worker.worker.postMessage({ command: `buy${worker.index}`, data });
+            if (interval_seconds > 0) {
+                const min_interval = interval_seconds * 1000;
+                const max_interval = Math.ceil(interval_seconds * 1.5) * 1000;
                 await common.sleep(Math.floor(Math.random() * (max_interval - min_interval)) + min_interval);
             }
         }
@@ -301,7 +302,7 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
             }
             );
         });
-        workers.push({ worker: worker, job: job });
+        workers.push({ worker: worker, index: key.index, job: job });
     }
 
     return true;
@@ -385,11 +386,10 @@ export function setup_cmd_interface(workers: common.WorkerJob[], bot_config: com
 
 export async function setup_config(config: common.BotConfig, keys_cnt: number): Promise<common.BotConfig | undefined> {
     if (config) {
-        config.collect_address = new PublicKey(config.collect_address);
         if (config.mint) {
-            config.mint = new PublicKey(config.mint);
+            common.log('Sniping existing mint...');
         } else if (config.token_name && config.token_ticker) {
-            common.log('Sniping mint address...');
+            common.log('Sniping token by name and ticker...');
         } else {
             console.error('Invalid config file.');
             process.exit(1);

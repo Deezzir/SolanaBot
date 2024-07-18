@@ -109,6 +109,8 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
 export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<void> {
     try {
         common.log(`Getting the token balance of the keys by the mint ${mint.toString()}...`);
+        common.log(`Bot count: ${keys.length}\n`);
+
         const { token_name, token_symbol } = await trade.get_token_meta(mint);
         const supply = parseInt((await trade.get_token_supply(mint)).toString());
         common.log(`Token name: ${token_name} | Symbol: ${token_symbol}\n`);
@@ -156,7 +158,8 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
 }
 
 export async function balance(keys: common.Key[]): Promise<void> {
-    common.log('Getting the balance of the keys...\n');
+    common.log('Getting the balance of the keys...');
+    common.log(`Bot count: ${keys.length}\n`);
     if (keys.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
@@ -600,7 +603,7 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
     }
 
     try {
-        const mint = bot_config.mint ? bot_config.mint : await run.wait_drop_sub(bot_config.token_name, bot_config.token_ticker);
+        const mint = bot_config.token_name && bot_config.token_ticker ? await run.wait_drop_sub(bot_config.token_name, bot_config.token_ticker) : bot_config.mint;
 
         if (mint) {
             bot_config.mint = mint;
@@ -609,12 +612,13 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
             await worker_update_mint(workers, bot_config.mint);
             const interval = setInterval(async () => { if (bot_config.mint) worker_update_mint(workers, bot_config.mint) }, META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(workers, 'buy', {}, bot_config.buy_interval || 0) }, 1000);
+            setTimeout(() => { run.worker_post_message(workers, 'buy', {}, bot_config.start_interval || 0) }, 1000);
             await run.wait_for_workers(workers);
             clearInterval(interval);
 
             if (global.START_COLLECT)
                 await collect_token(keys, bot_config.mint, bot_config.collect_address);
+
         } else {
             common.error('[ERROR] Token not found. Exiting...');
             global.RL.close();

@@ -35,7 +35,7 @@ async function main() {
     // common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
-        .version('2.2.0')
+        .version('2.2.1')
         .description('Solana Buy Bot CLI');
 
     program
@@ -46,9 +46,10 @@ async function main() {
             if (!existsSync(value))
                 throw new InvalidOptionArgumentError('Config file does not exist.');
             const json = common.read_json(value);
-            if (!json)
-                throw new InvalidOptionArgumentError('Invalid JSON format.');
-            return json as common.BotConfig;
+            const config = common.validate_bot_config(json);
+            if (!config)
+                throw new InvalidOptionArgumentError('Invalid Config JSON format.');
+            return config;
         })
         .action(async (options) => {
             let { config } = options;

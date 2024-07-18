@@ -4,7 +4,7 @@ import * as common from './common.js';
 import * as trade from './trade.js';
 import { Helius } from 'helius-sdk';
 
-const SLIPPAGE = 0.25;
+const SLIPPAGE = 0.50;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.005;
@@ -25,10 +25,6 @@ var CURRENT_BUY_AMOUNT = 0;
 var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
-
-async function sleep(seconds: number) {
-    return new Promise(resolve => setTimeout(resolve, seconds * 1000));
-}
 
 function control_sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
@@ -59,7 +55,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
     } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
         if (error instanceof Error && error.message.includes('Simulation failed')) {
-            await sleep(0.5);
+            await common.sleep(0.5 * 1000);
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Simulation failed, retrying...`);
             return false;
         }
@@ -98,7 +94,7 @@ const buy = async () => {
                 );
             }
             count--;
-            await sleep(1);
+            await common.sleep(1 * 1000);
         }
         await Promise.allSettled(transactions);
 
@@ -140,7 +136,7 @@ const sell = async () => {
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
                     sold = true;
                 }
-                await sleep(5);
+                await common.sleep(5 * 1000);
             }
 
             if (sold) break;
@@ -166,7 +162,7 @@ const sell = async () => {
                     );
                 }
                 count--;
-                await sleep(1);
+                await common.sleep(1 * 1000);
             }
             await Promise.allSettled(transactions);
         } catch (e) {
@@ -193,7 +189,7 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
         }
 
         if (IS_BUMP) {
-            await sleep(1);
+            await common.sleep(2 * 1000);
             await sell();
         }
 

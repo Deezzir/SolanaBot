@@ -55,10 +55,10 @@ export interface BotConfig {
     mcap_threshold: number;
     is_bump: boolean;
     is_buy_once: boolean;
-    start_interval: number;
+    start_interval: number | undefined;
     action: Action;
-    token_name: string;
-    token_ticker: string;
+    token_name: string | undefined;
+    token_ticker: string | undefined;
     collect_address: PublicKey;
     mint: PublicKey | undefined;
 }
@@ -120,6 +120,7 @@ export type WorkerConfig = {
 
 export type WorkerJob = {
     worker: Worker;
+    index: number;
     job: Promise<void>;
 }
 
@@ -532,4 +533,47 @@ export async function fetch_random_mints(count: number): Promise<TokenMeta[]> {
             error(`[ERROR] Failed fetching the mints: ${err}`);
             return [] as TokenMeta[];
         });
+}
+
+export function validate_bot_config(json: any): BotConfig | undefined {
+    const required_fields = [
+        'thread_cnt',
+        'buy_interval',
+        'spend_limit',
+        'start_buy',
+        'mcap_threshold',
+        'action',
+        'collect_address'
+    ];
+
+    for (const field of required_fields) {
+        if (!(field in json)) {
+            return;
+        }
+    }
+
+    const { token_name, token_ticker, mint } = json;
+
+    if (mint === undefined && token_name === undefined && token_ticker === undefined) {
+        error('[ERROR] Missing mint or token name and token ticker.');
+        return;
+    }
+
+    if (mint !== undefined && (token_name !== undefined || token_ticker !== undefined)) {
+        error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
+        return;
+    }
+
+    if (token_name === undefined && token_ticker !== undefined || token_name !== undefined && token_ticker === undefined) {
+        error('[ERROR] Both token name and token ticker are required.');
+        return;
+    }
+
+    if (!('is_bump' in json)) json.is_bump = false;
+    if (!('is_buy_once' in json)) json.is_buy_once = false;
+    if (!('start_interval' in json)) json.start_interval = undefined;
+    if (json.mint) json.mint = new PublicKey(json.mint);
+    json.collect_address = new PublicKey(json.collect_address);
+
+    return json as BotConfig;
 }

@@ -1,7 +1,7 @@
 {
-    "name": "bot",
-    "version": "1.0.0",
-    "description": "solana buy bot",
+    "name": "solanabot",
+    "version": "2.2.1",
+    "description": "Solana buy bot",
     "main": "./src/bot.ts",
     "type": "module",
     "scripts": {
