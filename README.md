@@ -63,17 +63,19 @@ Commands:
   balance|b                                         Get the balance of the accounts
   spl-balance|sb <mint>                             Get the total balance of a token of the accounts
   warmup|w [options]                                Warmup the accounts with the tokens
-  collect|c [options] <address>                     Collect all the SOL from the accounts to the provided address
-  spl-buy-once|bto <amount> <mint> <keypair_path>   Buy the token once with the provided amount
-  spl-sell-once|sto <mint> <keypair_path>           Sell the token once with the provided amount
+  collect|c [options] <receiver>                    Collect all the SOL from the accounts to the provided address
+  spl-buy-once|bto <amount> <mint> <buyer_path>     Buy the token once with the provided amount
+  spl-sell-once|sto [options] <mint> <seller_path>  Sell the token once with the provided amount
+  spl-buy|bt [options] <amount> <mint>              Buy the token by the mint from the accounts
   spl-sell|st [options] <mint>                      Sell all the token by the mint from the accounts
-  transfer|tr <amount> <address> <keypair_path>     Transfer SOL from the specified keypair to the receiver
-  spl-collect|ct <mint> <address>                   Collect all the token by the mint from the accounts to the provided address
-  topup|t [options] <amount> <keypair_path>         Topup the accounts with SOL using the provided keypair
-  metadata|m <json> <image_path>                    Upload the metadata of the token using the provided JSON file
-  promote|pr <count> <cid> <keypair_path>           Create promotion tokens using the provided keypair
-  drop|d [options] <airdrop> <mint> <keypair_path>  Do the drop
+  transfer|tr <amount> <receiver> <sender_path>     Transfer SOL from the specified keypair to the receiver
+  spl-collect|sc [options] <mint> <receiver>        Collect all the token by the mint from the accounts to the provided address
+  topup|t [options] <amount> <sender_path>          Topup the accounts with SOL using the provided keypair
+  metadata|m <json_path> <image_path>               Upload the metadata of the token using the provided JSON file
+  promote|pr <count> <cid> <creator_path>           Create promotion tokens using the provided keypair
+  create-token|ct [options] <cid> <creator_path>    Create a token
   clean|cl                                          Clean the accounts
+  drop|dr [options] <airdrop> <mint> <drop_path>    Do the drop
   clear-drop|cd <airdrop_file_path>                 Clear the drop
   help [command]                                    display help for command
 ```
