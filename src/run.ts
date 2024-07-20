@@ -24,7 +24,7 @@ export async function worker_post_message(workers: common.WorkerJob[], message: 
             worker.worker.postMessage({ command: `buy${worker.index}`, data });
             if (interval_seconds > 0) {
                 const min_interval = interval_seconds * 1000;
-                const max_interval = Math.ceil(interval_seconds * 1.5) * 1000;
+                const max_interval = interval_seconds * 1.5 * 1000;
                 await common.sleep(Math.floor(Math.random() * (max_interval - min_interval)) + min_interval);
             }
         }
