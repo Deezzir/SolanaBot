@@ -276,13 +276,15 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
         return false;
     }
 
-    if (!trade.check_has_balances(keys)) {
+    const all_has_balances = await trade.check_has_balances(keys);
+    if (!all_has_balances) {
         common.error('[ERROR] First, topup the specified accounts.');
         global.RL.close();
         return false;
     }
 
     common.log('[Main Worker] Starting the workers...');
+    const started_promises: Promise<void>[] = [];
 
     for (const key of keys) {
         const data: common.WorkerConfig = {
@@ -292,8 +294,19 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
         };
 
         const worker = new Worker(WORKER_PATH, { workerData: data });
+
+        let started: () => void;
+        const started_promise = new Promise<void>(resolve => started = resolve);
+
         const job = new Promise<void>((resolve, reject) => {
-            worker.on('message', (msg) => common.log(msg));
+            worker.on('message', (msg) => {
+                if (msg.command === 'started') {
+                    started()
+                    common.log(msg.data);
+                    return;
+                }
+                common.log(msg);
+            });
             worker.on('error', (err) => { common.error(`[Worker ${key.index}] Encountered error: ${err}`); reject() });
             worker.on('exit', (code) => {
                 if (code !== 0) reject(new Error(`[Worker ${key.index}]Stopped with exit code ${code} `));
@@ -301,8 +314,13 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
             }
             );
         });
+
+        started_promises.push(started_promise);
         workers.push({ worker: worker, index: key.index, job: job });
     }
+
+    await Promise.all(started_promises);
+    common.log('[Main Worker] All workers have started');
 
     return true;
 }

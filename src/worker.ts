@@ -226,11 +226,10 @@ async function main() {
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
     WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
 
-    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`);
+    parentPort?.postMessage({ command: "started", data: `[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}` });
 
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
-            // case 'buy':
             case `buy${WORKER_CONF.id}`:
                 const std = WORKER_CONF.inputs.start_buy * 0.05;
                 CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.inputs.start_buy, std);

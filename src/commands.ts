@@ -512,7 +512,7 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
-            await common.sleep(INTERVAL);
+            // await common.sleep(INTERVAL);
         }
 
         await Promise.allSettled(transactions);
@@ -601,6 +601,8 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
         global.RL.close();
         return;
     }
+
+    common.log('[Main Worker] Bot started successfully, waiting for the token...');
 
     try {
         const mint = bot_config.token_name && bot_config.token_ticker ? await run.wait_drop_sub(bot_config.token_name, bot_config.token_ticker) : bot_config.mint;
