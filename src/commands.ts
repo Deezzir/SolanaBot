@@ -544,6 +544,7 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
 
     if (!is_spider) {
         let transactions = [];
+        let failed: string[] = [];
 
         for (const key of keys) {
             const receiver = key.keypair
@@ -552,11 +553,19 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
             common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
             transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, common.PriorityLevel.VERY_HIGH)
                 .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
-                .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
+                .catch(error => {
+                    common.error(`Transaction failed for ${key.file_name}: ${error.message}`)
+                    failed.push(key.file_name);
+                }));
 
             await common.sleep(INTERVAL);
         }
         await Promise.allSettled(transactions);
+
+        if (failed.length > 0) {
+            common.log(`\nFailed transactions:`);
+            for (const item of failed) common.log(`File: ${item}`);
+        }
     } else {
         await spider.run_spider_transfer(keys, amount, payer);
     }
