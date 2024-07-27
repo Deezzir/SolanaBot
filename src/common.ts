@@ -7,6 +7,7 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
+import fetch from 'node-fetch';
 dotenv.config();
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
