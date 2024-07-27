@@ -51,7 +51,7 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid Config JSON format.');
             return config;
         })
-        .action(async (options) => {
+        .action(async (options: any) => {
             let { config } = options;
             const bot_config = await run.setup_config(config, keys_cnt);
             if (!bot_config) {

@@ -5,6 +5,7 @@ import * as run from './run.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
+import { Config } from './config.js';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
@@ -390,7 +391,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
 
 export async function collect_token(keys: common.Key[], mint: PublicKey, receiver: PublicKey, from?: number, to?: number, key_picks?: number[]): Promise<void> {
     common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
-    const reserve_keypair = common.RESERVE_KEYPAIR
+    const reserve_keypair = Config.ReserveKeypair;
     if (!reserve_keypair) throw new Error('Unreachable');
 
     if (keys.length === 0) {

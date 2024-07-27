@@ -7,19 +7,12 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
-import fetch from 'node-fetch';
+// import fetch from 'node-fetch';
 dotenv.config();
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
 export const RESERVE_KEY_FILE = process.env.RESERVE_KEY_FILE || 'key0.json';
 export const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
-
-const reserve_keypair = get_keypair(RESERVE_KEY_PATH);
-if (!reserve_keypair) {
-    error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
-    process.exit(1);
-}
-export const RESERVE_KEYPAIR = reserve_keypair;
 
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
@@ -526,7 +519,7 @@ export async function fetch_random_mints(count: number): Promise<TokenMeta[]> {
     const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
     return fetch(`${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`)
         .then(response => response.json())
-        .then(data => {
+        .then((data: any) => {
             if (!data || data.statusCode !== undefined) return [] as TokenMeta[];
             const shuffled = data.sort(() => 0.5 - Math.random());
             return shuffled.slice(0, count) as TokenMeta[];
