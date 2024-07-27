@@ -79,9 +79,19 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Directory '${value}' is not empty.`);
             return value;
         })
+        .option('-k, --keys_path <path>', 'Path to the file with secret keys to convert', (value) => {
+            if (!existsSync(value))
+                throw new InvalidOptionArgumentError('Keys file does not exist.');
+            return value;
+        })
+        .option('-i, --index <index>', 'Starting index of the keypair', (value) => {
+            if (!common.validate_int(value, 0))
+                throw new InvalidOptionArgumentError(`Index should be greater than 0.`);
+            return parseInt(value, 10);
+        })
         .option('-r, --reserve', 'Generate the reserve keypair', false)
         .action((count, options) => {
-            let { path, reserve } = options;
+            let { path, keys_path, index, reserve } = options;
             if (path === undefined) {
                 if (existsSync(common.KEYS_DIR) && readdirSync(common.KEYS_DIR).length > 0)
                     throw new InvalidOptionArgumentError(`Directory '${common.KEYS_DIR}' is empty.`);
@@ -89,7 +99,7 @@ async function main() {
             }
             try {
                 mkdirSync(path, { recursive: true });
-                commands.generate(count, path, reserve);
+                commands.generate(count, path, reserve, keys_path, index);
             } catch (e) {
                 common.error(`[ERROR] Failed to create the directory '${path}'.`);
             }

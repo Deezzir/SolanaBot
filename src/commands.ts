@@ -5,8 +5,9 @@ import * as run from './run.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
-import { existsSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
@@ -642,18 +643,32 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
     }
 }
 
-export function generate(count: number, dir: string, reserve: boolean) {
+export function generate(count: number, dir: string, reserve: boolean, keys_path?: string, index?: number): void {
     common.log(`Generating ${count} keypairs...\n`);
 
     const keys: common.Key[] = [];
+    const starting_index = index || 1;
 
-    for (let i = 0; i <= count; i++) {
-        const keypair = Keypair.generate();
-        if (reserve && i === 0) {
-            keys.push({ keypair, file_name: `${common.RESERVE_KEY_FILE}`, index: i, is_reserve: true });
-        } else {
-            keys.push({ keypair, file_name: `key${i}.json`, index: i, is_reserve: false });
-        }
+    if (keys_path && existsSync(keys_path)) {
+        const private_keys = readFileSync(keys_path, 'utf8').split('\n').filter(i => i);
+        private_keys.forEach((key, index) => {
+            if (key.length < 10) return;
+            key = key.trim();
+            try {
+                const decoded_key = Array.from(bs58.decode(key));
+                keys.push({ keypair: Keypair.fromSecretKey(new Uint8Array(decoded_key)), file_name: `key${index + starting_index}.json`, index: index + 1, is_reserve: false });
+            } catch (e) {
+                common.error(`[ERROR] Invalid key at line ${index + 1}`);
+                return;
+            }
+        });
+    } else {
+        for (let i = 0; i < count; i++)
+            keys.push({ keypair: Keypair.generate(), file_name: `key${i}.json`, index: i + starting_index, is_reserve: false });
+    }
+
+    if (reserve) {
+        keys.push({ keypair: Keypair.generate(), file_name: `${common.RESERVE_KEY_FILE}`, index: 0, is_reserve: true });
     }
 
     keys.forEach((key) => {
