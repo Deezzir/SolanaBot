@@ -1,7 +1,7 @@
 import figlet from 'figlet';
 import dotenv from 'dotenv'
 import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'commander';
-import { existsSync, } from 'fs';
+import { existsSync, mkdir, mkdirSync, readdirSync, } from 'fs';
 import * as common from './common.js';
 import * as run from './run.js';
 import * as commands from './commands.js';
@@ -35,7 +35,7 @@ async function main() {
     // common.log(`Using RPC: ${helius_rpc}\n`);
 
     program
-        .version('2.2.2')
+        .version('2.2.3')
         .description('Solana Buy Bot CLI');
 
     program
@@ -62,6 +62,39 @@ async function main() {
             await commands.start(keys, bot_config, workers)
             global.RL.close();
         });
+
+    program
+        .command('generate')
+        .alias('g')
+        .argument('<count>', 'Number of keypairs to generate', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
+            return parsedValue;
+        })
+        .option('-p, --path <path>', 'Path to the directory to save the keypairs', (value) => {
+            if (existsSync(value) && readdirSync(value).length > 0)
+                throw new InvalidOptionArgumentError(`Directory '${value}' is not empty.`);
+            return value;
+        })
+        .option('-r, --reserve', 'Generate the reserve keypair', false)
+        .action((count, options) => {
+            let { path, reserve } = options;
+            if (path === undefined) {
+                if (existsSync(common.KEYS_DIR) && readdirSync(common.KEYS_DIR).length > 0)
+                    throw new InvalidOptionArgumentError(`Directory '${common.KEYS_DIR}' is empty.`);
+                path = common.KEYS_DIR;
+            }
+            try {
+                mkdirSync(path, { recursive: true });
+                commands.generate(count, path, reserve);
+            } catch (e) {
+                common.error(`[ERROR] Failed to create the directory '${path}'.`);
+            }
+        })
+        .description('Generate the keypairs')
 
     program
         .command('balance')

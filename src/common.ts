@@ -283,7 +283,7 @@ export function get_keypair(file_path: string): Keypair | undefined {
         const content = readFileSync(file_path, 'utf8');
         return Keypair.fromSecretKey(new Uint8Array(JSON.parse(content)));
     } catch (err) {
-        error(`[ERROR] failed to read key file: ${err} (${file_path})`);
+        error(`[ERROR] Failed to read key file: ${err} (${file_path})`);
         return undefined;
     }
 }

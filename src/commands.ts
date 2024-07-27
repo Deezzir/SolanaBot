@@ -5,6 +5,8 @@ import * as run from './run.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
+import { existsSync, writeFileSync } from 'fs';
+import path from 'path';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
@@ -92,7 +94,7 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
     }
 
     let count = times;
-    let transactions = [];
+    const transactions = [];
 
     while (count > 0) {
         transactions.push(trade.create_token(creator, meta, cid, common.PriorityLevel.LOW)
@@ -370,7 +372,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
 
     keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-    let transactions = [];
+    const transactions = [];
 
     for (const key of keys) {
         const sender = key.keypair;
@@ -403,7 +405,7 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
     try {
         const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const sender = key.keypair;
@@ -445,7 +447,7 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
     try {
         keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const buyer = key.keypair
@@ -492,7 +494,7 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
     try {
         keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const seller = key.keypair
@@ -543,8 +545,8 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     }
 
     if (!is_spider) {
-        let transactions = [];
-        let failed: string[] = [];
+        const transactions = [];
+        const failed: string[] = [];
 
         for (const key of keys) {
             const receiver = key.keypair
@@ -638,4 +640,26 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
         common.error(`[ERROR] ${error}`);
         global.RL.close();
     }
+}
+
+export function generate(count: number, dir: string, reserve: boolean) {
+    common.log(`Generating ${count} keypairs...\n`);
+
+    const keys: common.Key[] = [];
+
+    for (let i = 0; i <= count; i++) {
+        const keypair = Keypair.generate();
+        if (reserve && i === 0) {
+            keys.push({ keypair, file_name: `${common.RESERVE_KEY_FILE}`, index: i, is_reserve: true });
+        } else {
+            keys.push({ keypair, file_name: `key${i}.json`, index: i, is_reserve: false });
+        }
+    }
+
+    keys.forEach((key) => {
+        const file_path = path.join(dir, key.file_name);
+        writeFileSync(file_path, JSON.stringify(Array.from(key.keypair.secretKey)), 'utf8');
+    });
+
+    common.log('Key generation completed');
 }
