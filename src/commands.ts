@@ -394,7 +394,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
 
 export async function collect_token(keys: common.Key[], mint: PublicKey, receiver: PublicKey, from?: number, to?: number, key_picks?: number[]): Promise<void> {
     common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
-    const reserve_keypair = Config.ReserveKeypair;
+    const reserve_keypair = common.Config.ReserveKeypair;
     if (!reserve_keypair) throw new Error('Unreachable');
 
     if (keys.length === 0) {

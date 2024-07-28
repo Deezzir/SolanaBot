@@ -8,7 +8,6 @@ import BN from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import bs58 from 'bs58';
-import { Config } from './config.js';
 
 const SWAP_SEED = 'swap';
 
@@ -68,7 +67,7 @@ function is_bundle_error<T>(value: T | Error): value is Error {
 export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
     try {
         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, Config.ReserveKeypair);
+        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, common.Config.ReserveKeypair);
 
         instructions.unshift(SystemProgram.transfer({
             fromPubkey: payer.publicKey,

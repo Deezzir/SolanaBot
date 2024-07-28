@@ -19,6 +19,67 @@ const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 
+export enum EConfigKeys {
+    ReserveKeypair = 'ReserveKeypair'
+}
+
+export interface IConfig {
+    [EConfigKeys.ReserveKeypair]?: Keypair;
+}
+
+export class Config {
+    public static config: IConfig = {};
+
+    static init(config: IConfig) {
+        Config.config = config;
+    }
+
+    /**
+     * Validator hook to ensure that all passed keys are defined in the Config class
+     * @param validateKeys - array of keys to validate. Should have a corresponding getter in Config class
+     * @returns 
+     */
+    public static validatorHook(validateKeys: EConfigKeys[]) {
+        return () => {
+            for (const key of validateKeys) {
+                const getMethod = Config[key];
+                if(!getMethod) {
+                    throw new Error(`[ERROR] Config key ${key} is not defined.`);
+                }
+            }
+        };
+    }
+
+    /**
+     * Initialize a config value and store it in the cache.
+     * @param key - Key to store the config value, should be a key of IConfig
+     * @param initMethod - Method to initialize the config value, should return the value
+     * @returns
+     */
+    private static configCacheBoilerplate(key: keyof IConfig, initMethod: () => any) {
+        if (Config.config[key]) {
+            return Config.config[key];
+        }
+
+        Config.config[key] = initMethod();
+        return Config.config[key];
+    }
+
+    public static get ReserveKeypair() {
+        return <Keypair>this.configCacheBoilerplate(EConfigKeys.ReserveKeypair, () => {
+            const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
+            const reserve_keypair = get_keypair(RESERVE_KEY_PATH);
+
+            if (!reserve_keypair) {
+                error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
+                process.exit(1);
+            }
+
+            return reserve_keypair;
+        });
+    }
+}
+
 export type Key = {
     file_name: string;
     keypair: Keypair;
