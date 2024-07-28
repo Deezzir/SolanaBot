@@ -12,6 +12,17 @@
       "sourceMaps": true,
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "node",
-    }
+    },
+    {
+      "name": "Debug Bot",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/bot.js",
+      "args": ["balance"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "node",
+    },
   ]
 }
