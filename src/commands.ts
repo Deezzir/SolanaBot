@@ -6,6 +6,9 @@ import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
 import { Config } from './config.js';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
@@ -93,7 +96,7 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
     }
 
     let count = times;
-    let transactions = [];
+    const transactions = [];
 
     while (count > 0) {
         transactions.push(trade.create_token(creator, meta, cid, common.PriorityLevel.LOW)
@@ -371,7 +374,7 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
 
     keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-    let transactions = [];
+    const transactions = [];
 
     for (const key of keys) {
         const sender = key.keypair;
@@ -404,7 +407,7 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
     try {
         const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const sender = key.keypair;
@@ -446,7 +449,7 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
     try {
         keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const buyer = key.keypair
@@ -493,7 +496,7 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
     try {
         keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
-        let transactions = [];
+        const transactions = [];
 
         for (const key of keys) {
             const seller = key.keypair
@@ -544,8 +547,8 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     }
 
     if (!is_spider) {
-        let transactions = [];
-        let failed: string[] = [];
+        const transactions = [];
+        const failed: string[] = [];
 
         for (const key of keys) {
             const receiver = key.keypair
@@ -639,4 +642,40 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
         common.error(`[ERROR] ${error}`);
         global.RL.close();
     }
+}
+
+export function generate(count: number, dir: string, reserve: boolean, keys_path?: string, index?: number): void {
+    common.log(`Generating ${count} keypairs...\n`);
+
+    const keys: common.Key[] = [];
+    const starting_index = index || 1;
+
+    if (keys_path && existsSync(keys_path)) {
+        const private_keys = readFileSync(keys_path, 'utf8').split('\n').filter(i => i);
+        private_keys.forEach((key, index) => {
+            if (key.length < 10) return;
+            key = key.trim();
+            try {
+                const decoded_key = Array.from(bs58.decode(key));
+                keys.push({ keypair: Keypair.fromSecretKey(new Uint8Array(decoded_key)), file_name: `key${index + starting_index}.json`, index: index + 1, is_reserve: false });
+            } catch (e) {
+                common.error(`[ERROR] Invalid key at line ${index + 1}`);
+                return;
+            }
+        });
+    } else {
+        for (let i = 0; i < count; i++)
+            keys.push({ keypair: Keypair.generate(), file_name: `key${i}.json`, index: i + starting_index, is_reserve: false });
+    }
+
+    if (reserve) {
+        keys.push({ keypair: Keypair.generate(), file_name: `${common.RESERVE_KEY_FILE}`, index: 0, is_reserve: true });
+    }
+
+    keys.forEach((key) => {
+        const file_path = path.join(dir, key.file_name);
+        writeFileSync(file_path, JSON.stringify(Array.from(key.keypair.secretKey)), 'utf8');
+    });
+
+    common.log('Key generation completed');
 }
