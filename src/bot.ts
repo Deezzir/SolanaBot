@@ -17,9 +17,6 @@ dotenv.config({ path: './.env' });
 
 
 async function main() {
-    if (!existsSync(common.RESERVE_KEY_PATH))
-        throw new Error("No reserve key available. Please create the 'key0.json' first.");
-
     let workers = new Array<common.WorkerJob>();
     const keys = await common.get_keys(common.KEYS_DIR);
     const keys_cnt = keys.length;
@@ -51,7 +48,8 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid Config JSON format.');
             return config;
         })
-        .action(async (options) => {
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
+        .action(async (options: any) => {
             let { config } = options;
             const bot_config = await run.setup_config(config, keys_cnt);
             if (!bot_config) {
@@ -110,6 +108,7 @@ async function main() {
         .command('balance')
         .alias('b')
         .description('Get the balance of the accounts')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action(() => commands.balance(keys));
 
     program
@@ -121,6 +120,7 @@ async function main() {
                 throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value)
         })
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint) => commands.spl_balance(keys, mint));
 
     program
@@ -159,6 +159,7 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50')
             return parsedValue;
         })
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((options) => {
             const { from, to, list, min, max } = options;
             commands.warmup(keys, from, to, list, min, max);
@@ -189,6 +190,7 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .description('Collect all the SOL from the accounts to the provided address')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((receiver, options) => {
             const { from, to, list } = options;
             commands.collect(keys, receiver, from, to, list);
@@ -216,6 +218,7 @@ async function main() {
             return buyer_keypair;
         })
         .description('Buy the token once with the provided amount')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((amount, mint, buyer) => {
             commands.buy_token_once(amount, mint, buyer);
         });
@@ -244,6 +247,7 @@ async function main() {
             return parsedValue;
         })
         .description('Sell the token once with the provided amount')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint, seller, options) => {
             const { percent } = options;
             commands.sell_token_once(mint, seller, percent);
@@ -280,6 +284,7 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .description('Buy the token by the mint from the accounts')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((amount, mint, options) => {
             const { from, to, list } = options;
             commands.buy_token(keys, amount, mint, from, to, list);
@@ -318,6 +323,7 @@ async function main() {
             return parsedValue;
         })
         .description('Sell all the token by the mint from the accounts')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint, options) => {
             const { from, to, list, percent } = options;
             commands.sell_token(keys, mint, from, to, list, percent);
@@ -347,6 +353,7 @@ async function main() {
             return sender_keypair;
         })
         .description('Transfer SOL from the specified keypair to the receiver')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((amount, receiver, sender) => {
             commands.transfer_sol(amount, receiver, sender);
         });
@@ -381,6 +388,7 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .description('Collect all the token by the mint from the accounts to the provided address')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint, receiver, options) => {
             const { from, to, list } = options;
             commands.collect_token(keys, mint, receiver, from, to, list);
@@ -422,6 +430,7 @@ async function main() {
         .option('-s, --spider', 'Topup the account using the spider')
         .alias('t')
         .description('Topup the accounts with SOL using the provided keypair')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((amount, sender, options) => {
             const { from, to, list, spider } = options;
             commands.topup(keys, amount, sender, spider, from, to, list);
@@ -443,6 +452,7 @@ async function main() {
             return value;
         })
         .description('Upload the metadata of the token using the provided JSON file')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action(async (json_path, image_path) => {
             console.log('Uploading metadata...');
             console.log(`CID: ${await common.create_metadata(json_path, image_path)}`);
@@ -468,6 +478,7 @@ async function main() {
             return creator_keypair;
         })
         .description('Create promotion tokens using the provided keypair')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((count, cid, creator) => {
             commands.promote(count, cid, creator);
         });
@@ -497,6 +508,7 @@ async function main() {
             return parsedValue;
         })
         .description('Create a token')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((cid, creator, options) => {
             const { mint, buy } = options;
             commands.create_token(cid, creator, buy, mint);
@@ -506,6 +518,7 @@ async function main() {
         .command('clean')
         .alias('cl')
         .description('Clean the accounts')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action(() => commands.clean(keys));
 
     program
@@ -540,6 +553,7 @@ async function main() {
             return parsedValue;
         })
         .description('Do the drop')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action(async (airdrop, mint, drop, options) => {
             const { presale } = options;
             await drop.drop(airdrop, mint, drop, presale);
@@ -554,6 +568,7 @@ async function main() {
             return value;
         })
         .description('Clear the drop')
+        .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((airdrop_file_path) => {
             drop.clear_drop(airdrop_file_path);
         });

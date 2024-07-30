@@ -35,6 +35,7 @@
         "inquirer": "^9.2.17",
         "jito-ts": "^3.0.1",
         "mongodb": "^6.6.1",
+        "node-fetch": "^3.3.2",
         "npm": "^10.5.2",
         "socket.io-client": "^4.7.5"
     }
