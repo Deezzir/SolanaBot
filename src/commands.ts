@@ -5,7 +5,6 @@ import * as run from './run.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
-import { Config } from './config.js';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
