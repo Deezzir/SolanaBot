@@ -96,13 +96,13 @@ async function main() {
                 path = common.KEYS_DIR;
             }
             try {
-                mkdirSync(path, { recursive: true });
+                if (!existsSync(common.KEYS_DIR)) mkdirSync(path, { recursive: true });
                 commands.generate(count, path, reserve, keys_path, index);
             } catch (e) {
                 common.error(`[ERROR] Failed to create the directory '${path}'.`);
             }
         })
-        .description('Generate the keypairs')
+        .description('Generate the keypairs. Optionally, a file with secret keys can be provided to convert them to keypairs.');
 
     program
         .command('balance')
