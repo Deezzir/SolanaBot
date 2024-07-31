@@ -37,6 +37,7 @@
         "mongodb": "^6.6.1",
         "node-fetch": "^3.3.2",
         "npm": "^10.5.2",
+        "p-limit": "^6.1.0",
         "socket.io-client": "^4.7.5"
     }
 }
