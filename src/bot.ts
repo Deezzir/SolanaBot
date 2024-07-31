@@ -65,12 +65,12 @@ async function main() {
         .command('generate')
         .alias('g')
         .argument('<count>', 'Number of keypairs to generate', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .option('-p, --path <path>', 'Path to the directory to save the keypairs', (value) => {
             if (existsSync(value) && readdirSync(value).length > 0)
@@ -144,20 +144,20 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-m, --min <value>', 'Minimum amount of tokens for each key', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .option('-M, --max <value>', 'Maximum amount of tokens for each key', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 1 || parsedValue > 50)
+            if (parsed_value < 1 || parsed_value > 50)
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50')
-            return parsedValue;
+            return parsed_value;
         })
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((options) => {
@@ -200,10 +200,10 @@ async function main() {
         .command('spl-buy-once')
         .alias('bto')
         .argument('<amount>', 'Amount to buy in SOL', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
@@ -239,12 +239,12 @@ async function main() {
             return seller_keypair;
         })
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 0.0 || parsedValue > 100.0)
+            if (parsed_value < 0.0 || parsed_value > 100.0)
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsedValue;
+            return parsed_value;
         })
         .description('Sell the token once with the provided amount')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
@@ -257,10 +257,10 @@ async function main() {
         .command('spl-buy')
         .alias('bt')
         .argument('<amount>', 'Amount to buy in SOL', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
@@ -315,12 +315,12 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 0.0 || parsedValue > 100.0)
+            if (parsed_value < 0.0 || parsed_value > 100.0)
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsedValue;
+            return parsed_value;
         })
         .description('Sell all the token by the mint from the accounts')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
@@ -333,12 +333,12 @@ async function main() {
         .command('transfer')
         .alias('tr')
         .argument('<amount>', 'Amount of SOL to topup', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 0)
+            if (parsed_value < 0)
                 throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<receiver>', 'Public address of the receiver', (value) => {
             if (!common.is_valid_pubkey(value))
@@ -397,12 +397,12 @@ async function main() {
     program
         .command('topup')
         .argument('<amount>', 'Amount of SOL to topup', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 0)
+            if (parsed_value < 0)
                 throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<sender_path>', 'Path to the keypair file of the sender', (value) => {
             if (!existsSync(value))
@@ -462,12 +462,12 @@ async function main() {
         .command('promote')
         .alias('pr')
         .argument('<count>', 'Number of promotion tokens to create', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
         .argument('<creator_path>', 'Path to the keypair file of the creator', (value) => {
@@ -502,10 +502,10 @@ async function main() {
             return mint_keypair;
         })
         .option('-b, --buy <number>', 'Amount of SOL to buy the token', (value) => {
-            const parsedValue = parseFloat(value);
-            if (isNaN(parsedValue) || parsedValue <= 0)
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value) || parsed_value <= 0)
                 throw new InvalidOptionArgumentError('Not a number.');
-            return parsedValue;
+            return parsed_value;
         })
         .description('Create a token')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
@@ -525,12 +525,12 @@ async function main() {
         .command('drop')
         .alias('dr')
         .argument('<airdrop>', 'Percent of tokens to be airdroped', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 0 || parsedValue > 100)
+            if (parsed_value < 0 || parsed_value > 100)
                 throw new InvalidArgumentError('Invalid range (0-100).');
-            return parsedValue;
+            return parsed_value;
         })
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value))
@@ -545,12 +545,12 @@ async function main() {
             return dropper_keypair;
         })
         .option('-p, --presale <number>', 'Turn on the presale', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 0 || parsedValue > 100)
+            if (parsed_value < 0 || parsed_value > 100)
                 throw new InvalidOptionArgumentError('Invalid range (0-100).');
-            return parsedValue;
+            return parsed_value;
         })
         .description('Do the drop')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
