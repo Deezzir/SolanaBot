@@ -573,6 +573,38 @@ async function main() {
             drop.clear_drop(airdrop_file_path);
         });
 
+    program
+        .command('benchmark')
+        .argument('<requests>', 'Number of requests to send', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
+            return parsedValue;
+        })
+        .option('-t, --thread <number>', 'Number of threads to use', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidOptionArgumentError('Invalid count. Must be greater than 0.');
+            return parsedValue;
+        })
+        .option('-i --interval <number>', 'Interval between console logs', (value) => {
+            const parsedValue = parseInt(value);
+            if (isNaN(parsedValue))
+                throw new InvalidOptionArgumentError('Not a number.');
+            if (parsedValue < 1)
+                throw new InvalidOptionArgumentError('Invalid count. Must be greater than 0.');
+            return parsedValue;
+        })
+        .description('Benchmark the RPC node')
+        .action((requests, options) => {
+            const { thread, interval } = options;
+            commands.benchmark(requests, '7536JKDpY6bGNq3qUcn87CAmwGPA4WcRctzsFDTr9i8N', thread, interval);
+        });
+
     program.parse(process.argv);
     if (!process.argv.slice(2).length) {
         program.outputHelp();

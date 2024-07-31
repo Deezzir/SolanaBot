@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, TokenAmount } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, TokenAmount, Connection } from '@solana/web3.js';
 import * as common from './common.js';
 import * as trade from './trade.js';
 import * as run from './run.js';
@@ -8,10 +8,11 @@ import { Wallet } from '@project-serum/anchor';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
+import pLimit from 'p-limit';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
-const INTERVAL = 50;
+const INTERVAL = 500;
 
 export async function clean(keys: common.Key[]): Promise<void> {
     common.log('Cleaning all the accounts...\n');
@@ -536,8 +537,8 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     try {
         const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
-        if (balance < amount * keys.length) {
-            common.error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${keys.length} keys`);
+        if (balance < amount * (keys.length - 1)) {
+            common.error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${keys.length - 1} keys`);
             return;
         }
     } catch (err) {
@@ -677,4 +678,67 @@ export function generate(count: number, dir: string, reserve: boolean, keys_path
     });
 
     common.log('Key generation completed');
+}
+
+export async function benchmark(NUM_REQUESTS: number, test_public_key: string, batch_size = 10, update_interval = 10): Promise<void> {
+    const publicKey = new PublicKey(test_public_key);
+    const limit = pLimit(batch_size);
+
+    let totalCallTime = 0;
+    let minTime = Number.MAX_VALUE;
+    let maxTime = 0;
+    let errors = 0;
+    let calls = 0;
+    const conn = new Connection(<any>process.env.RPC, {
+        disableRetryOnRateLimit: true,
+        httpHeaders: {
+            'Authorization': `Bearer ${process.env.RPC_TOKEN}`
+        }
+    });
+
+    const startTime = process.hrtime();
+    const tasks = Array.from({ length: NUM_REQUESTS }, (_, i) => limit(async () => {
+        calls++
+        const startTime = process.hrtime();
+    
+        try {
+          const result = await conn.getBalance(publicKey)
+        //   console.log(`Request ${i + 1} | Balance: ${result}`);
+        } catch (error) {
+        //   console.error(`Error on request ${i + 1}:`, error);
+          errors++;
+          return;
+        }
+    
+        const [seconds, nanoseconds] = process.hrtime(startTime);
+        const elapsedTime = seconds * 1000 + nanoseconds / 1e6; // Convert to milliseconds
+        totalCallTime += elapsedTime;
+    
+        if (elapsedTime < minTime) minTime = elapsedTime;
+        if (elapsedTime > maxTime) maxTime = elapsedTime;
+    
+        if ((i + 1) % update_interval === 0 || i === NUM_REQUESTS - 1) {
+          const avgTime = totalCallTime / (i + 1 - errors);
+          const tps = (i + 1 - errors) / (totalCallTime / 1000);
+          
+          // Log results on the same line
+          process.stdout.write(`\r[${i + 1}/${NUM_REQUESTS}] | Errors: ${errors} | Avg Time: ${avgTime.toFixed(2)} ms | Min Time: ${minTime.toFixed(2)} ms | Max Time: ${maxTime.toFixed(2)} ms | TPS: ${tps.toFixed(2)}`);
+        }
+    }));
+    
+    await Promise.all(tasks);
+    const endTime = process.hrtime(startTime);
+    const totalElapsedTime = endTime[0] * 1000 + endTime[1] / 1e6;
+    const avgTime = totalElapsedTime / (NUM_REQUESTS - errors);
+    const tps = (NUM_REQUESTS - errors) / (totalElapsedTime / 1000);
+  
+    console.log(`\n\nBenchmark Results:`);
+    console.log(`Total Requests: ${NUM_REQUESTS}`);
+    console.log(`Successful Requests: ${NUM_REQUESTS - errors}`);
+    console.log(`Failed Requests: ${errors}`);
+    console.log(`Total Time: ${totalElapsedTime.toFixed(2)} ms`);
+    console.log(`Average Time per Request: ${avgTime.toFixed(2)} ms`);
+    console.log(`Min Time: ${minTime.toFixed(2)} ms`);
+    console.log(`Max Time: ${maxTime.toFixed(2)} ms`);
+    console.log(`Estimated TPS: ${tps.toFixed(2)}`);
 }
