@@ -12,7 +12,7 @@ import pLimit from 'p-limit';
 dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 1000;
-const INTERVAL = 500;
+const INTERVAL = 50;
 
 export async function clean(keys: common.Key[]): Promise<void> {
     common.log('Cleaning all the accounts...\n');
