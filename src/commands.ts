@@ -681,64 +681,63 @@ export function generate(count: number, dir: string, reserve: boolean, keys_path
 }
 
 export async function benchmark(NUM_REQUESTS: number, test_public_key: string, batch_size = 10, update_interval = 10): Promise<void> {
-    const publicKey = new PublicKey(test_public_key);
+    const public_key = new PublicKey(test_public_key);
     const limit = pLimit(batch_size);
 
-    let totalCallTime = 0;
-    let minTime = Number.MAX_VALUE;
-    let maxTime = 0;
+    let total_call_time = 0;
+    let min_time = Number.MAX_VALUE;
+    let max_time = 0;
     let errors = 0;
     let calls = 0;
-    const conn = new Connection(<any>process.env.RPC, {
+    const connection = new Connection(<any>process.env.RPC, {
         disableRetryOnRateLimit: true,
         httpHeaders: {
             'Authorization': `Bearer ${process.env.RPC_TOKEN}`
         }
     });
 
-    const startTime = process.hrtime();
+    const start_time = process.hrtime();
     const tasks = Array.from({ length: NUM_REQUESTS }, (_, i) => limit(async () => {
         calls++
         const startTime = process.hrtime();
-    
+
         try {
-          const result = await conn.getBalance(publicKey)
-        //   console.log(`Request ${i + 1} | Balance: ${result}`);
+            const result = await connection.getBalance(public_key)
+            //   console.log(`Request ${i + 1} | Balance: ${result}`);
         } catch (error) {
-        //   console.error(`Error on request ${i + 1}:`, error);
-          errors++;
-          return;
+            //   console.error(`Error on request ${i + 1}:`, error);
+            errors++;
+            return;
         }
-    
+
         const [seconds, nanoseconds] = process.hrtime(startTime);
-        const elapsedTime = seconds * 1000 + nanoseconds / 1e6; // Convert to milliseconds
-        totalCallTime += elapsedTime;
-    
-        if (elapsedTime < minTime) minTime = elapsedTime;
-        if (elapsedTime > maxTime) maxTime = elapsedTime;
-    
+        const elapsed_time = seconds * 1000 + nanoseconds / 1e6; // Convert to milliseconds
+        total_call_time += elapsed_time;
+
+        if (elapsed_time < min_time) min_time = elapsed_time;
+        if (elapsed_time > max_time) max_time = elapsed_time;
+
         if ((i + 1) % update_interval === 0 || i === NUM_REQUESTS - 1) {
-          const avgTime = totalCallTime / (i + 1 - errors);
-          const tps = (i + 1 - errors) / (totalCallTime / 1000);
-          
-          // Log results on the same line
-          process.stdout.write(`\r[${i + 1}/${NUM_REQUESTS}] | Errors: ${errors} | Avg Time: ${avgTime.toFixed(2)} ms | Min Time: ${minTime.toFixed(2)} ms | Max Time: ${maxTime.toFixed(2)} ms | TPS: ${tps.toFixed(2)}`);
+            const avgTime = total_call_time / (i + 1 - errors);
+            const tps = (i + 1 - errors) / (total_call_time / 1000);
+
+            process.stdout.write(`\r[${i + 1}/${NUM_REQUESTS}] | Errors: ${errors} | Avg Time: ${avgTime.toFixed(2)} ms | Min Time: ${min_time.toFixed(2)} ms | Max Time: ${max_time.toFixed(2)} ms | TPS: ${tps.toFixed(2)}`);
         }
     }));
-    
+
     await Promise.all(tasks);
-    const endTime = process.hrtime(startTime);
-    const totalElapsedTime = endTime[0] * 1000 + endTime[1] / 1e6;
-    const avgTime = totalElapsedTime / (NUM_REQUESTS - errors);
-    const tps = (NUM_REQUESTS - errors) / (totalElapsedTime / 1000);
-  
+    const end_time = process.hrtime(start_time);
+    const total_elapsed_time = end_time[0] * 1000 + end_time[1] / 1e6;
+    const avg_time = total_elapsed_time / (NUM_REQUESTS - errors);
+    const tps = (NUM_REQUESTS - errors) / (total_elapsed_time / 1000);
+
     console.log(`\n\nBenchmark Results:`);
     console.log(`Total Requests: ${NUM_REQUESTS}`);
     console.log(`Successful Requests: ${NUM_REQUESTS - errors}`);
     console.log(`Failed Requests: ${errors}`);
-    console.log(`Total Time: ${totalElapsedTime.toFixed(2)} ms`);
-    console.log(`Average Time per Request: ${avgTime.toFixed(2)} ms`);
-    console.log(`Min Time: ${minTime.toFixed(2)} ms`);
-    console.log(`Max Time: ${maxTime.toFixed(2)} ms`);
+    console.log(`Total Time: ${total_elapsed_time.toFixed(2)} ms`);
+    console.log(`Average Time per Request: ${avg_time.toFixed(2)} ms`);
+    console.log(`Min Time: ${min_time.toFixed(2)} ms`);
+    console.log(`Max Time: ${max_time.toFixed(2)} ms`);
     console.log(`Estimated TPS: ${tps.toFixed(2)}`);
 }

@@ -576,28 +576,28 @@ async function main() {
     program
         .command('benchmark')
         .argument('<requests>', 'Number of requests to send', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .option('-t, --thread <number>', 'Number of threads to use', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidOptionArgumentError('Invalid count. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .option('-i --interval <number>', 'Interval between console logs', (value) => {
-            const parsedValue = parseInt(value);
-            if (isNaN(parsedValue))
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value))
                 throw new InvalidOptionArgumentError('Not a number.');
-            if (parsedValue < 1)
+            if (parsed_value < 1)
                 throw new InvalidOptionArgumentError('Invalid count. Must be greater than 0.');
-            return parsedValue;
+            return parsed_value;
         })
         .description('Benchmark the RPC node')
         .action((requests, options) => {
