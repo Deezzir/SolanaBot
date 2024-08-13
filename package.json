@@ -1,6 +1,6 @@
 {
     "name": "solanabot",
-    "version": "2.2.3",
+    "version": "2.3.0",
     "description": "Solana buy bot",
     "main": "./src/bot.ts",
     "type": "module",

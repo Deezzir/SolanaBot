@@ -18,6 +18,8 @@ const EVENT_AUTHORITUY_ACCOUNT = new PublicKey(process.env.EVENT_AUTHORITUY_ACCO
 const MINT_AUTHORITY_ACCOUNT = new PublicKey(process.env.MINT_AUTHORITY_ACCOUNT || '');
 const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
+const CURVE_TOKEN_DECIMALS = 6;
+const CURVE_STATE_SIGNATURE = Uint8Array.from([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
 
 export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -32,6 +34,57 @@ const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
 const MAX_RETRIES = 2;
+
+const CURVE_STATE_SIZE = 0x29;
+const CURVE_STATE_OFFSETS = {
+    VIRTUAL_TOKEN_RESERVES: 0x08,
+    VIRTUAL_SOL_RESERVES: 0x10,
+    REAL_TOKEN_RESERVES: 0x18,
+    REAL_SOL_RESERVES: 0x20,
+    TOKEN_TOTAL_SUPPLY: 0x28,
+    COMPLETE: 0x30,
+};
+
+interface CurveState {
+    virtual_token_reserves: bigint
+    virtual_sol_reserves: bigint
+    real_token_reserves: bigint
+    real_sol_reserves: bigint
+    token_total_supply: bigint
+    complete: boolean
+}
+
+export async function get_curve_state(bond_curve_addr: PublicKey): Promise<CurveState> {
+    const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, 'confirmed');
+    if (!acc_info || !acc_info.data || acc_info.data.byteLength < CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE) {
+        throw new Error("unexpected curve state");
+    }
+
+    const idl_signature = common.read_bytes(acc_info.data, 0, CURVE_STATE_SIGNATURE.byteLength);
+    if (idl_signature.compare(CURVE_STATE_SIGNATURE) !== 0) {
+        throw new Error("unexpected curve state IDL signature");
+    }
+
+    return {
+        virtual_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
+        virtual_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
+        real_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
+        real_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_SOL_RESERVES, 8),
+        token_total_supply: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
+        complete: common.read_bool(acc_info.data, CURVE_STATE_OFFSETS.COMPLETE, 1),
+    };
+}
+
+export function calculate_curve_price(virtual_sol_reserves: bigint, virtual_token_reserves: bigint): number {
+    if (virtual_token_reserves <= 0 || virtual_sol_reserves <= 0) throw new RangeError("curve state contains invalid reserve data");
+    return (Number(virtual_sol_reserves) / LAMPORTS_PER_SOL) / (Number(virtual_token_reserves) / 10 ** CURVE_TOKEN_DECIMALS);
+}
+
+export function calculate_token_mc(sol_price: number, token_price_sol: number, token_total_supply: bigint): { sol_mc: number, usd_mc: number } {
+    const sol_mc = token_price_sol * Number(token_total_supply) / 10 ** CURVE_TOKEN_DECIMALS;
+    const usd_mc = sol_mc * sol_price;
+    return { sol_mc, usd_mc };
+}
 
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
@@ -52,7 +105,7 @@ export async function get_token_supply(mint: PublicKey): Promise<bigint> {
         return mint_data.supply;
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
-        return BigInt(1_000_000_000 * 10 ** 6);
+        return BigInt(1_000_000_000 * 10 ** CURVE_TOKEN_DECIMALS);
     }
 }
 
@@ -277,15 +330,17 @@ export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> 
 }
 
 function get_token_amount_raw(sol_amount: number, token: Partial<common.TokenMeta>): number {
-    if (!token.total_supply || !token.market_cap) return 0;
-    const sup = Number(token.total_supply);
-    return Math.round(sol_amount * sup / (token.market_cap + sol_amount));
+    if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
+    const token_price = calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
+    console.log(`TOKEN PRICE: ${token_price}`);
+    console.log(`SOL AMOUNT: ${sol_amount}`);
+    return Math.round(sol_amount / token_price * 10 ** CURVE_TOKEN_DECIMALS);
 }
 
 function get_solana_amount_raw(token_amount: number, token: Partial<common.TokenMeta>): number {
-    if (!token.total_supply || !token.market_cap) return 0;
-    const sup = Number(token.total_supply);
-    return token_amount * token.market_cap / (sup * 1_000_000);
+    if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
+    const token_price = calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
+    return token_amount * token_price;
 }
 
 function calc_slippage_up(sol_amount: number, slippage: number): number {
@@ -294,6 +349,7 @@ function calc_slippage_up(sol_amount: number, slippage: number): number {
 }
 
 function calc_slippage_down(sol_amount: number, slippage: number): number {
+    if (slippage >= 1) throw new RangeError("Slippage must be less than 1");
     const lamports = sol_amount * LAMPORTS_PER_SOL;
     return Math.round(lamports * (1 - slippage));
 }
@@ -637,7 +693,7 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
     const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => {
         const mint = acc.data.mint;
-        const balance = Number(acc.data.amount) / 10 ** 6;
+        const balance = Number(acc.data.amount) / 10 ** CURVE_TOKEN_DECIMALS;
         common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()}`);
         return acc.data.mint
     });

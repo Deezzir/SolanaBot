@@ -43,7 +43,7 @@ export class Config {
         return () => {
             for (const key of validateKeys) {
                 const getMethod = Config[key];
-                if(!getMethod) {
+                if (!getMethod) {
                     throw new Error(`[ERROR] Config key ${key} is not defined.`);
                 }
             }
@@ -201,8 +201,8 @@ export type TokenMeta = {
     created_timestamp: number;
     raydium_pool: string | null;
     complete: boolean;
-    virtual_sol_reserves: number;
-    virtual_token_reserves: number;
+    virtual_sol_reserves: bigint;
+    virtual_token_reserves: bigint;
     total_supply: bigint;
     website: string | null;
     show_name: boolean
@@ -562,6 +562,19 @@ export function round_two(num: number): number {
     return Math.round((num + Number.EPSILON) * 100) / 100;
 }
 
+export const fetch_sol_price = async (): Promise<number> => {
+    return fetch(`${FETCH_MINT_API_URL}/sol-price`)
+        .then(response => response.json())
+        .then(data => {
+            if (!data || data.statusCode !== undefined) return 0.0;
+            return data.solPrice;
+        })
+        .catch(err => {
+            console.error(`[ERROR] Failed fetching the SOL price: ${err}`);
+            return 0.0;
+        });
+}
+
 export async function fetch_mint(mint: string): Promise<TokenMeta> {
     return fetch(`${FETCH_MINT_API_URL}/coins/${mint}`)
         .then(response => response.json())
@@ -632,4 +645,28 @@ export function validate_bot_config(json: any): BotConfig | undefined {
     json.collect_address = new PublicKey(json.collect_address);
 
     return json as BotConfig;
+}
+
+export function read_bytes(buf: Buffer, offset: number, length: number): Buffer {
+    const end = offset + length;
+    if (buf.byteLength < end) throw new RangeError("range out of bounds");
+    return buf.subarray(offset, end);
+}
+
+export function read_biguint_le(buf: Buffer, offset: number, length: number): bigint {
+    switch (length) {
+        case 1: return BigInt(buf.readUint8(offset));
+        case 2: return BigInt(buf.readUint16LE(offset));
+        case 4: return BigInt(buf.readUint32LE(offset));
+        case 8: return buf.readBigUint64LE(offset);
+    }
+    throw new Error(`unsupported data size (${length} bytes)`);
+}
+
+export function read_bool(buf: Buffer, offset: number, length: number): boolean {
+    const data = read_bytes(buf, offset, length);
+    for (const b of data) {
+        if (b) return true;
+    }
+    return false;
 }

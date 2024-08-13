@@ -11,7 +11,7 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 import pLimit from 'p-limit';
 dotenv.config({ path: './.env' });
 
-const META_UPDATE_INTERVAL = 1000;
+const META_UPDATE_INTERVAL = 200;
 const INTERVAL = 50;
 
 export async function clean(keys: common.Key[]): Promise<void> {
@@ -212,7 +212,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
     } else {
         let success = false;
         const amm = new PublicKey(mint_meta.raydium_pool);
-        trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 1.5)
+        trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 0.5)
             .then(signature => {
                 common.log(`Raydium Transaction completed, signature: ${signature}`);
                 success = true;
@@ -259,7 +259,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
         let success = false;
         const amm = new PublicKey(mint_meta.raydium_pool);
         const sol_amount = trade.get_sol_token_amount(amount);
-        trade.swap_raydium(sol_amount, buyer, amm, mint, 1.5)
+        trade.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
             .then(signature => {
                 common.log(`Raydium Transaction completed, signature: ${signature}`);
                 success = true;
@@ -464,7 +464,7 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
             } else {
                 const amm = new PublicKey(mint_meta.raydium_pool);
                 const sol_amount = trade.get_sol_token_amount(amount);
-                transactions.push(trade.swap_raydium(sol_amount, buyer, amm, mint, 1.5)
+                transactions.push(trade.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
                     .then(signature => common.log(`Raydium Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Raydium Transaction failed for ${key.file_name}: ${error.message}`)));
             }
@@ -507,12 +507,12 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
 
             common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
             if (mint_meta.raydium_pool === null) {
-                transactions.push(trade.sell_token(token_amount_to_sell, seller, mint_meta, 1.5)
+                transactions.push(trade.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             } else {
                 const amm = new PublicKey(mint_meta.raydium_pool);
-                transactions.push(trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 1.5)
+                transactions.push(trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 0.5)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
@@ -582,28 +582,55 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
     }
 
     keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
+    let mint_meta: common.TokenMeta | null = null;
+    const sol_price = await common.fetch_sol_price();
 
     const worker_update_mint = async (workers: common.WorkerJob[], mint: PublicKey) => {
-        const mint_meta = await common.fetch_mint(mint.toString());
-        mint_meta.total_supply = await trade.get_token_supply(mint);
-
+        mint_meta = await common.fetch_mint(mint.toString());
         if (Object.keys(mint_meta).length !== 0 && mint_meta.usd_market_cap !== undefined) {
-            common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
             run.worker_post_message(workers, 'mint', mint_meta);
         } else {
-            common.log(`[Main Worker] No MCAP data available, using the default values`);
+            common.log(`[Main Worker] No Token Meta data available, using the default values`);
             const [bonding] = trade.calc_token_bonding_curve(mint);
             const [assoc_bonding] = trade.calc_token_assoc_bonding_curve(mint, bonding);
-            const default_mint_meta: Partial<common.TokenMeta> = {
+            mint_meta = {
                 mint: mint.toString(),
                 symbol: 'Unknown',
                 raydium_pool: null,
                 bonding_curve: bonding.toString(),
                 associated_bonding_curve: assoc_bonding.toString(),
-                market_cap: 27.95,
+                market_cap: 27.958993535,
+                usd_market_cap: 27.958993535 * sol_price,
+                virtual_sol_reserves: BigInt(30000000030),
+                virtual_token_reserves: BigInt(1072999999000001),
                 total_supply: BigInt(1000000000000000)
-            };
-            run.worker_post_message(workers, 'mint', default_mint_meta);
+            } as Partial<common.TokenMeta> as common.TokenMeta;
+            run.worker_post_message(workers, 'mint', mint_meta);
+        }
+    }
+
+    const worker_update_reserves = async (workers: common.WorkerJob[]) => {
+        if (!mint_meta) {
+            common.error('[ERROR] Mint metadata not found.');
+            return;
+        }
+        try {
+            const curve_state = await trade.get_curve_state(new PublicKey(mint_meta.bonding_curve));
+            if (!curve_state) {
+                common.error('[ERROR] Curve state not found.');
+                return;
+            }
+            const token_price_sol = trade.calculate_curve_price(curve_state.virtual_sol_reserves, curve_state.virtual_token_reserves);
+            const token_mc = trade.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
+            mint_meta.usd_market_cap = token_mc.usd_mc;
+            mint_meta.market_cap = token_mc.sol_mc;
+            mint_meta.total_supply = curve_state.token_total_supply;
+            mint_meta.virtual_token_reserves = curve_state.virtual_token_reserves;
+            mint_meta.virtual_sol_reserves = curve_state.virtual_sol_reserves;
+            common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
+            run.worker_post_message(workers, 'mint', mint_meta);
+        } catch (error) {
+            common.error(`[ERROR]Failed to update token Market Cap: ${error}`);
         }
     }
 
@@ -625,9 +652,9 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
             common.log(`[Main Worker] Token detected: ${bot_config.mint.toString()}`);
 
             await worker_update_mint(workers, bot_config.mint);
-            const interval = setInterval(async () => { if (bot_config.mint) worker_update_mint(workers, bot_config.mint) }, META_UPDATE_INTERVAL);
+            const interval = setInterval(async () => await worker_update_reserves(workers), META_UPDATE_INTERVAL);
 
-            setTimeout(() => { run.worker_post_message(workers, 'buy', {}, bot_config.start_interval || 0) }, 1000);
+            run.worker_post_message(workers, 'buy', {}, bot_config.start_interval || 0);
             await run.wait_for_workers(workers);
             clearInterval(interval);
 

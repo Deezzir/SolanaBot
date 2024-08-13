@@ -184,21 +184,22 @@ export async function wait_drop_sub(token_name: string, token_ticker: string): P
         common.log('[Main Worker] Waiting for the new token drop using Websocket...');
         const socket = io(FETCH_MINT_API_URL, {
             path: "/socket.io/",
-            query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
+            // query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
             transports: ["websocket"]
         });
         LOGS_STOP_FUNCTION = () => { socket.disconnect(); reject(new Error('User stopped the process')) };
         socket.on("connect", () => { });
         socket.on("disconnect", () => { });
 
-        socket.prependAny(async (_, ...obj) => {
-            let token = obj[0] as common.TokenMeta;
-            if (token.name.toLowerCase() === token_name.toLowerCase() && token.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
+        socket.prependAny(async (event, ...obj) => {
+            if (event !== 'newCoinCreated') return;
+            const token_meta = obj[0] as common.TokenMeta;
+            if (token_meta.name.toLowerCase() === token_name.toLowerCase() && token_meta.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
                 LOGS_STOP_FUNCTION = null
                 await wait_drop_unsub();
                 common.log(`[Main Worker] Found the mint using Websocket`);
                 socket.disconnect();
-                resolve(new PublicKey(token.mint));
+                resolve(new PublicKey(token_meta.mint));
             }
         });
     }));
