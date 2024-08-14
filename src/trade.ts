@@ -332,8 +332,6 @@ export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> 
 function get_token_amount_raw(sol_amount: number, token: Partial<common.TokenMeta>): number {
     if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
     const token_price = calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-    console.log(`TOKEN PRICE: ${token_price}`);
-    console.log(`SOL AMOUNT: ${sol_amount}`);
     return Math.round(sol_amount / token_price * 10 ** CURVE_TOKEN_DECIMALS);
 }
 
