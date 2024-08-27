@@ -537,7 +537,7 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     try {
         const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
-        if (balance < amount * (keys.length - 1)) {
+        if (balance < amount * keys.length) {
             common.error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${keys.length - 1} keys`);
             return;
         }
