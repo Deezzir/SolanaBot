@@ -214,6 +214,9 @@ export type TokenMeta = {
     market_id: string | null;
     inverted: boolean | null;
     usd_market_cap: number;
+    username: string;
+    profile_image: string | null;
+    is_currently_live: boolean;
 }
 
 export function bot_conf_display(config: BotConfig) {

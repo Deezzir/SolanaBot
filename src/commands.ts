@@ -630,7 +630,7 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
             common.log(`[Main Worker] Currecnt MCAP: $${mint_meta.usd_market_cap.toFixed(3)}`);
             run.worker_post_message(workers, 'mint', mint_meta);
         } catch (error) {
-            common.error(`[ERROR]Failed to update token Market Cap: ${error}`);
+            common.error(`[ERROR] Failed to update token Market Cap: ${error}`);
         }
     }
 

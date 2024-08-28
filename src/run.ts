@@ -193,7 +193,9 @@ export async function wait_drop_sub(token_name: string, token_ticker: string): P
 
         socket.prependAny(async (event, ...obj) => {
             if (event !== 'newCoinCreated') return;
-            const token_meta = obj[0] as common.TokenMeta;
+            const data_raw = obj[0];
+            if (!data_raw || !data_raw.data || !data_raw.data.subscribe || !data_raw.data.subscribe.data) return;
+            const token_meta = JSON.parse(data_raw.data.subscribe.data).payload as common.TokenMeta;
             if (token_meta.name.toLowerCase() === token_name.toLowerCase() && token_meta.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
                 LOGS_STOP_FUNCTION = null
                 await wait_drop_unsub();
