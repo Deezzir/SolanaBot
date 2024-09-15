@@ -1,7 +1,8 @@
 import { parentPort, workerData } from 'worker_threads';
 import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey, TokenAmount } from '@solana/web3.js';
 import * as common from './common.js';
-import * as trade from './trade.js';
+import * as trade_common from './trade_common.js';
+import * as trade_pump from './trade_pump.js';
 import { Helius } from 'helius-sdk';
 
 const SLIPPAGE = 0.50;
@@ -18,7 +19,7 @@ const RPC = process.env.RPC || '';
 global.CONNECTION = new Connection(RPC, 'confirmed');
 global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
-var MINT_METADATA: common.TokenMeta;
+var MINT_METADATA: trade_pump.PumpTokenMeta;
 var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
@@ -45,7 +46,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
     try {
         const sig = await promise;
         try {
-            const balance_change = await trade.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
+            const balance_change = await trade_common.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
             CURRENT_SPENDINGS += balance_change;
         } catch (error) {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting balance change, continuing...`);
@@ -76,7 +77,7 @@ const buy = async () => {
         let count = TRADE_ITERATIONS;
         while (count > 0) {
             if (MINT_METADATA.raydium_pool === null) {
-                const buy_promise = trade.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
                 transactions.push(
                     process_buy_tx(buy_promise, amount).then(result => {
                         if (result) bought = true;
@@ -85,8 +86,8 @@ const buy = async () => {
             } else {
                 const amm = new PublicKey(MINT_METADATA.raydium_pool);
                 const mint = new PublicKey(MINT_METADATA.mint);
-                const sol_amount = trade.get_sol_token_amount(amount);
-                const buy_promise = trade.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, SLIPPAGE, common.PriorityLevel.HIGH)
+                const sol_amount = trade_common.get_sol_token_amount(amount);
+                const buy_promise = trade_common.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, SLIPPAGE, common.PriorityLevel.HIGH)
                 transactions.push(
                     process_buy_tx(buy_promise, amount).then(result => {
                         if (result) bought = true;
@@ -128,7 +129,7 @@ const sell = async () => {
             let balance: TokenAmount | undefined = undefined;
 
             while (get_balance_retry < MAX_RETRIES) {
-                balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
+                balance = await trade_common.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
                 if (get_balance_retry < MAX_RETRIES) MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
@@ -146,7 +147,7 @@ const sell = async () => {
 
             while (count > 0 && balance !== undefined) {
                 if (MINT_METADATA.raydium_pool === null) {
-                    const sell_promise = trade.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade_pump.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -154,7 +155,7 @@ const sell = async () => {
                     );
                 } else {
                     const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    const sell_promise = trade.swap_raydium(balance, WORKER_KEYPAIR, amm, trade.SOL_MINT, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade_common.swap_raydium(balance, WORKER_KEYPAIR, amm, trade_common.SOL_MINT, SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -222,11 +223,11 @@ const control_loop = async () => new Promise<void>(async (resolve) => {
 });
 
 async function main() {
-    const balance = await trade.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
+    const balance = await trade_common.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
     WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
 
-    parentPort?.postMessage({ command: "started", data: `[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}` });
+    parentPort?.postMessage({ command: 'started', data: `[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}` });
 
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {

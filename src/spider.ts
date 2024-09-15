@@ -1,11 +1,11 @@
-import { Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
-import path from "path";
+import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import path from 'path';
 import * as common from './common.js';
 import * as commands from './commands.js';
-import * as trade from './trade.js';
+import * as trade from './trade_common.js';
 
-const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || "./.rescue";
+const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || './.rescue';
 const MAX_RETRIES: number = 3;
 const EXTRA_SOL: number = 0.005;
 const INTERVAL: number = 1000;
@@ -66,14 +66,14 @@ function display_spider_tree(tree: SpiderTree) {
 
     common.log(`[Main Worker] Spider tree depth: ${tree.depth}`);
 
-    const _display_spider_tree = (node: SpiderTreeNode | null, layer_cnt: number = 0, prefix: string = "", isLeft: boolean = true) => {
+    const _display_spider_tree = (node: SpiderTreeNode | null, layer_cnt: number = 0, prefix: string = '', isLeft: boolean = true) => {
         if (node === null) return;
 
-        const connector = layer_cnt === 0 ? " " : (isLeft ? "├── " : "└── ");
-        const child_prefix = prefix + (layer_cnt === 0 ? " " : (isLeft ? "│   " : "    "));
+        const connector = layer_cnt === 0 ? ' ' : (isLeft ? '├── ' : '└── ');
+        const child_prefix = prefix + (layer_cnt === 0 ? ' ' : (isLeft ? '│   ' : '    '));
         const node_display = `${node.amount.toFixed(4)} SOL - ${node.keypair.publicKey.toString()}`;
 
-        common.log(`${prefix}${layer_cnt === 0 ? " " : "│"}`);
+        common.log(`${prefix}${layer_cnt === 0 ? ' ' : '│'}`);
         common.log(`${prefix}${connector}${node_display}`);
 
         if (node.left || node.right) {
@@ -92,7 +92,7 @@ function display_spider_tree(tree: SpiderTree) {
 }
 
 function setup_rescue_dir(layers_cnt: number): string | undefined {
-    const target_folder = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(" ", "_");
+    const target_folder = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
     const target_folder_path = path.join(RESCUE_DIR_PATH, target_folder);
 
     try {
@@ -185,7 +185,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             const receiver = node.left.keypair;
             const layer_name = `${layer_cnt}_${postfixes.get(layer_cnt) || 0}`;
 
-            common.log(`${sender.publicKey.toString().padEnd(44, " ")} is sending ${amount.toFixed(4).padEnd(7, " ")} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`);
+            common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`);
 
             let ok = await send_lamports_with_retries(sol_amount, sender, receiver, common.PriorityLevel.HIGH, layer_name);
             if (!ok) return false;
@@ -203,7 +203,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             const receiver = node.right.keypair;
             const layer_name = `${layer_cnt}_${postfixes.get(layer_cnt) || 0}`;
 
-            common.log(`${sender.publicKey.toString().padEnd(44, " ")} is sending ${amount.toFixed(4).padEnd(7, " ")} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`);
+            common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`);
 
             let ok = await send_lamports_with_retries(sol_amount, sender, receiver, common.PriorityLevel.HIGH, layer_name);
             if (!ok) return false;
@@ -260,7 +260,7 @@ async function process_final_transfers(keys: common.Key[], entries: Keypair[]): 
         const amount = await trade.get_balance(sender.publicKey);
         if (amount <= 0) continue;
 
-        common.log(`${sender.publicKey.toString().padEnd(44, " ")} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, " ")} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`);
+        common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`);
         transactions.push(send_lamports_with_retries(amount, sender, receiver, common.PriorityLevel.HIGH, key.file_name));
 
         await common.sleep(50);

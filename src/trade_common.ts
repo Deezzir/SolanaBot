@@ -1,90 +1,26 @@
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext, ComputeBudgetProgram, Commitment } from '@solana/web3.js';
 import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddress, getMint } from '@solana/spl-token';
-import { Metaplex } from "@metaplex-foundation/js";
+import { Metaplex } from '@metaplex-foundation/js';
 import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID, MarketV2 } from '@raydium-io/raydium-sdk';
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
-import BN from 'bn.js';
+import BN, { min } from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import bs58 from 'bs58';
 
 const SWAP_SEED = 'swap';
-
-const TRADE_PROGRAM_ID = new PublicKey(process.env.TRADE_PROGRAM_ID || '');
-const GLOBAL_ACCOUNT = new PublicKey(process.env.GLOBAL_ACCOUNT || '');
-const FEE_RECIPIENT_ACCOUNT = new PublicKey(process.env.FEE_RECIPIENT_ACCOUNT || '');
-const EVENT_AUTHORITUY_ACCOUNT = new PublicKey(process.env.EVENT_AUTHORITUY_ACCOUNT || '');
-const MINT_AUTHORITY_ACCOUNT = new PublicKey(process.env.MINT_AUTHORITY_ACCOUNT || '');
-const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
-const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
-const CURVE_TOKEN_DECIMALS = 6;
-const CURVE_STATE_SIGNATURE = Uint8Array.from([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
+const DEFAULT_CURVE_TOKEN_DECIMALS = 6;
 
 export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
-const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
-const METAPLEX_TOKEN_META = new PublicKey(process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
+const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
 const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-engine.jito.wtf';
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
 const MAX_RETRIES = 2;
-
-const CURVE_STATE_SIZE = 0x29;
-const CURVE_STATE_OFFSETS = {
-    VIRTUAL_TOKEN_RESERVES: 0x08,
-    VIRTUAL_SOL_RESERVES: 0x10,
-    REAL_TOKEN_RESERVES: 0x18,
-    REAL_SOL_RESERVES: 0x20,
-    TOKEN_TOTAL_SUPPLY: 0x28,
-    COMPLETE: 0x30,
-};
-
-interface CurveState {
-    virtual_token_reserves: bigint
-    virtual_sol_reserves: bigint
-    real_token_reserves: bigint
-    real_sol_reserves: bigint
-    token_total_supply: bigint
-    complete: boolean
-}
-
-export async function get_curve_state(bond_curve_addr: PublicKey): Promise<CurveState> {
-    const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, 'confirmed');
-    if (!acc_info || !acc_info.data || acc_info.data.byteLength < CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE) {
-        throw new Error("unexpected curve state");
-    }
-
-    const idl_signature = common.read_bytes(acc_info.data, 0, CURVE_STATE_SIGNATURE.byteLength);
-    if (idl_signature.compare(CURVE_STATE_SIGNATURE) !== 0) {
-        throw new Error("unexpected curve state IDL signature");
-    }
-
-    return {
-        virtual_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
-        virtual_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
-        real_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
-        real_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_SOL_RESERVES, 8),
-        token_total_supply: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
-        complete: common.read_bool(acc_info.data, CURVE_STATE_OFFSETS.COMPLETE, 1),
-    };
-}
-
-export function calculate_curve_price(virtual_sol_reserves: bigint, virtual_token_reserves: bigint): number {
-    if (virtual_token_reserves <= 0 || virtual_sol_reserves <= 0) throw new RangeError("curve state contains invalid reserve data");
-    return (Number(virtual_sol_reserves) / LAMPORTS_PER_SOL) / (Number(virtual_token_reserves) / 10 ** CURVE_TOKEN_DECIMALS);
-}
-
-export function calculate_token_mc(sol_price: number, token_price_sol: number, token_total_supply: bigint): { sol_mc: number, usd_mc: number } {
-    const sol_mc = token_price_sol * Number(token_total_supply) / 10 ** CURVE_TOKEN_DECIMALS;
-    const usd_mc = sol_mc * sol_price;
-    return { sol_mc, usd_mc };
-}
 
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
@@ -99,13 +35,13 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
     }
 }
 
-export async function get_token_supply(mint: PublicKey): Promise<bigint> {
+export async function get_token_supply(mint: PublicKey): Promise<{supply: bigint, decimals: number}> {
     try {
         const mint_data = await getMint(global.CONNECTION, mint, 'confirmed');
-        return mint_data.supply;
+        return { supply: mint_data.supply, decimals: mint_data.decimals };
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
-        return BigInt(1_000_000_000 * 10 ** CURVE_TOKEN_DECIMALS);
+        return { supply: BigInt(1_000_000_000 * 10 ** DEFAULT_CURVE_TOKEN_DECIMALS), decimals: DEFAULT_CURVE_TOKEN_DECIMALS };
     }
 }
 
@@ -189,7 +125,7 @@ async function get_priority_fee(priority: common.PriorityOptions): Promise<numbe
     return Math.floor(response.priorityFeeEstimate || 0);
 }
 
-async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[],) {
+export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[],) {
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], { skipPreflight: true, preflightCommitment: 'confirmed' });
 }
 
@@ -329,47 +265,6 @@ export async function get_token_meta(mint: PublicKey): Promise<common.MintMeta> 
     throw new Error(`Failed to get the token metadata.`);
 }
 
-function get_token_amount_raw(sol_amount: number, token: Partial<common.TokenMeta>): number {
-    if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
-    const token_price = calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-    return Math.round(sol_amount / token_price * 10 ** CURVE_TOKEN_DECIMALS);
-}
-
-function get_solana_amount_raw(token_amount: number, token: Partial<common.TokenMeta>): number {
-    if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
-    const token_price = calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-    return token_amount * token_price;
-}
-
-function calc_slippage_up(sol_amount: number, slippage: number): number {
-    const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 + slippage));
-}
-
-function calc_slippage_down(sol_amount: number, slippage: number): number {
-    if (slippage >= 1) throw new RangeError("Slippage must be less than 1");
-    const lamports = sol_amount * LAMPORTS_PER_SOL;
-    return Math.round(lamports * (1 - slippage));
-}
-
-function buy_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
-    const instruction_buf = Buffer.from('66063d1201daebea', 'hex');
-    const token_amount_buf = Buffer.alloc(8);
-    token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
-    const slippage_buf = Buffer.alloc(8);
-    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_up(sol_amount, slippage)), 0);
-    return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
-}
-
-function sell_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
-    const instruction_buf = Buffer.from('33e685a4017f83ad', 'hex');
-    const token_amount_buf = Buffer.alloc(8);
-    token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
-    const slippage_buf = Buffer.alloc(8);
-    slippage_buf.writeBigUInt64LE(BigInt(calc_slippage_down(sol_amount, slippage)), 0);
-    return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
-}
-
 export async function get_token_balance(pubkey: PublicKey, mint: PublicKey, commitment: Commitment = 'finalized'): Promise<TokenAmount> {
     try {
         const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
@@ -417,223 +312,6 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     } catch (err) {
         throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
     }
-}
-
-export async function get_buy_token_instructions(
-    sol_amount: number, buyer: Signer, mint_meta: Partial<common.TokenMeta>, slippage: number = 0.05
-): Promise<TransactionInstruction[]> {
-    if (!mint_meta.mint || !mint_meta.bonding_curve || !mint_meta.associated_bonding_curve) {
-        throw new Error(`[ERROR]: Failed to get the mint meta.`);
-    }
-
-    const mint = new PublicKey(mint_meta.mint);
-    const bonding_curve = new PublicKey(mint_meta.bonding_curve);
-    const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
-
-    const token_amount = get_token_amount_raw(sol_amount, mint_meta);
-    const instruction_data = buy_data(sol_amount, token_amount, slippage);
-    const assoc_address = await calc_assoc_token_addr(buyer.publicKey, mint);
-    const exists = await check_account_exists(assoc_address);
-    // TODO: Create account in advance
-    // TODO: Make a transfer to bloxroute for obfuscation
-
-    let instructions: TransactionInstruction[] = [];
-    if (!exists) {
-        instructions.push(createAssociatedTokenAccountInstruction(
-            buyer.publicKey,
-            assoc_address,
-            buyer.publicKey,
-            mint,
-        ));
-    }
-    instructions.push(new TransactionInstruction({
-        keys: [
-            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
-            { pubkey: mint, isSigner: false, isWritable: false },
-            { pubkey: bonding_curve, isSigner: false, isWritable: true },
-            { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
-            { pubkey: assoc_address, isSigner: false, isWritable: true },
-            { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
-        ],
-        programId: TRADE_PROGRAM_ID,
-        data: instruction_data,
-    }));
-    return instructions;
-}
-
-export async function buy_token(
-    sol_amount: number, buyer: Signer, mint_meta: common.TokenMeta, slippage: number = 0.00,
-    priority?: common.PriorityLevel
-): Promise<String> {
-    let instructions = await get_buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
-    if (priority) {
-        return await create_and_send_tx(
-            instructions, [buyer],
-            { priority_level: priority, accounts: [TRADE_PROGRAM_ID.toString()] }
-        );
-    } else {
-        return await create_and_send_smart_tx(instructions, [buyer]);
-    }
-}
-
-export async function sell_token(
-    token_amount: TokenAmount, seller: Signer, mint_meta: Partial<common.TokenMeta>,
-    slippage: number = 0.05, priority?: common.PriorityLevel
-): Promise<String> {
-    if (!mint_meta.mint || !mint_meta.bonding_curve || !mint_meta.associated_bonding_curve) {
-        throw new Error(`[ERROR]: Failed to get the mint meta.`);
-    }
-
-    const mint = new PublicKey(mint_meta.mint);
-    const bonding_curve = new PublicKey(mint_meta.bonding_curve);
-    const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
-
-    if (token_amount.uiAmount === null)
-        throw new Error(`[ERROR]: Failed to get the token amount.`);
-    const token_amount_raw = parseInt(token_amount.amount);
-    if (isNaN(token_amount_raw))
-        throw new Error(`[ERROR]: Failed to parse the token amount.`);
-
-    const sol_amount = get_solana_amount_raw(token_amount.uiAmount, mint_meta);
-    const instruction_data = sell_data(sol_amount, token_amount_raw, slippage);
-    const assoc_address = await calc_assoc_token_addr(seller.publicKey, mint);
-
-    let instructions: TransactionInstruction[] = [];
-    instructions.push(new TransactionInstruction({
-        keys: [
-            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
-            { pubkey: mint, isSigner: false, isWritable: false },
-            { pubkey: bonding_curve, isSigner: false, isWritable: true },
-            { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
-            { pubkey: assoc_address, isSigner: false, isWritable: true },
-            { pubkey: seller.publicKey, isSigner: true, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
-        ],
-        programId: TRADE_PROGRAM_ID,
-        data: instruction_data,
-    }));
-    if (priority) {
-        return await create_and_send_tx(
-            instructions, [seller],
-            { priority_level: priority, accounts: [TRADE_PROGRAM_ID.toString()] }
-        );
-    } else {
-        return await create_and_send_smart_tx(instructions, [seller]);
-    }
-}
-
-function create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
-    const instruction_buf = Buffer.from('181ec828051c0777', 'hex');
-
-    const token_name_buf = Buffer.alloc(4 + token_name.length);
-    token_name_buf.writeUInt32LE(token_name.length, 0);
-    token_name_buf.write(token_name, 4);
-
-    const token_ticker_buf = Buffer.alloc(4 + token_ticker.length);
-    token_ticker_buf.writeUInt32LE(token_ticker.length, 0);
-    token_ticker_buf.write(token_ticker, 4);
-
-    const meta_link_buf = Buffer.alloc(4 + meta_link.length);
-    meta_link_buf.writeUInt32LE(meta_link.length, 0);
-    meta_link_buf.write(meta_link, 4);
-
-    return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
-}
-
-export function calc_token_bonding_curve(mint: PublicKey): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync([BONDING_ADDR, mint.toBuffer()], TRADE_PROGRAM_ID);
-}
-
-export function calc_token_assoc_bonding_curve(mint: PublicKey, bonding: PublicKey): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
-}
-
-export async function get_create_token_instructions(
-    creator: Signer, meta: common.IPFSMetadata, cid: string, mint: Keypair,
-): Promise<TransactionInstruction[]> {
-    const meta_link = `${common.IPFS}${cid}`;
-    const instruction_data = create_data(meta.name, meta.symbol, meta_link);
-    const [bonding] = calc_token_bonding_curve(mint.publicKey);
-    const [assoc_bonding] = calc_token_assoc_bonding_curve(mint.publicKey, bonding);
-    const [metaplex] = PublicKey.findProgramAddressSync([META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()], METAPLEX_TOKEN_META);
-
-    let instructions: TransactionInstruction[] = [];
-    instructions.push(new TransactionInstruction({
-        keys: [
-            { pubkey: mint.publicKey, isSigner: true, isWritable: true },
-            { pubkey: MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: bonding, isSigner: false, isWritable: true },
-            { pubkey: assoc_bonding, isSigner: false, isWritable: true },
-            { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },
-            { pubkey: metaplex, isSigner: false, isWritable: true },
-            { pubkey: creator.publicKey, isSigner: true, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
-            { pubkey: TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
-        ],
-        programId: TRADE_PROGRAM_ID,
-        data: instruction_data,
-    }));
-
-    return instructions;
-}
-
-export async function create_token_with_buy(
-    creator: Signer, meta: common.IPFSMetadata, cid: string,
-    mint: Keypair = Keypair.generate(), sol_amount?: number, priority: common.PriorityLevel = common.PriorityLevel.MEDIUM
-): Promise<[String, PublicKey]> {
-    let instructions = await get_create_token_instructions(creator, meta, cid, mint);
-
-    const token_meta: Partial<common.TokenMeta> = {
-        mint: mint.publicKey.toString(),
-        bonding_curve: instructions[0].keys[2].pubkey.toString(),
-        associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
-        market_cap: 27.95,
-        total_supply: BigInt(1_000_000_000_000_000), // 1 * 10**9 * 10**6
-    };
-
-    if (sol_amount && sol_amount > 0) {
-        const buy_instructions = await get_buy_token_instructions(sol_amount, creator, token_meta, 0.05);
-        instructions = instructions.concat(buy_instructions);
-    }
-
-    let create_sig: String;
-
-    try {
-        const priority_options = { priority_level: priority, accounts: [TRADE_PROGRAM_ID.toString()] };
-        create_sig = await create_and_send_tx(instructions, [creator, mint], priority_options);
-    } catch (err) {
-        throw new Error(`${err}`);
-    }
-
-    return [create_sig, mint.publicKey];
-}
-
-export async function create_token(
-    creator: Signer, meta: common.IPFSMetadata, cid: string, priority?: common.PriorityLevel
-): Promise<[String, PublicKey]> {
-    const mint = Keypair.generate();
-    const instructions = await get_create_token_instructions(creator, meta, cid, mint);
-    const sig = await create_and_send_tx(
-        instructions, [creator, mint],
-        { priority_level: priority || common.PriorityLevel.MEDIUM, accounts: ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'] }
-    );
-    return [sig, mint.publicKey];
 }
 
 export async function swap_jupiter(
@@ -689,9 +367,10 @@ export async function swap_jupiter(
 export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
     const token_accounts = await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, { programId: TOKEN_PROGRAM_ID });
     const deserialized = token_accounts.value.map((acc) => { return { pubkey: acc.pubkey, data: AccountLayout.decode(acc.account.data) } });
-    const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map((acc) => {
+    const unsold = deserialized.filter((acc) => acc.data.amount !== BigInt(0)).map(async (acc) => {
         const mint = acc.data.mint;
-        const balance = Number(acc.data.amount) / 10 ** CURVE_TOKEN_DECIMALS;
+        const { decimals } = await get_token_supply(mint);
+        const balance = Number(acc.data.amount) / 10 ** decimals;
         common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()}`);
         return acc.data.mint
     });
@@ -714,7 +393,7 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
             }
         }
     }
-    return unsold;
+    return await Promise.all(unsold);
 }
 
 async function calc_raydium_amounts(
@@ -837,8 +516,8 @@ async function create_raydium_swap_tx(
         data: Buffer.from(
             Uint8Array.of(
                 9,
-                ...new BN(amount_in.raw).toArray("le", 8),
-                ...new BN(min_amount_out.raw).toArray("le", 8),
+                ...new BN(amount_in.raw).toArray('le', 8),
+                ...new BN(min_amount_out.raw).toArray('le', 8),
             ),
         ),
     }));
@@ -868,7 +547,7 @@ async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys |
             const marketAuthority = PublicKey.createProgramAddressSync(
                 [
                     marketState.ownAddress.toBuffer(),
-                    marketState.vaultSignerNonce.toArrayLike(Buffer, "le", 8),
+                    marketState.vaultSignerNonce.toArrayLike(Buffer, 'le', 8),
                 ],
                 MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
             );

@@ -1,6 +1,8 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, TokenAmount, Connection } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
 import * as common from './common.js';
-import * as trade from './trade.js';
+import * as trade_common from './trade_common.js';
+import * as trade_pump from './trade_pump.js';
+import * as trade_moon from './trade_moon.js';
 import * as run from './run.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
@@ -26,14 +28,14 @@ export async function clean(keys: common.Key[]): Promise<void> {
     for (const key of keys) {
         const wallet = new Wallet(key.keypair);
 
-        const balance = await trade.get_balance(wallet.publicKey);
+        const balance = await trade_common.get_balance(wallet.publicKey);
         if (balance === 0) {
             common.error(`No balance for ${wallet.publicKey.toString().padEnd(44, ' ')} (${key.file_name}), skipping...`);
             continue;
         }
 
         common.log(`Cleaning ${wallet.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
-        const unsold = await trade.close_accounts(wallet);
+        const unsold = await trade_common.close_accounts(wallet);
         if (unsold) unsold_set = [...new Set([...unsold_set, ...unsold.map(i => i.toString())])]
         common.log(`Cleaned`);
     }
@@ -46,12 +48,14 @@ export async function clean(keys: common.Key[]): Promise<void> {
     }
 }
 
-export async function create_token(cid: string, creator: Keypair, dev_buy?: number, mint?: Keypair): Promise<void> {
+export async function create_token(
+    cid: string, creator: Keypair, program: common.Program = common.Program.Pump, dev_buy?: number, mint?: Keypair
+): Promise<void> {
     common.log('Creating a token...\n');
 
     let meta: common.IPFSMetadata;
     try {
-        const balance = await trade.get_balance(creator.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade_common.get_balance(creator.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Dev address: ${creator.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
 
         if (dev_buy && dev_buy > balance) {
@@ -71,21 +75,34 @@ export async function create_token(cid: string, creator: Keypair, dev_buy?: numb
     common.log(`Token Meta: ${JSON.stringify(meta, null, 2)}`);
     console.log(`Dev Buy: ${dev_buy || 0}\n`);
 
-    try {
-        const [sig, mint_addr] = await trade.create_token_with_buy(creator, meta, cid, mint, dev_buy);
-        common.log(`Token created | Signature: ${sig}`);
-        common.log(`Mint address: ${mint_addr}`);
-    } catch (err) {
-        common.error('[ERROR] Failed to create token: ' + err);
+    switch (program) {
+        case common.Program.Pump: {
+            try {
+                const [sig, mint_addr] = await trade_pump.create_token_with_buy(creator, meta, cid, mint, dev_buy);
+                common.log(`Token created | Signature: ${sig}`);
+                common.log(`Mint address: ${mint_addr}`);
+            } catch (err) {
+                common.error('[ERROR] Failed to create token: ' + err);
+            }
+            break;
+        }
+        case common.Program.Moonshot: {
+            common.error(`[ERROR] The '${program}' is not yet supported`);
+            break;
+        }
+        default: {
+            common.error(`[ERROR] Invalid program received: ${program}`);
+            break;
+        }
     }
 }
 
-export async function promote(times: number, cid: string, creator: Keypair): Promise<void> {
+export async function promote(times: number, cid: string, creator: Keypair, program: common.Program = common.Program.Pump): Promise<void> {
     common.log(`Promoting ${times} accounts with CID ${cid}...\n`);
 
     let meta: common.IPFSMetadata;
     try {
-        const balance = await trade.get_balance(creator.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade_common.get_balance(creator.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Creator address: ${creator.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
 
         meta = await common.fetch_ipfs_json(cid) as common.IPFSMetadata;
@@ -99,9 +116,22 @@ export async function promote(times: number, cid: string, creator: Keypair): Pro
     const transactions = [];
 
     while (count > 0) {
-        transactions.push(trade.create_token(creator, meta, cid, common.PriorityLevel.LOW)
-            .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
-            .catch(error => common.error(`Transaction failed: ${error.message}`)));
+        switch(program) {
+            case common.Program.Pump: {
+                transactions.push(trade_pump.create_token(creator, meta, cid, common.PriorityLevel.LOW)
+                    .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
+                    .catch(error => common.error(`Transaction failed: ${error.message}`)));
+                break;
+            }
+            case common.Program.Moonshot: {
+                common.error(`[ERROR] The '${program}' is not yet supported`);
+                return;
+            }
+            default: {
+                common.error(`[ERROR] Invalid program received: ${program}`);
+                return;
+            }
+        }
 
         count--;
         await common.sleep(INTERVAL);
@@ -115,8 +145,9 @@ export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<
         common.log(`Getting the token balance of the keys by the mint ${mint.toString()}...`);
         common.log(`Bot count: ${keys.length}\n`);
 
-        const { token_name, token_symbol } = await trade.get_token_meta(mint);
-        const supply = parseInt((await trade.get_token_supply(mint)).toString());
+        const { token_name, token_symbol } = await trade_common.get_token_meta(mint);
+        const { supply, decimals } = await trade_common.get_token_supply(mint);
+        const supply_num = parseInt(supply.toString())
         common.log(`Token name: ${token_name} | Symbol: ${token_symbol}\n`);
 
         if (keys.length === 0) {
@@ -126,15 +157,15 @@ export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<
 
         let total = 0;
         for (const key of keys) {
-            const balance = await trade.get_token_balance(key.keypair.publicKey, mint);
+            const balance = await trade_common.get_token_balance(key.keypair.publicKey, mint);
             const ui_balance = balance.uiAmount || 0;
             if (ui_balance === 0) continue;
 
-            const key_alloc = (ui_balance / (supply / 1_000_000)) * 100;
+            const key_alloc = (ui_balance / (supply_num / (10 ** decimals))) * 100;
             total += ui_balance;
             common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Allocation: ${key_alloc.toFixed(2)}% | Balance: ${ui_balance.toFixed(2)} ${token_symbol}`);
         }
-        const allocation = (total / (supply / 1_000_000)) * 100;
+        const allocation = (total / (supply_num / (10 ** decimals))) * 100;
 
         common.log(`\nTotal balance: ${total} ${token_symbol}`);
         common.log(`Total allocation: ${allocation.toFixed(2)}%`);
@@ -145,7 +176,7 @@ export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
     common.log(`Transferring ${amount} SOL from ${sender} to ${receiver.toString()}...`);
-    const balance = await trade.get_balance(sender.publicKey);
+    const balance = await trade_common.get_balance(sender.publicKey);
 
     if (sender.publicKey.equals(receiver)) {
         common.error('[ERROR] Sender and receiver addresses are the same.');
@@ -156,7 +187,7 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
         common.error(`[ERROR] Sender balance is not enough to transfer ${amount} SOL`);
         return;
     }
-    trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, common.PriorityLevel.VERY_HIGH)
+    trade_common.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, common.PriorityLevel.VERY_HIGH)
         .then(signature => common.log(`Transaction completed, signature: ${signature}`))
         .catch(error => common.error(`Transaction failed: ${error.message}`));
 }
@@ -170,7 +201,7 @@ export async function balance(keys: common.Key[]): Promise<void> {
     }
     let total = 0;
     for (const key of keys) {
-        const balance = await trade.get_balance(key.keypair.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade_common.get_balance(key.keypair.publicKey) / LAMPORTS_PER_SOL;
         total += balance;
         common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key.is_reserve ? '| (Reserve)' : ''}`);
     }
@@ -178,63 +209,96 @@ export async function balance(keys: common.Key[]): Promise<void> {
     common.log(`\nTotal balance: ${total} SOL`);
 }
 
-export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?: number): Promise<void> {
+export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?: number, program: common.Program = common.Program.Pump): Promise<void> {
     const PERCENT = percent || 100.0;
     common.log(`Selling the token by the mint ${mint.toString()}...`);
     common.log(`Selling ${PERCENT}% of the tokens...`);
 
     try {
-        const balance = await trade.get_token_balance(seller.publicKey, mint);
+        const balance = await trade_common.get_token_balance(seller.publicKey, mint);
         common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${balance.uiAmount || 0} tokens\n`);
     } catch (err) {
         common.error('[ERROR] Failed to process seller file');
         return;
     }
 
-    const mint_meta = await common.fetch_mint(mint.toString());
-    if (Object.keys(mint_meta).length === 0) {
-        common.error('[ERROR] Mint metadata not found.');
-        return;
-    }
-    const token_amount = await trade.get_token_balance(seller.publicKey, mint);
+    const token_amount = await trade_common.get_token_balance(seller.publicKey, mint);
     if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) {
         common.error('[ERROR] No tokens to sell');
         return;
     }
-    const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
+    const token_amount_to_sell = trade_common.get_token_amount_by_percent(token_amount, PERCENT);
 
     common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
 
-    if (mint_meta.raydium_pool === null) {
-        trade.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
-            .then(signature => common.log(`Transaction completed, signature: ${signature}`))
-            .catch(error => common.error(`Transaction failed: ${error.message}`));
-    } else {
-        let success = false;
-        const amm = new PublicKey(mint_meta.raydium_pool);
-        trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 0.5)
-            .then(signature => {
-                common.log(`Raydium Transaction completed, signature: ${signature}`);
-                success = true;
-            })
-            .catch(error => {
-                common.error(`Raydium Transaction failed: ${error.message}`);
-                return trade.swap_jupiter(token_amount_to_sell, seller, mint, trade.SOL_MINT, 0.5);
-            })
-            .then(signature => {
-                if (!success) common.log(`Jupiter Transaction completed, signature: ${signature}`);
-            })
-            .catch(error => {
-                if (!success) common.error(`Jupiter Transaction failed: ${error.message}`)
-            })
+    let amm: PublicKey | undefined;
+
+    switch (program) {
+        case common.Program.Pump: {
+            const mint_meta = await trade_pump.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}`);
+                return;
+            }
+            if (mint_meta.raydium_pool !== null) {
+                amm = new PublicKey(mint_meta.raydium_pool);
+                break;
+            }
+
+            trade_pump.sell_token(token_amount, seller, mint_meta, 0.5)
+                .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+                .catch(error => common.error(`Transaction failed: ${error.message}`));
+
+            return;
+        }
+        case common.Program.Moonshot: {
+            const mint_meta = await trade_moon.fetch_mint(mint.toString());
+            if(Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}`);
+                return;
+            }
+
+            if (mint_meta.dexId === 'raydium') {
+                amm = new PublicKey(mint_meta.pairAddress);
+                break;
+            }
+
+            trade_moon.sell_token(token_amount, seller, mint_meta, 0.05)
+                .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+                .catch(error => common.error(`Transaction failed: ${error.message}`));
+
+            return;
+        }
+        default: {
+            common.error(`[ERROR] Invalid program received: ${program}`);
+            return;
+        }
     }
+
+    if (!amm) return;
+    let success = false;
+    trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, 0.5)
+        .then(signature => {
+            common.log(`Raydium Transaction completed, signature: ${signature}`);
+            success = true;
+        })
+        .catch(error => {
+            common.error(`Raydium Transaction failed: ${error.message}`);
+            return trade_common.swap_jupiter(token_amount_to_sell, seller, mint, trade_common.SOL_MINT, 0.5);
+        })
+        .then(signature => {
+            if (!success) common.log(`Jupiter Transaction completed, signature: ${signature}`);
+        })
+        .catch(error => {
+            if (!success) common.error(`Jupiter Transaction failed: ${error.message}`)
+        })
 }
 
-export async function buy_token_once(amount: number, mint: PublicKey, buyer: Keypair): Promise<void> {
+export async function buy_token_once(amount: number, mint: PublicKey, buyer: Keypair, program: common.Program = common.Program.Pump): Promise<void> {
     common.log(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`);
 
     try {
-        const balance = await trade.get_balance(buyer.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade_common.get_balance(buyer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Buyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
         if (balance < amount) {
             common.error(`[ERROR] Buyer balance is not enough to buy ${amount} SOL`);
@@ -245,36 +309,68 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
         return;
     }
 
-    const mint_meta = await common.fetch_mint(mint.toString());
-    if (Object.keys(mint_meta).length === 0) {
-        common.error('[ERROR] Mint metadata not found.');
-        return;
+    let amm: PublicKey | undefined;
+
+    switch (program) {
+        case common.Program.Pump: {
+            const mint_meta = await trade_pump.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}`);
+                return;
+            }
+            if (mint_meta.raydium_pool !== null) {
+                amm = new PublicKey(mint_meta.raydium_pool);
+                break;
+            }
+
+            trade_pump.buy_token(amount, buyer, mint_meta, 0.5)
+                .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+                .catch(error => common.error(`Transaction failed: ${error.message}`));
+
+            return;
+        }
+        case common.Program.Moonshot: {
+            const mint_meta = await trade_moon.fetch_mint(mint.toString());
+            if(Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}`);
+                return;
+            }
+
+            if (mint_meta.dexId === 'raydium') {
+                amm = new PublicKey(mint_meta.pairAddress);
+                break;
+            }
+
+            trade_moon.buy_token(amount, buyer, mint_meta, 0.05)
+                .then(signature => common.log(`Transaction completed, signature: ${signature}`))
+                .catch(error => common.error(`Transaction failed: ${error.message}`));
+
+            return;
+        }
+        default: {
+            common.error(`[ERROR] Invalid program received: ${program}`);
+            return;
+        }
     }
 
-    if (mint_meta.raydium_pool === null) {
-        trade.buy_token(amount, buyer, mint_meta, 0.5)
-            .then(signature => common.log(`Transaction completed, signature: ${signature}`))
-            .catch(error => common.error(`Transaction failed: ${error.message}`));
-    } else {
-        let success = false;
-        const amm = new PublicKey(mint_meta.raydium_pool);
-        const sol_amount = trade.get_sol_token_amount(amount);
-        trade.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
-            .then(signature => {
-                common.log(`Raydium Transaction completed, signature: ${signature}`);
-                success = true;
-            })
-            .catch(error => {
-                common.error(`Raydium Transaction failed: ${error.message}`);
-                return trade.swap_jupiter(sol_amount, buyer, mint, trade.SOL_MINT, 0.5);
-            })
-            .then(signature => {
-                if (!success) common.log(`Jupiter Transaction completed, signature: ${signature}`);
-            })
-            .catch(error => {
-                if (!success) common.error(`Jupiter Transaction failed: ${error.message}`)
-            })
-    }
+    if (!amm) return;
+    let success = false;
+    const sol_amount = trade_common.get_sol_token_amount(amount);
+    trade_common.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
+        .then(signature => {
+            common.log(`Raydium Transaction completed, signature: ${signature}`);
+            success = true;
+        })
+        .catch(error => {
+            common.error(`Raydium Transaction failed: ${error.message}`);
+            return trade_common.swap_jupiter(sol_amount, buyer, mint, trade_common.SOL_MINT, 0.5);
+        })
+        .then(signature => {
+            if (!success) common.log(`Jupiter Transaction completed, signature: ${signature}`);
+        })
+        .catch(error => {
+            if (!success) common.error(`Jupiter Transaction failed: ${error.message}`)
+        })
 }
 
 export async function warmup(keys: common.Key[], from?: number, to?: number, key_picks?: number[], min?: number, max?: number): Promise<void> {
@@ -300,14 +396,14 @@ export async function warmup(keys: common.Key[], from?: number, to?: number, key
         const buyer = key.keypair
         let mints = [];
 
-        const balance = await trade.get_balance(buyer.publicKey);
+        const balance = await trade_common.get_balance(buyer.publicKey);
         if (balance === 0) {
             common.error(`No balance for ${buyer.publicKey.toString().padEnd(44, ' ')} (${key.file_name}), skipping...`);
             continue;
         }
 
         while (true) {
-            mints = (await common.fetch_random_mints(token_cnts[i])).filter(i => !i.raydium_pool);
+            mints = (await trade_pump.fetch_random_mints(token_cnts[i])).filter(i => !i.raydium_pool);
             if (mints.length === token_cnts[i]) break;
             await common.sleep(2000);
         }
@@ -323,7 +419,7 @@ export async function warmup(keys: common.Key[], from?: number, to?: number, key
             let bought = false;
             while (buy_attempts > 0 && !bought) {
                 try {
-                    const signature = await trade.buy_token(amount, buyer, mint_meta, 0.5);
+                    const signature = await trade_pump.buy_token(amount, buyer, mint_meta, 0.5);
                     common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`);
                     bought = true;
                 } catch (e) {
@@ -338,24 +434,22 @@ export async function warmup(keys: common.Key[], from?: number, to?: number, key
                 continue;
             }
 
-            await common.sleep(3000);
-
-            let attempts = 20;
-            while (attempts > 0) {
+            
+            let sell_attempts = 20;
+            while (sell_attempts > 0) {
+                await common.sleep(3000);
                 try {
-                    const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
+                    const balance = await trade_common.get_token_balance(buyer.publicKey, new PublicKey(mint_meta.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
                         common.log(`No tokens yet to sell for ${key.file_name} and mint ${mint_meta.mint}, waiting...`);
-                        attempts--;
-                        await common.sleep(3000);
+                        sell_attempts--;
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${key.file_name})...`);
-                    const signature = await trade.sell_token(balance, buyer, mint_meta, 0.5);
+                    const signature = await trade_pump.sell_token(balance, buyer, mint_meta, 0.5);
                     common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`);
                     break;
                 } catch (e) {
-                    await common.sleep(1000);
                     common.log(`Error selling the token, retrying... ${e}`);
                 }
             }
@@ -378,11 +472,11 @@ export async function collect(keys: common.Key[], receiver: PublicKey, from?: nu
 
     for (const key of keys) {
         const sender = key.keypair;
-        const amount = await trade.get_balance(sender.publicKey);
+        const amount = await trade_common.get_balance(sender.publicKey);
         if (amount === 0 || receiver.equals(sender.publicKey)) continue;
 
         common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
-        transactions.push(trade.send_lamports(amount, sender, receiver, common.PriorityLevel.VERY_HIGH)
+        transactions.push(trade_common.send_lamports(amount, sender, receiver, common.PriorityLevel.VERY_HIGH)
             .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
             .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
 
@@ -405,20 +499,20 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
     keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
 
     try {
-        const receiver_assoc_addr = await trade.create_assoc_token_account(reserve_keypair, receiver, mint);
+        const receiver_assoc_addr = await trade_common.create_assoc_token_account(reserve_keypair, receiver, mint);
 
         const transactions = [];
 
         for (const key of keys) {
             const sender = key.keypair;
-            const token_amount = await trade.get_token_balance(sender.publicKey, mint);
+            const token_amount = await trade_common.get_token_balance(sender.publicKey, mint);
             const token_amount_raw = parseInt(token_amount.amount);
 
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount || sender.publicKey.equals(receiver)) continue;
-            const sender_assoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
+            const sender_assoc_addr = await trade_common.calc_assoc_token_addr(sender.publicKey, mint);
 
             common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
-            transactions.push(trade.send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender)
+            transactions.push(trade_common.send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender)
                 .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
 
@@ -431,7 +525,9 @@ export async function collect_token(keys: common.Key[], mint: PublicKey, receive
     }
 }
 
-export async function buy_token(keys: common.Key[], amount: number, mint: PublicKey, from?: number, to?: number, key_picks?: number[]): Promise<void> {
+export async function buy_token(
+    keys: common.Key[], amount: number, mint: PublicKey, program: common.Program = common.Program.Pump, from?: number, to?: number, key_picks?: number[]
+): Promise<void> {
     common.log(`Buying the tokens from the accounts by the mint ${mint.toString()}...`);
     common.log(`Buying ${amount} SOL of the token...\n`);
 
@@ -440,10 +536,32 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
         return;
     }
 
-    const mint_meta = await common.fetch_mint(mint.toString());
-    if (Object.keys(mint_meta).length === 0) {
-        common.error('[ERROR] Mint metadata not found.');
-        return;
+    let amm: PublicKey | undefined;
+    let mint_meta: trade_pump.PumpTokenMeta | trade_moon.MoonshotTokenMeta;
+
+    switch (program) {
+        case common.Program.Pump: {
+            mint_meta = await trade_pump.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}.`);
+                return;
+            }
+            if (mint_meta.raydium_pool !== null) amm = new PublicKey(mint_meta.raydium_pool);
+            break;
+        }
+        case common.Program.Moonshot: {
+            mint_meta = await trade_moon.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}.`);
+                return;
+            }
+            if (mint_meta.dexId === 'raydium') amm = new PublicKey(mint_meta.pairAddress);
+            break;
+        }
+        default: {
+            common.error(`[ERROR] Invalid program received: ${program}`);
+            return;
+        }
     }
 
     try {
@@ -454,21 +572,30 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
         for (const key of keys) {
             const buyer = key.keypair
 
-            const balance = await trade.get_balance(buyer.publicKey) / LAMPORTS_PER_SOL;
+            const balance = await trade_common.get_balance(buyer.publicKey) / LAMPORTS_PER_SOL;
             if (balance < amount) continue;
 
-            if (mint_meta.raydium_pool === null) {
-                transactions.push(trade.buy_token(amount, buyer, mint_meta, 0.5)
-                    .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
-                    .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
-            } else {
-                const amm = new PublicKey(mint_meta.raydium_pool);
-                const sol_amount = trade.get_sol_token_amount(amount);
-                transactions.push(trade.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
+            common.log(`Buying ${amount} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
+
+            if (amm) {
+                const sol_amount = trade_common.get_sol_token_amount(amount);
+                transactions.push(trade_common.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
                     .then(signature => common.log(`Raydium Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Raydium Transaction failed for ${key.file_name}: ${error.message}`)));
+                continue;
             }
-            await common.sleep(INTERVAL);
+
+            if (trade_pump.is_pump_meta(mint_meta)) {
+                transactions.push(trade_pump.buy_token(amount, buyer, mint_meta, 0.5)
+                    .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
+                    .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
+            } else if (trade_moon.is_moonshot_meta(mint_meta)) {
+                transactions.push(trade_moon.buy_token(amount, buyer, mint_meta, 0.5)
+                    .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
+                    .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
+            }
+
+            // await common.sleep(INTERVAL);
         }
 
         await Promise.allSettled(transactions);
@@ -477,7 +604,9 @@ export async function buy_token(keys: common.Key[], amount: number, mint: Public
     }
 }
 
-export async function sell_token(keys: common.Key[], mint: PublicKey, from?: number, to?: number, key_picks?: number[], percent?: number): Promise<void> {
+export async function sell_token(
+    keys: common.Key[], mint: PublicKey, program: common.Program = common.Program.Pump, from?: number, to?: number, key_picks?: number[], percent?: number
+): Promise<void> {
     const PERCENT = percent || 100.0;
     common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
     common.log(`Selling ${PERCENT}% of the tokens...\n`);
@@ -487,10 +616,32 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
         return;
     }
 
-    const mint_meta = await common.fetch_mint(mint.toString());
-    if (Object.keys(mint_meta).length === 0) {
-        common.error('[ERROR] Mint metadata not found.');
-        return;
+    let amm: PublicKey | undefined;
+    let mint_meta: trade_pump.PumpTokenMeta | trade_moon.MoonshotTokenMeta;
+
+    switch (program) {
+        case common.Program.Pump: {
+            mint_meta = await trade_pump.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}.`);
+                return;
+            }
+            if (mint_meta.raydium_pool !== null) amm = new PublicKey(mint_meta.raydium_pool);
+            break;
+        }
+        case common.Program.Moonshot: {
+            mint_meta = await trade_moon.fetch_mint(mint.toString());
+            if (Object.keys(mint_meta).length === 0) {
+                common.error(`[ERROR] Mint metadata not found for program: ${program}.`);
+                return;
+            }
+            if (mint_meta.dexId === 'raydium') amm = new PublicKey(mint_meta.pairAddress);
+            break;
+        }
+        default: {
+            common.error(`[ERROR] Invalid program received: ${program}`);
+            return;
+        }
     }
 
     try {
@@ -500,22 +651,30 @@ export async function sell_token(keys: common.Key[], mint: PublicKey, from?: num
 
         for (const key of keys) {
             const seller = key.keypair
-            const token_amount = await trade.get_token_balance(seller.publicKey, mint);
+            const token_amount = await trade_common.get_token_balance(seller.publicKey, mint);
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
-            const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
+            const token_amount_to_sell = trade_common.get_token_amount_by_percent(token_amount, PERCENT);
 
             common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
-            if (mint_meta.raydium_pool === null) {
-                transactions.push(trade.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
+
+            if (amm) {
+                transactions.push(trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, 0.5)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
-            } else {
-                const amm = new PublicKey(mint_meta.raydium_pool);
-                transactions.push(trade.swap_raydium(token_amount_to_sell, seller, amm, trade.SOL_MINT, 0.5)
+                continue;
+            }
+
+            if (trade_pump.is_pump_meta(mint_meta)) {
+                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
+                    .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
+                    .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
+            } else if (trade_moon.is_moonshot_meta(mint_meta)) {
+                transactions.push(trade_moon.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
+
             // await common.sleep(INTERVAL);
         }
 
@@ -535,7 +694,7 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
     common.log(`Topping up ${amount} SOL to ${keys.length} keys...`);
 
     try {
-        const balance = await trade.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
+        const balance = await trade_common.get_balance(payer.publicKey) / LAMPORTS_PER_SOL;
         common.log(`Payer address: ${payer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
         if (balance < amount * keys.length) {
             common.error(`[ERROR] Payer balance is not enough to topup ${amount} SOL to ${keys.length - 1} keys`);
@@ -555,7 +714,7 @@ export async function topup(keys: common.Key[], amount: number, payer: Keypair, 
             if (receiver.publicKey.equals(payer.publicKey)) continue;
 
             common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
-            transactions.push(trade.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, common.PriorityLevel.VERY_HIGH)
+            transactions.push(trade_common.send_lamports(amount * LAMPORTS_PER_SOL, payer, receiver.publicKey, common.PriorityLevel.VERY_HIGH)
                 .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                 .catch(error => {
                     common.error(`Transaction failed for ${key.file_name}: ${error.message}`)
@@ -582,17 +741,17 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
     }
 
     keys = key_picks ? keys.filter((key) => key_picks.includes(key.index)) : keys.slice(from, to);
-    let mint_meta: common.TokenMeta | null = null;
+    let mint_meta: trade_pump.PumpTokenMeta | null = null;
     const sol_price = await common.fetch_sol_price();
 
     const worker_update_mint = async (workers: common.WorkerJob[], mint: PublicKey) => {
-        mint_meta = await common.fetch_mint(mint.toString());
+        mint_meta = await trade_pump.fetch_mint(mint.toString());
         if (Object.keys(mint_meta).length !== 0 && mint_meta.usd_market_cap !== undefined) {
             run.worker_post_message(workers, 'mint', mint_meta);
         } else {
             common.log(`[Main Worker] No Token Meta data available, using the default values`);
-            const [bonding] = trade.calc_token_bonding_curve(mint);
-            const [assoc_bonding] = trade.calc_token_assoc_bonding_curve(mint, bonding);
+            const [bonding] = trade_pump.calc_token_bonding_curve(mint);
+            const [assoc_bonding] = trade_pump.calc_token_assoc_bonding_curve(mint, bonding);
             mint_meta = {
                 mint: mint.toString(),
                 symbol: 'Unknown',
@@ -604,7 +763,7 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
                 virtual_sol_reserves: BigInt(30000000030),
                 virtual_token_reserves: BigInt(1072999999000001),
                 total_supply: BigInt(1000000000000000)
-            } as Partial<common.TokenMeta> as common.TokenMeta;
+            } as Partial<trade_pump.PumpTokenMeta> as trade_pump.PumpTokenMeta;
             run.worker_post_message(workers, 'mint', mint_meta);
         }
     }
@@ -615,13 +774,13 @@ export async function start(keys: common.Key[], bot_config: common.BotConfig, wo
             return;
         }
         try {
-            const curve_state = await trade.get_curve_state(new PublicKey(mint_meta.bonding_curve));
+            const curve_state = await trade_pump.get_curve_state(new PublicKey(mint_meta.bonding_curve));
             if (!curve_state) {
                 common.error('[ERROR] Curve state not found.');
                 return;
             }
-            const token_price_sol = trade.calculate_curve_price(curve_state.virtual_sol_reserves, curve_state.virtual_token_reserves);
-            const token_mc = trade.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
+            const token_price_sol = trade_pump.calculate_curve_price(curve_state.virtual_sol_reserves, curve_state.virtual_token_reserves);
+            const token_mc = trade_pump.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
             mint_meta.usd_market_cap = token_mc.usd_mc;
             mint_meta.market_cap = token_mc.sol_mc;
             mint_meta.total_supply = curve_state.token_total_supply;

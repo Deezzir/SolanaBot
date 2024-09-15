@@ -1,17 +1,18 @@
 import inquirer from 'inquirer';
 import { Worker } from 'worker_threads';
-import io from "socket.io-client";
+import io from 'socket.io-client';
 import bs58 from 'bs58';
-import { Keypair, PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
+import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import { CreateMetadataAccountV3InstructionData, getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
-import * as common from './common.js';
 import { clearLine, cursorTo, moveCursor } from 'readline';
-import * as trade from './trade.js';
+import * as common from './common.js';
+import * as trade from './trade_common.js';
+import * as trade_pump from './trade_pump.js'
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
-const TRADE_PROGRAM_ID = new PublicKey(process.env.TRADE_PROGRAM_ID || '');
+const PUMP_TRADE_PROGRAM_ID = new PublicKey(process.env.PUMP_TRADE_PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
@@ -88,7 +89,7 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                 type: 'input',
                 name: 'collect_address',
                 message: 'Enter the public key for funds collection:',
-                validate: input => common.is_valid_pubkey(input) || "Please enter a valid public key.",
+                validate: input => common.is_valid_pubkey(input) || 'Please enter a valid public key.',
                 filter: input => new PublicKey(input)
             },
             {
@@ -140,9 +141,9 @@ export async function get_config(keys_cnt: number): Promise<common.BotConfig> {
                     name: 'mint',
                     message: 'Enter the mint public key:',
                     validate: async (input) => {
-                        if (!common.is_valid_pubkey(input)) return "Please enter a valid public key.";
-                        const meta = await common.fetch_mint(input);
-                        if (Object.keys(meta).length === 0) return "Failed fetching the mint data with the public key.";
+                        if (!common.is_valid_pubkey(input)) return 'Please enter a valid public key.';
+                        const meta = await trade_pump.fetch_mint(input);
+                        if (Object.keys(meta).length === 0) return 'Failed fetching the mint data with the public key.';
                         return true;
                     },
                     filter: input => new PublicKey(input)
@@ -183,19 +184,19 @@ export async function wait_drop_sub(token_name: string, token_ticker: string): P
     search.push(new Promise<PublicKey | null>(async (resolve, reject) => {
         common.log('[Main Worker] Waiting for the new token drop using Websocket...');
         const socket = io(FETCH_MINT_API_URL, {
-            path: "/socket.io/",
-            // query: { offset: 0, limit: 100, sort: "last_trade_timestamp", order: "DESC", includeNsfw: true },
-            transports: ["websocket"]
+            path: '/socket.io/',
+            // query: { offset: 0, limit: 100, sort: 'last_trade_timestamp', order: 'DESC', includeNsfw: true },
+            transports: ['websocket']
         });
         LOGS_STOP_FUNCTION = () => { socket.disconnect(); reject(new Error('User stopped the process')) };
-        socket.on("connect", () => { });
-        socket.on("disconnect", () => { });
+        socket.on('connect', () => { });
+        socket.on('disconnect', () => { });
 
         socket.prependAny(async (event, ...obj) => {
             if (event !== 'newCoinCreated') return;
             const data_raw = obj[0];
             if (!data_raw || !data_raw.data || !data_raw.data.subscribe || !data_raw.data.subscribe.data) return;
-            const token_meta = JSON.parse(data_raw.data.subscribe.data).payload as common.TokenMeta;
+            const token_meta = JSON.parse(data_raw.data.subscribe.data).payload as trade_pump.PumpTokenMeta;
             if (token_meta.name.toLowerCase() === token_name.toLowerCase() && token_meta.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
                 LOGS_STOP_FUNCTION = null
                 await wait_drop_unsub();
@@ -210,7 +211,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string): P
         let mint: PublicKey;
         LOGS_STOP_FUNCTION = () => reject(new Error('User stopped the process'));
         common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
-        SUBSCRIPTION_ID = global.CONNECTION.onLogs(TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
+        SUBSCRIPTION_ID = global.CONNECTION.onLogs(PUMP_TRADE_PROGRAM_ID, async ({ err, logs, signature }) => {
             if (err) return;
             if (logs && logs.includes('Program log: Instruction: Create')) {
                 try {

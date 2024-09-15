@@ -7,7 +7,6 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
-// import fetch from 'node-fetch';
 dotenv.config();
 
 export const KEYS_DIR = process.env.KEYS_DIR || './keys';
@@ -88,13 +87,13 @@ export type Key = {
 };
 
 export enum PriorityLevel {
-    MIN = "Min",
-    LOW = "Low",
-    MEDIUM = "Medium",
-    HIGH = "High",
-    VERY_HIGH = "VeryHigh",
-    UNSAFE_MAX = "UnsafeMax",
-    DEFAULT = "Default"
+    MIN = 'Min',
+    LOW = 'Low',
+    MEDIUM = 'Medium',
+    HIGH = 'High',
+    VERY_HIGH = 'VeryHigh',
+    UNSAFE_MAX = 'UnsafeMax',
+    DEFAULT = 'Default'
 }
 
 export type PriorityOptions = {
@@ -167,6 +166,11 @@ export enum Action {
 
 export const ActionStrings = ['Sell', 'Collect'];
 
+export enum Program {
+    Pump = 'pump',
+    Moonshot = 'moonshot',
+}
+
 export type WorkerConfig = {
     secret: Uint8Array;
     id: number;
@@ -184,39 +188,6 @@ export type MintMeta = {
     token_symbol: string;
     token_decimals: number;
     mint: PublicKey
-}
-
-export type TokenMeta = {
-    mint: string;
-    name: string;
-    symbol: string;
-    description: string;
-    image_uri: string;
-    metadata_uri: string;
-    twitter: string | null;
-    telegram: string | null;
-    bonding_curve: string;
-    associated_bonding_curve: string;
-    creator: string;
-    created_timestamp: number;
-    raydium_pool: string | null;
-    complete: boolean;
-    virtual_sol_reserves: bigint;
-    virtual_token_reserves: bigint;
-    total_supply: bigint;
-    website: string | null;
-    show_name: boolean
-    king_of_the_hill_timestamp: number | null;
-    market_cap: number;
-    reply_count: number;
-    last_reply: number | null;
-    nsfw: boolean;
-    market_id: string | null;
-    inverted: boolean | null;
-    usd_market_cap: number;
-    username: string;
-    profile_image: string | null;
-    is_currently_live: boolean;
 }
 
 export function bot_conf_display(config: BotConfig) {
@@ -497,26 +468,26 @@ export async function fetch_ipfs_json(cid: string): Promise<any> {
 
 export async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse | undefined> {
     var headers = new Headers();
-    headers.append("x-api-key", IPSF_API_KEY);
+    headers.append('x-api-key', IPSF_API_KEY);
 
     var body_data: BodyInit;
     const form_data = new FormData();
 
-    if (content_type.includes("json")) {
-        form_data.append("Key", file_name);
-        form_data.append("Content-Type", "application/json; charset=utf-8");
-        const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-        form_data.append("Body", blob, "filename.json");
+    if (content_type.includes('json')) {
+        form_data.append('Key', file_name);
+        form_data.append('Content-Type', 'application/json; charset=utf-8');
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        form_data.append('Body', blob, 'filename.json');
         body_data = form_data;
     } else {
         if (data instanceof File) {
-            form_data.append("Body", data, file_name);
+            form_data.append('Body', data, file_name);
         } else {
-            console.error("The provided data is not a file.");
+            console.error('The provided data is not a file.');
             return;
         }
-        form_data.append("Key", file_name);
-        form_data.append("ContentType", content_type);
+        form_data.append('Key', file_name);
+        form_data.append('ContentType', content_type);
         body_data = form_data;
     }
 
@@ -578,35 +549,6 @@ export const fetch_sol_price = async (): Promise<number> => {
         });
 }
 
-export async function fetch_mint(mint: string): Promise<TokenMeta> {
-    return fetch(`${FETCH_MINT_API_URL}/coins/${mint}`)
-        .then(response => response.json())
-        .then(data => {
-            if (!data || data.statusCode !== undefined) return {} as TokenMeta;
-            return data as TokenMeta;
-        })
-        .catch(err => {
-            error(`[ERROR] Failed fetching the mint: ${err}`);
-            return {} as TokenMeta;
-        });
-}
-
-export async function fetch_random_mints(count: number): Promise<TokenMeta[]> {
-    const limit = 50;
-    const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
-    return fetch(`${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`)
-        .then(response => response.json())
-        .then((data: any) => {
-            if (!data || data.statusCode !== undefined) return [] as TokenMeta[];
-            const shuffled = data.sort(() => 0.5 - Math.random());
-            return shuffled.slice(0, count) as TokenMeta[];
-        })
-        .catch(err => {
-            error(`[ERROR] Failed fetching the mints: ${err}`);
-            return [] as TokenMeta[];
-        });
-}
-
 export function validate_bot_config(json: any): BotConfig | undefined {
     const required_fields = [
         'thread_cnt',
@@ -652,7 +594,7 @@ export function validate_bot_config(json: any): BotConfig | undefined {
 
 export function read_bytes(buf: Buffer, offset: number, length: number): Buffer {
     const end = offset + length;
-    if (buf.byteLength < end) throw new RangeError("range out of bounds");
+    if (buf.byteLength < end) throw new RangeError('range out of bounds');
     return buf.subarray(offset, end);
 }
 

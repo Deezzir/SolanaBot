@@ -1,14 +1,15 @@
 import figlet from 'figlet';
 import dotenv from 'dotenv'
-import { Command, InvalidArgumentError, InvalidOptionArgumentError } from 'commander';
-import { existsSync, mkdir, mkdirSync, readdirSync, } from 'fs';
+import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
+import { existsSync, mkdirSync, readdirSync, } from 'fs';
 import * as common from './common.js';
 import * as run from './run.js';
 import * as commands from './commands.js';
 import * as drop from './drop.js';
 import { exit } from 'process';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { Helius } from "helius-sdk";
+import { Helius } from 'helius-sdk';
+import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 dotenv.config({ path: './.env' });
 
 //------------------------------------------------------------
@@ -25,6 +26,13 @@ async function main() {
     global.START_COLLECT = false;
     global.CONNECTION = new Connection(helius_rpc, 'confirmed');
     global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
+    global.MOONSHOT = new Moonshot({
+        rpcUrl: global.CONNECTION.rpcEndpoint,
+        environment: Environment.MAINNET,
+        chainOptions: {
+            solana: {confirmOptions: {commitment: 'confirmed'} }
+        }
+    });
 
     const program = new Command();
 
@@ -217,10 +225,16 @@ async function main() {
             if (!buyer_keypair) throw new InvalidArgumentError('Invalid keypair file.');
             return buyer_keypair;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Buy the token once with the provided amount')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
-        .action((amount, mint, buyer) => {
-            commands.buy_token_once(amount, mint, buyer);
+        .action((amount, mint, buyer, options) => {
+            const { program } = options
+            commands.buy_token_once(amount, mint, buyer, program);
         });
 
     program
@@ -246,11 +260,16 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
             return parsed_value;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Sell the token once with the provided amount')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint, seller, options) => {
-            const { percent } = options;
-            commands.sell_token_once(mint, seller, percent);
+            const { percent, program } = options;
+            commands.sell_token_once(mint, seller, percent, program);
         });
 
     program
@@ -283,11 +302,16 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Key file '${key_path}' does not exist.`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Buy the token by the mint from the accounts')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((amount, mint, options) => {
-            const { from, to, list } = options;
-            commands.buy_token(keys, amount, mint, from, to, list);
+            const { from, to, list, program } = options;
+            commands.buy_token(keys, amount, mint, program, from, to, list);
         });
 
     program
@@ -322,11 +346,16 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
             return parsed_value;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Sell all the token by the mint from the accounts')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((mint, options) => {
-            const { from, to, list, percent } = options;
-            commands.sell_token(keys, mint, from, to, list, percent);
+            const { from, to, list, percent, program } = options;
+            commands.sell_token(keys, mint, program, from, to, list, percent);
         });
 
     program
@@ -477,10 +506,16 @@ async function main() {
             if (!creator_keypair) throw new InvalidArgumentError('Invalid keypair file.');
             return creator_keypair;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Create promotion tokens using the provided keypair')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
-        .action((count, cid, creator) => {
-            commands.promote(count, cid, creator);
+        .action((count, cid, creator, options) => {
+            const { program } = options;
+            commands.promote(count, cid, creator, program);
         });
 
     program
@@ -507,11 +542,16 @@ async function main() {
                 throw new InvalidOptionArgumentError('Not a number.');
             return parsed_value;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .description('Create a token')
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((cid, creator, options) => {
-            const { mint, buy } = options;
-            commands.create_token(cid, creator, buy, mint);
+            const { mint, buy, program } = options;
+            commands.create_token(cid, creator, program, buy, mint);
         });
 
     program
