@@ -64,7 +64,7 @@ export function is_pump_meta(obj: any): obj is PumpTokenMeta {
         typeof obj.market_cap === 'number' &&
         typeof obj.usd_market_cap === 'number' &&
         typeof obj.bonding_curve === 'string' &&
-        typeof obj.assoc_bonding_curve === 'string'
+        typeof obj.associated_bonding_curve === 'string'
     )
 }
 

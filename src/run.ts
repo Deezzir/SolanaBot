@@ -10,7 +10,7 @@ import * as trade from './trade_common.js';
 import * as trade_pump from './trade_pump.js'
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
-const WORKER_PATH = process.env.WORKER_PATH || './dist/worker.js';
+const WORKER_PATH = process.env.WORKER_PATH || './dist/pump_worker.js';
 const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
 const PUMP_TRADE_PROGRAM_ID = new PublicKey(process.env.PUMP_TRADE_PROGRAM_ID || '');
 var SUBSCRIPTION_ID: number | undefined;
