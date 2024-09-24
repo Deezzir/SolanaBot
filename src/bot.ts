@@ -167,10 +167,15 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50')
             return parsed_value;
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .hook('preAction', common.Config.validatorHook([common.EConfigKeys.ReserveKeypair]))
         .action((options) => {
-            const { from, to, list, min, max } = options;
-            commands.warmup(keys, from, to, list, min, max);
+            const { from, to, list, min, max, program } = options;
+            commands.warmup(keys, program, from, to, list, min, max);
         });
 
     program

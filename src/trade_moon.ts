@@ -45,7 +45,7 @@ export function is_moonshot_meta(obj: any): obj is MoonshotTokenMeta {
     return (
         typeof obj === 'object' &&
         obj !== null &&
-        typeof obj.moonshoot === 'object' &&
+        typeof obj.moonshot === 'object' &&
         typeof obj.chainId === 'string' &&
         typeof obj.pairAddress === 'string' &&
         typeof obj.dexId === 'string' &&
@@ -82,7 +82,7 @@ async function get_buy_token_instructions(
     const token = global.MOONSHOT.Token({
         mintAddress: mint_meta.baseToken.address
     });
-    const raw_slippage = slippage * 100;
+    const raw_slippage = slippage * 1000;
     const curve_pos = await token.getCurvePosition();
     const collateral_amount = BigInt(sol_amount * LAMPORTS_PER_SOL);
 
@@ -129,7 +129,7 @@ async function get_sell_token_instructions(
     const token = global.MOONSHOT.Token({
         mintAddress: mint_meta.baseToken.address
     });
-    const raw_slippage = slippage * 100;
+    const raw_slippage = slippage * 1000;
     const curve_pos = await token.getCurvePosition();
     const token_amount_raw = BigInt(token_amount.amount);
 

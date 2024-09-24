@@ -373,9 +373,16 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
         })
 }
 
-export async function warmup(keys: common.Key[], from?: number, to?: number, key_picks?: number[], min?: number, max?: number): Promise<void> {
+export async function warmup(
+    keys: common.Key[], program: common.Program = common.Program.Pump, from?: number, to?: number, key_picks?: number[], min?: number, max?: number
+): Promise<void> {
     const MIN = min || 1;
     const MAX = max || 5;
+
+    if (program === common.Program.Moonshot) {
+        common.error(`[ERROR] The '${program}' is not yet supported`);
+        return;
+    }
 
     if (MAX < MIN) {
         common.error('[ERROR] Invalid min and max values.');
