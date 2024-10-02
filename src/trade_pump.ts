@@ -60,7 +60,7 @@ export function is_pump_meta(obj: any): obj is PumpTokenMeta {
         typeof obj === 'object' &&
         obj !== null &&
         typeof obj.mint === 'string' &&
-        typeof obj.raydium_pool === 'string' &&
+        typeof obj.symbol === 'string' &&
         typeof obj.market_cap === 'number' &&
         typeof obj.usd_market_cap === 'number' &&
         typeof obj.bonding_curve === 'string' &&
