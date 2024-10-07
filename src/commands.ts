@@ -245,7 +245,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
                 break;
             }
 
-            trade_pump.sell_token(token_amount, seller, mint_meta, 0.5)
+            trade_pump.sell_token(token_amount, seller, mint_meta, 0.1)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -323,7 +323,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
                 break;
             }
 
-            trade_pump.buy_token(amount, buyer, mint_meta, 0.5)
+            trade_pump.buy_token(amount, buyer, mint_meta, 0.05)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -426,7 +426,7 @@ export async function warmup(
             let bought = false;
             while (buy_attempts > 0 && !bought) {
                 try {
-                    const signature = await trade_pump.buy_token(amount, buyer, mint_meta, 0.5);
+                    const signature = await trade_pump.buy_token(amount, buyer, mint_meta, 0.05);
                     common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`);
                     bought = true;
                 } catch (e) {
@@ -453,7 +453,7 @@ export async function warmup(
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint_meta.name}' tokens (${key.file_name})...`);
-                    const signature = await trade_pump.sell_token(balance, buyer, mint_meta, 0.5);
+                    const signature = await trade_pump.sell_token(balance, buyer, mint_meta, 0.05);
                     common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`);
                     break;
                 } catch (e) {
@@ -673,7 +673,7 @@ export async function sell_token(
             }
 
             if (trade_pump.is_pump_meta(mint_meta)) {
-                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
+                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.1)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             } else if (trade_moon.is_moonshot_meta(mint_meta)) {

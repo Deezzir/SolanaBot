@@ -5,7 +5,7 @@ import * as trade_common from './trade_common.js';
 import * as trade_pump from './trade_pump.js';
 import { Helius } from 'helius-sdk';
 
-const SLIPPAGE = 0.50;
+const SLIPPAGE = 0.10;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.005;
@@ -77,7 +77,7 @@ const buy = async () => {
         let count = TRADE_ITERATIONS;
         while (count > 0) {
             if (MINT_METADATA.raydium_pool === null) {
-                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.DEFAULT)
                 transactions.push(
                     process_buy_tx(buy_promise, amount).then(result => {
                         if (result) bought = true;
