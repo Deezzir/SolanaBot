@@ -163,7 +163,7 @@ export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<
 
             const key_alloc = (ui_balance / (supply_num / (10 ** decimals))) * 100;
             total += ui_balance;
-            common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Allocation: ${key_alloc.toFixed(2)}% | Balance: ${ui_balance.toFixed(2)} ${token_symbol}`);
+            common.log(`File: ${key.file_name.padEnd(11, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Allocation: ${key_alloc.toFixed(2)}% | Balance: ${ui_balance.toFixed(2)} ${token_symbol}`);
         }
         const allocation = (total / (supply_num / (10 ** decimals))) * 100;
 
@@ -203,7 +203,7 @@ export async function balance(keys: common.Key[]): Promise<void> {
     for (const key of keys) {
         const balance = await trade_common.get_balance(key.keypair.publicKey) / LAMPORTS_PER_SOL;
         total += balance;
-        common.log(`File: ${key.file_name.padEnd(10, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key.is_reserve ? '| (Reserve)' : ''}`);
+        common.log(`File: ${key.file_name.padEnd(11, ' ')} | Address: ${key.keypair.publicKey.toString().padEnd(44, ' ')} | Balance: ${balance.toFixed(9)} SOL ${key.is_reserve ? '| (Reserve)' : ''}`);
     }
 
     common.log(`\nTotal balance: ${total} SOL`);
@@ -245,7 +245,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
                 break;
             }
 
-            trade_pump.sell_token(token_amount, seller, mint_meta, 0.1)
+            trade_pump.sell_token(token_amount, seller, mint_meta, 0.5)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -263,7 +263,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
                 break;
             }
 
-            trade_moon.sell_token(token_amount, seller, mint_meta, 0.05)
+            trade_moon.sell_token(token_amount, seller, mint_meta, 0.5)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -673,7 +673,7 @@ export async function sell_token(
             }
 
             if (trade_pump.is_pump_meta(mint_meta)) {
-                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.1)
+                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             } else if (trade_moon.is_moonshot_meta(mint_meta)) {

@@ -5,7 +5,8 @@ import * as trade_common from './trade_common.js';
 import * as trade_pump from './trade_pump.js';
 import { Helius } from 'helius-sdk';
 
-const SLIPPAGE = 0.10;
+const BUY_SLIPPAGE = 0.25;
+const SELL_SLIPPAGE = 0.50;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.005;
@@ -77,7 +78,7 @@ const buy = async () => {
         let count = TRADE_ITERATIONS;
         while (count > 0) {
             if (MINT_METADATA.raydium_pool === null) {
-                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.DEFAULT)
+                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, BUY_SLIPPAGE, common.PriorityLevel.DEFAULT)
                 transactions.push(
                     process_buy_tx(buy_promise, amount).then(result => {
                         if (result) bought = true;
@@ -87,7 +88,7 @@ const buy = async () => {
                 const amm = new PublicKey(MINT_METADATA.raydium_pool);
                 const mint = new PublicKey(MINT_METADATA.mint);
                 const sol_amount = trade_common.get_sol_token_amount(amount);
-                const buy_promise = trade_common.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, SLIPPAGE, common.PriorityLevel.HIGH)
+                const buy_promise = trade_common.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, BUY_SLIPPAGE, common.PriorityLevel.HIGH)
                 transactions.push(
                     process_buy_tx(buy_promise, amount).then(result => {
                         if (result) bought = true;
@@ -147,7 +148,7 @@ const sell = async () => {
 
             while (count > 0 && balance !== undefined) {
                 if (MINT_METADATA.raydium_pool === null) {
-                    const sell_promise = trade_pump.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade_pump.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SELL_SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;
@@ -155,7 +156,7 @@ const sell = async () => {
                     );
                 } else {
                     const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    const sell_promise = trade_common.swap_raydium(balance, WORKER_KEYPAIR, amm, trade_common.SOL_MINT, SLIPPAGE, common.PriorityLevel.HIGH)
+                    const sell_promise = trade_common.swap_raydium(balance, WORKER_KEYPAIR, amm, trade_common.SOL_MINT, SELL_SLIPPAGE, common.PriorityLevel.HIGH)
                     transactions.push(
                         process_sell_tx(sell_promise, balance).then(result => {
                             if (result) sold = true;

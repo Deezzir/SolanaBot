@@ -1,5 +1,5 @@
 import figlet from 'figlet';
-import dotenv from 'dotenv'
+import dotenv from 'dotenv';
 import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
 import { existsSync, mkdirSync, readdirSync, } from 'fs';
 import * as common from './common.js';
