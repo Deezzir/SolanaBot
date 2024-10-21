@@ -15,6 +15,8 @@ dotenv.config({ path: './.env' });
 
 const META_UPDATE_INTERVAL = 200;
 const INTERVAL = 50;
+const SELL_SLIPPAGE = 0.5;
+const BUY_SLIPPAGE = 0.1;
 
 export async function clean(keys: common.Key[]): Promise<void> {
     common.log('Cleaning all the accounts...\n');
@@ -116,7 +118,7 @@ export async function promote(times: number, cid: string, creator: Keypair, prog
     const transactions = [];
 
     while (count > 0) {
-        switch(program) {
+        switch (program) {
             case common.Program.Pump: {
                 transactions.push(trade_pump.create_token(creator, meta, cid, common.PriorityLevel.LOW)
                     .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
@@ -245,7 +247,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
                 break;
             }
 
-            trade_pump.sell_token(token_amount, seller, mint_meta, 0.5)
+            trade_pump.sell_token(token_amount, seller, mint_meta, SELL_SLIPPAGE)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -253,7 +255,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
         }
         case common.Program.Moonshot: {
             const mint_meta = await trade_moon.fetch_mint(mint.toString());
-            if(Object.keys(mint_meta).length === 0) {
+            if (Object.keys(mint_meta).length === 0) {
                 common.error(`[ERROR] Mint metadata not found for program: ${program}`);
                 return;
             }
@@ -263,7 +265,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
                 break;
             }
 
-            trade_moon.sell_token(token_amount, seller, mint_meta, 0.5)
+            trade_moon.sell_token(token_amount, seller, mint_meta, SELL_SLIPPAGE)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -277,7 +279,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
 
     if (!amm) return;
     let success = false;
-    trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, 0.5)
+    trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, SELL_SLIPPAGE)
         .then(signature => {
             common.log(`Raydium Transaction completed, signature: ${signature}`);
             success = true;
@@ -323,7 +325,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
                 break;
             }
 
-            trade_pump.buy_token(amount, buyer, mint_meta, 0.05)
+            trade_pump.buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -331,7 +333,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
         }
         case common.Program.Moonshot: {
             const mint_meta = await trade_moon.fetch_mint(mint.toString());
-            if(Object.keys(mint_meta).length === 0) {
+            if (Object.keys(mint_meta).length === 0) {
                 common.error(`[ERROR] Mint metadata not found for program: ${program}`);
                 return;
             }
@@ -341,7 +343,7 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
                 break;
             }
 
-            trade_moon.buy_token(amount, buyer, mint_meta, 0.05)
+            trade_moon.buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
                 .then(signature => common.log(`Transaction completed, signature: ${signature}`))
                 .catch(error => common.error(`Transaction failed: ${error.message}`));
 
@@ -356,14 +358,14 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
     if (!amm) return;
     let success = false;
     const sol_amount = trade_common.get_sol_token_amount(amount);
-    trade_common.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
+    trade_common.swap_raydium(sol_amount, buyer, amm, mint, BUY_SLIPPAGE)
         .then(signature => {
             common.log(`Raydium Transaction completed, signature: ${signature}`);
             success = true;
         })
         .catch(error => {
             common.error(`Raydium Transaction failed: ${error.message}`);
-            return trade_common.swap_jupiter(sol_amount, buyer, mint, trade_common.SOL_MINT, 0.5);
+            return trade_common.swap_jupiter(sol_amount, buyer, mint, trade_common.SOL_MINT, BUY_SLIPPAGE);
         })
         .then(signature => {
             if (!success) common.log(`Jupiter Transaction completed, signature: ${signature}`);
@@ -441,7 +443,6 @@ export async function warmup(
                 continue;
             }
 
-            
             let sell_attempts = 20;
             while (sell_attempts > 0) {
                 await common.sleep(3000);
@@ -586,18 +587,18 @@ export async function buy_token(
 
             if (amm) {
                 const sol_amount = trade_common.get_sol_token_amount(amount);
-                transactions.push(trade_common.swap_raydium(sol_amount, buyer, amm, mint, 0.5)
+                transactions.push(trade_common.swap_raydium(sol_amount, buyer, amm, mint, BUY_SLIPPAGE)
                     .then(signature => common.log(`Raydium Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Raydium Transaction failed for ${key.file_name}: ${error.message}`)));
                 continue;
             }
 
             if (trade_pump.is_pump_meta(mint_meta)) {
-                transactions.push(trade_pump.buy_token(amount, buyer, mint_meta, 0.5)
+                transactions.push(trade_pump.buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             } else if (trade_moon.is_moonshot_meta(mint_meta)) {
-                transactions.push(trade_moon.buy_token(amount, buyer, mint_meta, 0.5)
+                transactions.push(trade_moon.buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
@@ -666,18 +667,18 @@ export async function sell_token(
             common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${key.file_name})...`);
 
             if (amm) {
-                transactions.push(trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, 0.5)
+                transactions.push(trade_common.swap_raydium(token_amount_to_sell, seller, amm, trade_common.SOL_MINT, SELL_SLIPPAGE)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
                 continue;
             }
 
             if (trade_pump.is_pump_meta(mint_meta)) {
-                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
+                transactions.push(trade_pump.sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             } else if (trade_moon.is_moonshot_meta(mint_meta)) {
-                transactions.push(trade_moon.sell_token(token_amount_to_sell, seller, mint_meta, 0.5)
+                transactions.push(trade_moon.sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
                     .then(signature => common.log(`Transaction completed for ${key.file_name}, signature: ${signature}`))
                     .catch(error => common.error(`Transaction failed for ${key.file_name}: ${error.message}`)));
             }
