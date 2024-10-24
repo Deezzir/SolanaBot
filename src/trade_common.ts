@@ -99,7 +99,9 @@ async function is_blockhash_expired(last_block_height: number): Promise<boolean>
 async function check_transaction_status(signature: string, context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>): Promise<void> {
     const retry_interval = 1000;
     while (true) {
-        const { value: status } = await global.CONNECTION.getSignatureStatus(signature);
+        const { value: status } = await global.CONNECTION.getSignatureStatus(signature, {
+            searchTransactionHistory: true
+        });
 
         if (status) {
             if ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') && status.err === null) {
