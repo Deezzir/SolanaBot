@@ -91,9 +91,10 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
     }
 }
 
-async function is_blockhash_expired(last_block_height: number): Promise<boolean> {
+async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
     let current_block_height = (await global.CONNECTION.getBlockHeight('confirmed'));
-    return (current_block_height > last_block_height - 149);
+    return (last_valid_block_height - current_block_height  < 0);
+
 }
 
 async function check_transaction_status(signature: string, context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>): Promise<void> {

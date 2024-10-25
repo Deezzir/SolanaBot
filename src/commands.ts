@@ -159,7 +159,7 @@ export async function spl_balance(keys: common.Key[], mint: PublicKey): Promise<
 
         let total = 0;
         for (const key of keys) {
-            const balance = await trade_common.get_token_balance(key.keypair.publicKey, mint);
+            const balance = await trade_common.get_token_balance(key.keypair.publicKey, mint, 'confirmed');
             const ui_balance = balance.uiAmount || 0;
             if (ui_balance === 0) continue;
 
@@ -216,15 +216,8 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
     common.log(`Selling the token by the mint ${mint.toString()}...`);
     common.log(`Selling ${PERCENT}% of the tokens...`);
 
-    try {
-        const balance = await trade_common.get_token_balance(seller.publicKey, mint);
-        common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${balance.uiAmount || 0} tokens\n`);
-    } catch (err) {
-        common.error('[ERROR] Failed to process seller file');
-        return;
-    }
-
     const token_amount = await trade_common.get_token_balance(seller.publicKey, mint);
+    common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`);
     if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) {
         common.error('[ERROR] No tokens to sell');
         return;
@@ -659,7 +652,7 @@ export async function sell_token(
 
         for (const key of keys) {
             const seller = key.keypair
-            const token_amount = await trade_common.get_token_balance(seller.publicKey, mint);
+            const token_amount = await trade_common.get_token_balance(seller.publicKey, mint, 'confirmed');
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
             const token_amount_to_sell = trade_common.get_token_amount_by_percent(token_amount, PERCENT);
