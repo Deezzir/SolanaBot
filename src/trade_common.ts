@@ -129,7 +129,7 @@ async function get_priority_fee(priority: common.PriorityOptions): Promise<numbe
 }
 
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[],) {
-    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], { skipPreflight: true, preflightCommitment: 'confirmed' });
+    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], { skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: MAX_RETRIES });
 }
 
 export async function create_and_send_tx(
