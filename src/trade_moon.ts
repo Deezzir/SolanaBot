@@ -1,10 +1,9 @@
-import { FixedSide, Moonshot } from '@wen-moon-ser/moonshot-sdk';
+import { FixedSide } from '@wen-moon-ser/moonshot-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstruction } from '@solana/web3.js';
 import * as trade_common from './trade_common.js';
 import * as common from './common.js'
 
 const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
-const CURVE_TOKEN_DECIMALS = 9;
 
 export interface MoonshotTokenMeta {
     url: string;
@@ -65,11 +64,6 @@ export async function fetch_mint(mint: string): Promise<MoonshotTokenMeta> {
             console.error(`[ERROR] Failed fetching the mint: ${err}`);
             return {} as MoonshotTokenMeta;
         });
-}
-
-function get_token_amount_raw(sol_amount: number, token: Partial<MoonshotTokenMeta>): bigint {
-    if (!token.priceNative) return BigInt(0);
-    return BigInt(Math.round(sol_amount / parseFloat(token.priceNative) * 10 ** CURVE_TOKEN_DECIMALS));
 }
 
 async function get_buy_token_instructions(

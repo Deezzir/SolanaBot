@@ -7,8 +7,7 @@ import * as run from './pump_start.js';
 import * as spider from './spider.js';
 import dotenv from 'dotenv'
 import { Wallet } from '@project-serum/anchor';
-import { createWriteStream, existsSync, readFileSync, writeFileSync } from 'fs';
-import path from 'path';
+import { createWriteStream, existsSync, readFileSync } from 'fs';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 import pLimit from 'p-limit';
 dotenv.config({ path: './.env' });
@@ -834,8 +833,7 @@ export async function benchmark(NUM_REQUESTS: number, test_public_key: string, b
         const startTime = process.hrtime();
 
         try {
-            const result = await connection.getBalance(public_key)
-            //   console.log(`Request ${i + 1} | Balance: ${result}`);
+            await connection.getBalance(public_key)
         } catch (error) {
             //   console.error(`Error on request ${i + 1}:`, error);
             errors++;

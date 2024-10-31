@@ -1,10 +1,10 @@
-import { MongoClient, Db, ServerApiVersion, ClientSession, WithId, Document, BulkWriteResult } from "mongodb";
+import { MongoClient, Db, ServerApiVersion, WithId, Document, BulkWriteResult } from "mongodb";
 import * as common from "./common.js";
-import { Keypair, PublicKey, RpcResponseAndContext, Signer, TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, Signer, TransactionInstruction } from "@solana/web3.js";
 import * as trade from "./trade_common.js";
 import { readFileSync } from "fs";
 import dotenv from "dotenv";
-import { createAssociatedTokenAccountInstruction, createTransferInstruction, getAccount } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, createTransferInstruction } from "@solana/spl-token";
 dotenv.config();
 
 const RECORDS_PER_ITERATION = 10;
@@ -22,10 +22,7 @@ const DB_CLIENT = new MongoClient(MONGO_URI, {
     },
 });
 
-async function send_tokens(
-    token_amount: number, mint: PublicKey, sender: PublicKey, receiver: PublicKey, payer: Signer,
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>,
-): Promise<String> {
+async function send_tokens(token_amount: number, mint: PublicKey, sender: PublicKey, receiver: PublicKey, payer: Signer): Promise<String> {
     let instructions: TransactionInstruction[] = []
 
     const ata = await trade.calc_assoc_token_addr(receiver, mint);
@@ -211,7 +208,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: common.Mi
                 const token_amount_raw = token_amount * (10 ** mint_meta.token_decimals);
 
                 console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`);
-                transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop, context)
+                transactions.push(send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop)
                     .then((signature) => {
                         console.log(`Transaction completed for ${xUsername}, signature: ${signature}`)
                         db_updates.push({

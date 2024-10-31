@@ -1,7 +1,6 @@
-import { createReadStream, readdirSync, readFileSync, statSync } from 'fs';
-import { readdir } from 'fs/promises';
+import { createReadStream, readFileSync } from 'fs';
 import dotenv from 'dotenv';
-import path, { basename } from 'path';
+import { basename } from 'path';
 import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -318,13 +317,6 @@ export function validate_float(input: string, min: number = -Infinity, max: numb
     const num = parseFloat(input);
     if (isNaN(num) || num <= min || num > max) return false;
     return true;
-}
-
-export function shuffle(array: Array<any>): void {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
 }
 
 function box_muller(): number {

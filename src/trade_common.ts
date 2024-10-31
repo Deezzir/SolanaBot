@@ -1,10 +1,10 @@
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TokenAmount, TransactionInstruction, VersionedTransaction, TransactionMessage, RpcResponseAndContext, ComputeBudgetProgram, Commitment } from '@solana/web3.js';
 import { AccountLayout, TokenAccountNotFoundError, TokenInvalidAccountOwnerError, createAssociatedTokenAccountInstruction, createCloseAccountInstruction, createInitializeAccountInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddress, getMint } from '@solana/spl-token';
 import { Metaplex } from '@metaplex-foundation/js';
-import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID, MarketV2 } from '@raydium-io/raydium-sdk';
+import { Liquidity, LiquidityPoolInfo, LiquidityPoolKeys, Percent, Token, TokenAmount as RayTokenAmount, LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
-import BN, { min } from 'bn.js';
+import BN from 'bn.js';
 import * as common from './common.js';
 import * as jito from 'jito-ts';
 import bs58 from 'bs58';
@@ -77,7 +77,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
 
         if (!is_bundle_error(bundle)) {
             try {
-                const resp = await c.sendBundle(bundle);
+                await c.sendBundle(bundle);
                 await check_transaction_status(signature, ctx);
                 return signature;
             } catch (e) {
