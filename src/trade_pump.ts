@@ -8,11 +8,11 @@ const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 1
 const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 
 const CURVE_STATE_SIGNATURE = Uint8Array.from([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
-const PUMP_TRADE_PROGRAM_ID = new PublicKey(process.env.PUMP_TRADE_PROGRAM_ID || '');
-const GLOBAL_ACCOUNT = new PublicKey(process.env.GLOBAL_ACCOUNT || '');
-const FEE_RECIPIENT_ACCOUNT = new PublicKey(process.env.FEE_RECIPIENT_ACCOUNT || '');
-const EVENT_AUTHORITUY_ACCOUNT = new PublicKey(process.env.EVENT_AUTHORITUY_ACCOUNT || '');
-const MINT_AUTHORITY_ACCOUNT = new PublicKey(process.env.MINT_AUTHORITY_ACCOUNT || '');
+const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+const GLOBAL_ACCOUNT = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
+const FEE_RECIPIENT_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
+const EVENT_AUTHORITUY_ACCOUNT = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
+const MINT_AUTHORITY_ACCOUNT = new PublicKey('TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
 
 const METAPLEX_TOKEN_META = new PublicKey(process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -20,7 +20,7 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_P
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
-const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
+const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
 
 export type PumpTokenMeta = {
     mint: string;
@@ -260,6 +260,66 @@ export async function buy_token(
         return await trade_common.create_and_send_smart_tx(instructions, [buyer]);
     }
 }
+
+export async function init_mint_meta(mint: PublicKey, sol_price: number): Promise<PumpTokenMeta> {
+    let mint_meta = await fetch_mint(mint.toString());
+    if (Object.keys(mint_meta).length !== 0 && mint_meta.usd_market_cap !== undefined) {
+        return mint_meta;
+    } else {
+        common.log(`[Main Worker] No Token Meta data available, using the default values`);
+        const [bonding] = calc_token_bonding_curve(mint);
+        const [assoc_bonding] = calc_token_assoc_bonding_curve(mint, bonding);
+        mint_meta = {
+            mint: mint.toString(),
+            symbol: 'Unknown',
+            raydium_pool: null,
+            bonding_curve: bonding.toString(),
+            associated_bonding_curve: assoc_bonding.toString(),
+            market_cap: 27.958993535,
+            usd_market_cap: 27.958993535 * sol_price,
+            virtual_sol_reserves: BigInt(30000000030),
+            virtual_token_reserves: BigInt(1072999999000001),
+            total_supply: BigInt(1000000000000000)
+        } as Partial<PumpTokenMeta> as PumpTokenMeta;
+        return mint_meta;
+    }
+}
+
+export async function update_mint_meta_reserves(mint_meta: PumpTokenMeta, sol_price: number): Promise<PumpTokenMeta | null> {
+    try {
+        const curve_state = await get_curve_state(new PublicKey(mint_meta.bonding_curve));
+        if (!curve_state) {
+            common.error('[ERROR] Curve state not found.');
+            return null;
+        }
+
+        const token_price_sol = calculate_curve_price(
+            curve_state.virtual_sol_reserves,
+            curve_state.virtual_token_reserves
+        );
+
+        const token_mc = calculate_token_mc(
+            sol_price,
+            token_price_sol,
+            curve_state.token_total_supply
+        );
+
+        const updated_mint_meta: PumpTokenMeta = {
+            ...mint_meta,
+            usd_market_cap: token_mc.usd_mc,
+            market_cap: token_mc.sol_mc,
+            total_supply: curve_state.token_total_supply,
+            virtual_token_reserves: curve_state.virtual_token_reserves,
+            virtual_sol_reserves: curve_state.virtual_sol_reserves,
+        };
+
+        return updated_mint_meta;
+    } catch (error) {
+        common.error(`[ERROR] Failed to update token Market Cap: ${error}`);
+        return null;
+    }
+}
+
 
 async function get_sell_token_instructions(
     token_amount: TokenAmount, seller: Signer, mint_meta: Partial<PumpTokenMeta>, slippage: number = 0.05

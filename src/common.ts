@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { createReadStream, readdirSync, readFileSync, statSync } from 'fs';
 import { readdir } from 'fs/promises';
 import dotenv from 'dotenv';
 import path, { basename } from 'path';
@@ -7,82 +7,22 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
+import { parse } from 'csv-parse';
+import base58 from 'bs58';
 dotenv.config();
 
-export const KEYS_DIR = process.env.KEYS_DIR || './keys';
-export const RESERVE_KEY_FILE = process.env.RESERVE_KEY_FILE || 'key0.json';
-export const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
-
+export const WALLETS_FILE = process.env.KEYS_FILE || 'keys.csv';
+export const KEYS_FILE_HEADERS = ['name', 'key', 'is_reserve']
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
+
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
-const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
+const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
 
-export enum EConfigKeys {
-    ReserveKeypair = 'ReserveKeypair'
-}
-
-export interface IConfig {
-    [EConfigKeys.ReserveKeypair]?: Keypair;
-}
-
-export class Config {
-    public static config: IConfig = {};
-
-    static init(config: IConfig) {
-        Config.config = config;
-    }
-
-    /**
-     * Validator hook to ensure that all passed keys are defined in the Config class
-     * @param validateKeys - array of keys to validate. Should have a corresponding getter in Config class
-     * @returns 
-     */
-    public static validatorHook(validateKeys: EConfigKeys[]) {
-        return () => {
-            for (const key of validateKeys) {
-                const getMethod = Config[key];
-                if (!getMethod) {
-                    throw new Error(`[ERROR] Config key ${key} is not defined.`);
-                }
-            }
-        };
-    }
-
-    /**
-     * Initialize a config value and store it in the cache.
-     * @param key - Key to store the config value, should be a key of IConfig
-     * @param initMethod - Method to initialize the config value, should return the value
-     * @returns
-     */
-    private static configCacheBoilerplate(key: keyof IConfig, initMethod: () => any) {
-        if (Config.config[key]) {
-            return Config.config[key];
-        }
-
-        Config.config[key] = initMethod();
-        return Config.config[key];
-    }
-
-    public static get ReserveKeypair() {
-        return <Keypair>this.configCacheBoilerplate(EConfigKeys.ReserveKeypair, () => {
-            const RESERVE_KEY_PATH = path.join(KEYS_DIR, RESERVE_KEY_FILE);
-            const reserve_keypair = get_keypair(RESERVE_KEY_PATH);
-
-            if (!reserve_keypair) {
-                error(`[ERROR] Failed to read the reserve key file: ${RESERVE_KEY_PATH}`);
-                process.exit(1);
-            }
-
-            return reserve_keypair;
-        });
-    }
-}
-
-export type Key = {
-    file_name: string;
+export type Wallet = {
+    name: string;
     keypair: Keypair;
-    index: number;
+    id: number;
     is_reserve: boolean;
 };
 
@@ -293,93 +233,52 @@ export function error(message: string): void {
     if (global.RL !== undefined) global.RL.prompt(true);
 }
 
-export function filter_keys(files: string[]): string[] {
-    return files.filter(file => path.extname(file) === '.json' && /key[0-9]+/.test(path.basename(file)));
+export function check_reserve_exists(keys: Wallet[]): boolean {
+    return keys.some(wallet => wallet.is_reserve);
 }
 
-export async function count_keys(keys_dir: string): Promise<number> {
-    try {
-        const files = await readdir(keys_dir);
-        return filter_keys(files).length;
-    } catch (err) {
-        error(`[ERROR] failed to read keys directory: ${err}`);
-        return 0;
-    }
+export function filter_wallets(wallet: Wallet[], from?: number, to?: number, list?: number[]): Wallet[] {
+    return list ? wallet.filter((wallet) => list.includes(wallet.id)) : wallet.slice(from, to);
 }
 
-export function get_keypair(file_path: string): Keypair | undefined {
+export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
+    const rows: Wallet[] = [];
+    let index = 1;
     try {
-        const content = readFileSync(file_path, 'utf8');
-        return Keypair.fromSecretKey(new Uint8Array(JSON.parse(content)));
-    } catch (err) {
-        error(`[ERROR] Failed to read key file: ${err} (${file_path})`);
-        return undefined;
-    }
-}
+        const parser = createReadStream(keys_csv_path)
+            .pipe(parse({ columns: true, trim: true }));
 
-export async function get_rescue_keys(keys_dir: string, keys_list: Key[] = []): Promise<Key[]> {
-    const is_valid_key_path = (file_path: string): boolean => {
-        if (path.extname(file_path) !== '.json') return false;
-        if (!/^key\d+_\d+\.json$/.test(path.basename(file_path))) return false;
-        return true;
-    }
-
-    const extract_index = (value: string): number => {
-        const match = value.match(/(\d+)_(\d+)/);
-        if (!match || match.length !== 3) return 0;
-        return parseInt(match[1] + match[2], 10);
-    }
-
-    try {
-        const files = readdirSync(keys_dir);
-
-        files.forEach(file => {
-            const file_path = path.join(keys_dir, file);
-            const stat = statSync(file_path);
-
-            if (stat.isDirectory()) {
-                get_rescue_keys(file_path, keys_list);
-            } else if (stat.isFile() && is_valid_key_path(file_path)) {
-                const keypair = get_keypair(file_path);
-                if (!keypair) return;
-                keys_list.push({
-                    file_name: file,
-                    keypair: keypair,
-                    index: extract_index(file),
-                    is_reserve: false
-                });
-            }
-        });
-        return keys_list;
-    } catch (err) {
-        error(`[ERROR] failed to read keys directory: ${err}`);
-        return []
-    }
-
-}
-
-export async function get_keys(keys_dir: string, from?: number, to?: number): Promise<Key[]> {
-    const extract_index = (value: string): number => {
-        const match = value.match(/\d+/);
-        return match ? parseInt(match[0], 10) : 0;
-    }
-
-    try {
-        const files = natural_sort(await readdir(keys_dir));
-        return filter_keys(files).slice(from, to)
-            .map(file_name => {
-                return {
-                    file_name: file_name,
-                    keypair: get_keypair(path.join(keys_dir, file_name)),
-                    index: extract_index(file_name),
-                    is_reserve: file_name === RESERVE_KEY_FILE
-                };
-            })
-            .filter((key) => key.keypair !== undefined) as Key[]
+        for await (const data of parser) {
+            const is_reserve = data.is_reserve === 'true'
+            const name = data.name;
+            const keypair = Keypair.fromSecretKey(base58.decode(data.key));
+            const id = is_reserve ? 0 : index++;
+            const row: Wallet = {
+                name: name,
+                id: id,
+                keypair: keypair,
+                is_reserve: is_reserve,
+            };
+            rows.push(row);
+        }
+        return rows;
     } catch (err) {
         error(`[ERROR] failed to process keys: ${err}`);
         return [];
     }
+}
+
+export function get_keypair_from_private_key(private_key: string): Keypair | undefined {
+    try {
+        return Keypair.fromSecretKey(base58.decode(private_key));
+    } catch (err) {
+        error(`[ERROR] failed to parse the private key: ${err}`);
+        return;
+    }
+}
+
+export function get_wallet(index: number, wallets: Wallet[]): Wallet | undefined {
+    return wallets.find((wallet) => wallet.id == index)
 }
 
 export function chunks<T>(array: T[], chunkSize = 10): T[][] {
@@ -426,12 +325,6 @@ export function shuffle(array: Array<any>): void {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
     }
-}
-
-export function natural_sort(files: string[]): string[] {
-    return files.sort((a, b) => {
-        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-    });
 }
 
 function box_muller(): number {

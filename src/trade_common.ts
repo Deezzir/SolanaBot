@@ -15,6 +15,7 @@ const DEFAULT_CURVE_TOKEN_DECIMALS = 6;
 export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const JITOTIP_AUTH_KEY = Keypair.fromSecretKey(bs58.decode(process.env.JITOTIP_AUTH_KEY || ''))
 const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
 const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-engine.jito.wtf';
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
@@ -35,7 +36,7 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
     }
 }
 
-export async function get_token_supply(mint: PublicKey): Promise<{supply: bigint, decimals: number}> {
+export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint, decimals: number }> {
     try {
         const mint_data = await getMint(global.CONNECTION, mint, 'confirmed');
         return { supply: mint_data.supply, decimals: mint_data.decimals };
@@ -56,7 +57,7 @@ function is_bundle_error<T>(value: T | Error): value is Error {
 export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
     try {
         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, common.Config.ReserveKeypair);
+        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, JITOTIP_AUTH_KEY);
 
         instructions.unshift(SystemProgram.transfer({
             fromPubkey: payer.publicKey,
@@ -93,8 +94,7 @@ export async function create_and_send_tipped_tx(instructions: TransactionInstruc
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
     let current_block_height = (await global.CONNECTION.getBlockHeight('confirmed'));
-    return (last_valid_block_height - current_block_height  < 0);
-
+    return (last_valid_block_height - current_block_height < 0);
 }
 
 async function check_transaction_status(signature: string, context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number; }>>): Promise<void> {
@@ -180,21 +180,21 @@ export async function get_balance_change(signature: string, address: PublicKey):
     }
 }
 
-export async function check_has_balances(keys: common.Key[], min_balance: number = 0): Promise<boolean> {
+export async function check_has_balances(wallets: common.Wallet[], min_balance: number = 0): Promise<boolean> {
     let ok = true;
 
     try {
-        const balance_checks = keys.map(async (key) => {
-            const holder = key.keypair;
+        const balance_checks = wallets.map(async (wallet) => {
+            const holder = wallet.keypair;
             try {
                 const lamports = await get_balance(holder.publicKey);
                 const sol_balance = lamports / LAMPORTS_PER_SOL;
                 if (sol_balance <= min_balance) {
-                    common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (${key.file_name})`);
+                    common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`);
                     ok = false;
                 }
             } catch (err) {
-                common.error(`Failed to get the balance: ${err} for '${key.file_name}'`);
+                common.error(`Failed to get the balance: ${err} for 'wallet ${wallet.id}'`);
                 ok = false;
             }
         });

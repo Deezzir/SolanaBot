@@ -1,11 +1,11 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as common from './common.js';
 import * as commands from './commands.js';
 import * as trade from './trade_common.js';
 
-const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || './.rescue';
+const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
 const MAX_RETRIES: number = 3;
 const EXTRA_SOL: number = 0.005;
 const INTERVAL: number = 1000;
@@ -91,21 +91,18 @@ function display_spider_tree(tree: SpiderTree) {
     common.log('');
 }
 
-function setup_rescue_dir(layers_cnt: number): string | undefined {
-    const target_folder = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
-    const target_folder_path = path.join(RESCUE_DIR_PATH, target_folder);
+function setup_rescue_file(): string | undefined {
+    const target_file = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
+    const target_file_path = path.join(RESCUE_DIR_PATH, target_file);
 
     try {
         if (!existsSync(RESCUE_DIR_PATH)) mkdirSync(RESCUE_DIR_PATH);
         try {
-            if (existsSync(target_folder_path)) throw 'Target already exists';
-            mkdirSync(target_folder_path);
-
-            for (let i: number = 0; i < layers_cnt; i++) mkdirSync(path.join(target_folder_path, `layer_${i}`));
-
-            return target_folder_path;
+            if (existsSync(target_file_path)) throw 'Target already exists';
+            writeFileSync(target_file_path, common.KEYS_FILE_HEADERS.join(',') + '\n', 'utf-8')
+            return target_file_path;
         } catch (error) {
-            common.error(`[ERROR] Failed to process target rescue entry '${target_folder_path}': ${error}`);
+            common.error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${error}`);
             return;
         }
     } catch (error) {
@@ -114,15 +111,17 @@ function setup_rescue_dir(layers_cnt: number): string | undefined {
     }
 }
 
-function save_rescue_key(node: SpiderTreeNode, target_folder: string, layer_cnt: number, index: number): boolean {
-    const key_file_name = `key${layer_cnt}_${index}.json`;
-    const key_file_path = path.join(target_folder, path.join(`layer_${layer_cnt}`, key_file_name));
-    if (!existsSync(key_file_path)) {
+function save_rescue_key(node: SpiderTreeNode, target_file: string, layer_cnt: number, index: number): boolean {
+    const key_name = `wallet${layer_cnt}_${index}`;
+    const private_key = JSON.stringify(Array.from(node.keypair.secretKey));
+
+    if (!existsSync(target_file)) {
         try {
-            writeFileSync(key_file_path, JSON.stringify(Array.from(node.keypair.secretKey)), 'utf8');
+            const row = [key_name, private_key, false].join(',');
+            appendFileSync(target_file, row + '\n', 'utf8');
             return true;
         } catch (error) {
-            common.error(`[ERROR] Failed to write a key to a rescue folder: ${error}`);
+            common.error(`[ERROR] Failed to write a wallet to a rescue file: ${error}`);
             return false;
         }
     }
@@ -132,8 +131,8 @@ function save_rescue_key(node: SpiderTreeNode, target_folder: string, layer_cnt:
 function backup_spider_tree(tree: SpiderTree): string | undefined {
     if (!tree.head) return;
 
-    const target_folder = setup_rescue_dir(tree.depth);
-    if (!target_folder) return;
+    const target_file = setup_rescue_file();
+    if (!target_file) return;
 
     let postfixes: Map<number, number> = new Map();
 
@@ -141,7 +140,7 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
         if (node === null) return true;
 
         postfixes.set(layer_cnt, (postfixes.get(layer_cnt) ?? 0) + 1);
-        const ok = save_rescue_key(node, target_folder, layer_cnt, postfixes.get(layer_cnt) || 0);
+        const ok = save_rescue_key(node, target_file, layer_cnt, postfixes.get(layer_cnt) || 0);
         if (!ok) return false;
 
         if (node.left) {
@@ -159,11 +158,11 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
 
     const ok = _backup_spider_tree(tree.head);
     if (!ok) {
-        common.error(`[ERROR] Something went wrong during the spider transfer, check the rescue folder for key backups`);
+        common.error(`[ERROR] Something went wrong during the spider transfer, check the rescue file for wallet backups`);
     } else {
         common.log(`[Main Worker] Successfully backed the keys up for the spider transfer`)
     }
-    return target_folder;
+    return target_file;
 }
 
 async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | undefined> {
@@ -245,23 +244,23 @@ async function send_lamports_with_retries(amount: number, sender: Keypair, recei
     return false;
 }
 
-async function process_final_transfers(keys: common.Key[], entries: Keypair[]): Promise<void> {
+async function process_final_transfers(wallets: common.Wallet[], entries: Keypair[]): Promise<void> {
     if (entries.length === 0) return;
-    if (entries.length !== keys.length) {
+    if (entries.length !== wallets.length) {
         common.error(`[ERROR] The number of entries doesn't match the number of keys`);
         return;
     }
 
     const transactions: Promise<boolean>[] = [];
 
-    for (const [i, key] of keys.entries()) {
+    for (const [i, wallet] of wallets.entries()) {
         const sender = entries[i];
-        const receiver = key.keypair;
+        const receiver = wallet.keypair;
         const amount = await trade.get_balance(sender.publicKey);
         if (amount <= 0) continue;
 
         common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`);
-        transactions.push(send_lamports_with_retries(amount, sender, receiver, common.PriorityLevel.HIGH, key.file_name));
+        transactions.push(send_lamports_with_retries(amount, sender, receiver, common.PriorityLevel.DEFAULT, wallet.name));
 
         await common.sleep(50);
     }
@@ -274,7 +273,7 @@ async function process_final_transfers(keys: common.Key[], entries: Keypair[]): 
     }
 }
 
-export async function run_spider_transfer(keys: common.Key[], amount: number, payer: Keypair) {
+export async function run_spider_transfer(keys: common.Wallet[], amount: number, payer: Keypair) {
     const keys_cnt = keys.length;
 
     let tree = {
@@ -285,9 +284,9 @@ export async function run_spider_transfer(keys: common.Key[], amount: number, pa
     tree = build_spider_tree(tree, amount, keys_cnt, payer);
     display_spider_tree(tree);
 
-    const target_folder = backup_spider_tree(tree);
-    if (!target_folder) return;
-    const rescue_keys = await common.get_rescue_keys(target_folder);
+    const target_file = backup_spider_tree(tree);
+    if (!target_file) return;
+    const rescue_keys = await common.get_wallets(target_file);
 
     common.log(`[Main Worker] Processing inner transfers...\n`);
     const final_entries = await process_inner_transfers(tree);

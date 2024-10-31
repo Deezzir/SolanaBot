@@ -3,7 +3,7 @@ import { LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstructio
 import * as trade_common from './trade_common.js';
 import * as common from './common.js'
 
-const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey(process.env.MOONSHOT_TRADE_PROGRAM_ID || '');
+const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 const CURVE_TOKEN_DECIMALS = 9;
 
 export interface MoonshotTokenMeta {

@@ -247,15 +247,8 @@ async function main() {
             case 'sell':
                 if (!START_SELL) {
                     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);
-                    if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
                     IS_DONE = true;
                     START_SELL = true;
-                }
-                break;
-            case 'collect':
-                if (!IS_DONE) {
-                    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received collect command from the main thread`);
-                    IS_DONE = true;
                     if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
                 }
                 break;

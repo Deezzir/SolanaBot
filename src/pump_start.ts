@@ -11,8 +11,8 @@ import * as trade_pump from './trade_pump.js'
 
 const METAPLEX_PROGRAM_ID = new PublicKey(process.env.METAPLEX_PROGRAM_ID || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const WORKER_PATH = process.env.WORKER_PATH || './dist/pump_worker.js';
-const FETCH_MINT_API_URL = process.env.FETCH_MINT_API_URL || '';
-const PUMP_TRADE_PROGRAM_ID = new PublicKey(process.env.PUMP_TRADE_PROGRAM_ID || '');
+const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
+const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 var SUBSCRIPTION_ID: number | undefined;
 let LOGS_STOP_FUNCTION: (() => void) | null = null;
 let FETCH_STOP_FUNCTION: (() => void) | null = null;
@@ -271,16 +271,16 @@ export async function wait_drop_unsub(): Promise<void> {
     }
 }
 
-export async function start_workers(keys: common.Key[], config: common.BotConfig, workers: common.WorkerJob[]): Promise<boolean> {
-    keys = keys.filter((key) => !key.is_reserve).slice(0, config.thread_cnt);
+export async function start_workers(wallets: common.Wallet[], config: common.BotConfig, workers: common.WorkerJob[]): Promise<boolean> {
+    wallets = wallets.filter((wallet) => !wallet.is_reserve).slice(0, config.thread_cnt);
 
-    if (keys.length === 0 || keys.length < config.thread_cnt) {
+    if (wallets.length === 0 || wallets.length < config.thread_cnt) {
         common.error(`[ERROR] The number of keys doesn't match the number of threads`);
         global.RL.close();
         return false;
     }
 
-    const all_has_balances = await trade.check_has_balances(keys);
+    const all_has_balances = await trade.check_has_balances(wallets);
     if (!all_has_balances) {
         common.error('[ERROR] First, topup the specified accounts.');
         global.RL.close();
@@ -290,10 +290,10 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
     common.log('[Main Worker] Starting the workers...');
     const started_promises: Promise<void>[] = [];
 
-    for (const key of keys) {
+    for (const wallet of wallets) {
         const data: common.WorkerConfig = {
-            secret: key.keypair.secretKey,
-            id: key.index,
+            secret: wallet.keypair.secretKey,
+            id: wallet.id,
             inputs: config
         };
 
@@ -311,16 +311,16 @@ export async function start_workers(keys: common.Key[], config: common.BotConfig
                 }
                 common.log(msg);
             });
-            worker.on('error', (err) => { common.error(`[Worker ${key.index}] Encountered error: ${err}`); reject() });
+            worker.on('error', (err) => { common.error(`[Worker ${wallet.id}] Encountered error: ${err}`); reject() });
             worker.on('exit', (code) => {
-                if (code !== 0) reject(new Error(`[Worker ${key.index}]Stopped with exit code ${code} `));
+                if (code !== 0) reject(new Error(`[Worker ${wallet.id}]Stopped with exit code ${code} `));
                 else resolve();
             }
             );
         });
 
         started_promises.push(started_promise);
-        workers.push({ worker: worker, index: key.index, job: job });
+        workers.push({ worker: worker, index: wallet.id, job: job });
     }
 
     await Promise.all(started_promises);
@@ -341,7 +341,7 @@ export async function wait_for_workers(workers: common.WorkerJob[]): Promise<voi
 
 export function setup_cmd_interface(workers: common.WorkerJob[], bot_config: common.BotConfig) {
     if (global.RL === undefined) common.setup_readline();
-    global.RL.setPrompt('Command (stop/config/collect/sell/set)> ');
+    global.RL.setPrompt('Command (stop/config/sell/set)> ');
     global.RL.prompt(true);
 
     let selling = false;
@@ -364,14 +364,6 @@ export function setup_cmd_interface(workers: common.WorkerJob[], bot_config: com
             case 'config':
                 if (bot_config !== undefined)
                     console.table(common.bot_conf_display(bot_config));
-                break;
-            case 'collect':
-                if (!global.START_COLLECT) {
-                    worker_post_message(workers, 'collect');
-                    global.START_COLLECT = true;
-                } else {
-                    common.log('[Main Worker] Collecting is already in progress...');
-                }
                 break;
             case 'sell':
                 if (!selling) {

@@ -10,7 +10,6 @@ declare global {
     var CONNECTION: Connection;
     var HELIUS_CONNECTION: Helius;
     var MOONSHOT: Moonshot;
-    var START_COLLECT: boolean;
 }
 
 export { };
