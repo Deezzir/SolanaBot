@@ -1,22 +1,26 @@
 import { createReadStream, readFileSync } from 'fs';
 import dotenv from 'dotenv';
 import { basename } from 'path';
-import { Worker } from 'worker_threads';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
-import { CurrencyAmount, TokenAmount as RayTokenAmount } from '@raydium-io/raydium-sdk';
 import { parse } from 'csv-parse';
 import base58 from 'bs58';
 dotenv.config();
 
 export const WALLETS_FILE = process.env.KEYS_FILE || 'keys.csv';
-export const KEYS_FILE_HEADERS = ['name', 'key', 'is_reserve']
-export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/'
+export const KEYS_FILE_HEADERS = ['name', 'key', 'is_reserve'];
+export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/';
 
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
 const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
+
+export function staticImplements<T>() {
+    return <U extends T>(constructor: U) => {
+        constructor;
+    };
+}
 
 export type Wallet = {
     name: string;
@@ -25,197 +29,37 @@ export type Wallet = {
     is_reserve: boolean;
 };
 
-export enum PriorityLevel {
-    MIN = 'Min',
-    LOW = 'Low',
-    MEDIUM = 'Medium',
-    HIGH = 'High',
-    VERY_HIGH = 'VeryHigh',
-    UNSAFE_MAX = 'UnsafeMax',
-    DEFAULT = 'Default'
-}
-
-export type PriorityOptions = {
-    accounts?: string[];
-    priority_level: PriorityLevel;
-}
-
-export interface BotConfig {
-    thread_cnt: number;
-    buy_interval: number;
-    spend_limit: number;
-    start_buy: number;
-    mcap_threshold: number;
-    is_bump: boolean;
-    is_buy_once: boolean;
-    start_interval: number | undefined;
-    action: Action;
-    token_name: string | undefined;
-    token_ticker: string | undefined;
-    collect_address: PublicKey;
-    mint: PublicKey | undefined;
-}
-
 export type IPFSMetadata = {
-    name: string,
-    symbol: string,
-    description: string,
-    image: string | undefined,
-    showName: boolean,
-    createdOn: string,
-    twitter: string | undefined,
-    telegram: string | undefined,
-    website: string | undefined,
-}
+    name: string;
+    symbol: string;
+    description: string;
+    image: string | undefined;
+    showName: boolean;
+    createdOn: string;
+    twitter: string | undefined;
+    telegram: string | undefined;
+    website: string | undefined;
+};
 
-export type RaydiumAmounts = {
-    amount_in: RayTokenAmount,
-    token_in: PublicKey,
-    token_out: PublicKey,
-    min_amount_out: CurrencyAmount;
-}
-
-export type IPFSResponse = {
-    requestid: string,
-    status: string,
-    created: string,
+type IPFSResponse = {
+    requestid: string;
+    status: string;
+    created: string;
     pin: {
-        cid: string,
-        name: string,
-        origin: [],
-        meta: {},
-    }
+        cid: string;
+        name: string;
+        origin: [];
+        meta: {};
+    };
     info: {
-        size: string,
-    },
-    delegates: string[],
-}
-
-export enum Method {
-    Wait = 0,
-    Snipe = 1,
-}
-
-export const MethodStrings = ['Wait', 'Snipe'];
-
-export enum Action {
-    Sell = 0,
-    Collect = 1,
-}
-
-export const ActionStrings = ['Sell', 'Collect'];
+        size: string;
+    };
+    delegates: string[];
+};
 
 export enum Program {
     Pump = 'pump',
-    Moonshot = 'moonshot',
-}
-
-export type WorkerConfig = {
-    secret: Uint8Array;
-    id: number;
-    inputs: BotConfig;
-}
-
-export type WorkerJob = {
-    worker: Worker;
-    index: number;
-    job: Promise<void>;
-}
-
-export type MintMeta = {
-    token_name: string;
-    token_symbol: string;
-    token_decimals: number;
-    mint: PublicKey
-}
-
-export function bot_conf_display(config: BotConfig) {
-    return {
-        ...config,
-        action: ActionStrings[config.action],
-        token_name: config.token_name ? config.token_name : 'N/A',
-        token_ticker: config.token_ticker ? config.token_ticker : 'N/A',
-        collect_address: config.collect_address.toString(),
-        start_interval: config.start_interval ? config.start_interval : 0,
-        mint: config.mint ? config.mint.toString() : 'N/A'
-    };
-}
-
-export function update_bot_config(config: BotConfig, key: string, value: string): void {
-    switch (key) {
-        case 'thread_cnt':
-            if (validate_int(value, 1))
-                config.thread_cnt = parseInt(value, 10);
-            else
-                error('Invalid thread count.');
-            break;
-        case 'buy_interval':
-            if (validate_int(value, 1))
-                config.buy_interval = parseInt(value, 10);
-            else
-                error('Invalid buy interval.');
-            break;
-        case 'spend_limit':
-            if (validate_float(value, 0.001))
-                config.spend_limit = parseFloat(value);
-            else
-                error('Invalid spend limit.');
-            break;
-        case 'start_buy':
-            if (validate_float(value, 0.001))
-                config.start_buy = parseFloat(value);
-            else
-                error('Invalid start buy.');
-            break;
-        case 'return_pubkey':
-            if (is_valid_pubkey(value))
-                config.collect_address = new PublicKey(value);
-            else
-                error('Invalid return public key.');
-            break;
-        case 'is_bump':
-            config.is_bump = value === 'true';
-            break;
-        case 'is_buy_once':
-            config.is_buy_once = value === 'true';
-            break;
-        case 'start_interval':
-            if (validate_int(value, 0))
-                config.start_interval = parseInt(value, 10);
-            else
-                error('Invalid start interval.');
-            break;
-        case 'mcap_threshold':
-            if (validate_int(value, 5000))
-                config.mcap_threshold = parseInt(value, 10);
-            else
-                error('Invalid market cap threshold.');
-            break;
-        case 'action':
-            value = value.toLowerCase();
-            if (value === 'sell')
-                config.action = Action.Sell;
-            else if (value === 'collect')
-                config.action = Action.Collect;
-            else
-                error('Invalid action.');
-            break;
-        case 'token_name':
-            config.token_name = value;
-            break;
-        case 'token_ticker':
-            config.token_ticker = value;
-            break;
-        case 'mint':
-            if (is_valid_pubkey(value))
-                config.mint = new PublicKey(value);
-            else
-                error('Invalid mint public key.');
-            break;
-        default:
-            error('Invalid key.');
-            break;
-    }
+    Moonshot = 'moonshot'
 }
 
 export function log(message: string): void {
@@ -233,7 +77,7 @@ export function error(message: string): void {
 }
 
 export function check_reserve_exists(keys: Wallet[]): boolean {
-    return keys.some(wallet => wallet.is_reserve);
+    return keys.some((wallet) => wallet.is_reserve);
 }
 
 export function filter_wallets(wallet: Wallet[], from?: number, to?: number, list?: number[]): Wallet[] {
@@ -244,11 +88,10 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
     const rows: Wallet[] = [];
     let index = 1;
     try {
-        const parser = createReadStream(keys_csv_path)
-            .pipe(parse({ columns: true, trim: true }));
+        const parser = createReadStream(keys_csv_path).pipe(parse({ columns: true, trim: true }));
 
         for await (const data of parser) {
-            const is_reserve = data.is_reserve === 'true'
+            const is_reserve = data.is_reserve === 'true';
             const name = data.name;
             const keypair = Keypair.fromSecretKey(base58.decode(data.key));
             const id = is_reserve ? 0 : index++;
@@ -256,7 +99,7 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
                 name: name,
                 id: id,
                 keypair: keypair,
-                is_reserve: is_reserve,
+                is_reserve: is_reserve
             };
             rows.push(row);
         }
@@ -277,7 +120,7 @@ export function get_keypair_from_private_key(private_key: string): Keypair | und
 }
 
 export function get_wallet(index: number, wallets: Wallet[]): Wallet | undefined {
-    return wallets.find((wallet) => wallet.id == index)
+    return wallets.find((wallet) => wallet.id == index);
 }
 
 export function chunks<T>(array: T[], chunkSize = 10): T[][] {
@@ -286,7 +129,7 @@ export function chunks<T>(array: T[], chunkSize = 10): T[][] {
         res.push(array.slice(currentChunk, currentChunk + chunkSize));
     }
     return res;
-};
+}
 
 export async function clear_lines_up(lines: number): Promise<void> {
     process.stdout.moveCursor(0, -lines);
@@ -304,7 +147,7 @@ export function is_valid_pubkey(input: string): boolean {
 }
 
 export function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function validate_int(input: string, min: number = -Infinity, max: number = Infinity): boolean {
@@ -320,7 +163,8 @@ export function validate_float(input: string, min: number = -Infinity, max: numb
 }
 
 function box_muller(): number {
-    let u = 0, v = 0;
+    let u = 0,
+        v = 0;
     while (u === 0) u = Math.random();
     while (v === 0) v = Math.random();
     return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
@@ -351,7 +195,7 @@ export async function fetch_ipfs_json(cid: string): Promise<any> {
     }
 }
 
-export async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse | undefined> {
+async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse | undefined> {
     var headers = new Headers();
     headers.append('x-api-key', IPSF_API_KEY);
 
@@ -361,7 +205,9 @@ export async function upload_ipfs(data: any, content_type: string, file_name: st
     if (content_type.includes('json')) {
         form_data.append('Key', file_name);
         form_data.append('Content-Type', 'application/json; charset=utf-8');
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify(data)], {
+            type: 'application/json'
+        });
         form_data.append('Body', blob, 'filename.json');
         body_data = form_data;
     } else {
@@ -423,59 +269,16 @@ export function round_two(num: number): number {
 
 export const fetch_sol_price = async (): Promise<number> => {
     return fetch(`${FETCH_MINT_API_URL}/sol-price`)
-        .then(response => response.json())
-        .then(data => {
+        .then((response) => response.json())
+        .then((data) => {
             if (!data || data.statusCode !== undefined) return 0.0;
             return data.solPrice;
         })
-        .catch(err => {
+        .catch((err) => {
             console.error(`[ERROR] Failed fetching the SOL price: ${err}`);
             return 0.0;
         });
-}
-
-export function validate_bot_config(json: any): BotConfig | undefined {
-    const required_fields = [
-        'thread_cnt',
-        'buy_interval',
-        'spend_limit',
-        'start_buy',
-        'mcap_threshold',
-        'action',
-        'collect_address'
-    ];
-
-    for (const field of required_fields) {
-        if (!(field in json)) {
-            return;
-        }
-    }
-
-    const { token_name, token_ticker, mint } = json;
-
-    if (mint === undefined && token_name === undefined && token_ticker === undefined) {
-        error('[ERROR] Missing mint or token name and token ticker.');
-        return;
-    }
-
-    if (mint !== undefined && (token_name !== undefined || token_ticker !== undefined)) {
-        error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
-        return;
-    }
-
-    if (token_name === undefined && token_ticker !== undefined || token_name !== undefined && token_ticker === undefined) {
-        error('[ERROR] Both token name and token ticker are required.');
-        return;
-    }
-
-    if (!('is_bump' in json)) json.is_bump = false;
-    if (!('is_buy_once' in json)) json.is_buy_once = false;
-    if (!('start_interval' in json)) json.start_interval = undefined;
-    if (json.mint) json.mint = new PublicKey(json.mint);
-    json.collect_address = new PublicKey(json.collect_address);
-
-    return json as BotConfig;
-}
+};
 
 export function read_bytes(buf: Buffer, offset: number, length: number): Buffer {
     const end = offset + length;
@@ -485,10 +288,14 @@ export function read_bytes(buf: Buffer, offset: number, length: number): Buffer 
 
 export function read_biguint_le(buf: Buffer, offset: number, length: number): bigint {
     switch (length) {
-        case 1: return BigInt(buf.readUint8(offset));
-        case 2: return BigInt(buf.readUint16LE(offset));
-        case 4: return BigInt(buf.readUint32LE(offset));
-        case 8: return buf.readBigUint64LE(offset);
+        case 1:
+            return BigInt(buf.readUint8(offset));
+        case 2:
+            return BigInt(buf.readUint16LE(offset));
+        case 4:
+            return BigInt(buf.readUint32LE(offset));
+        case 8:
+            return buf.readBigUint64LE(offset);
     }
     throw new Error(`unsupported data size (${length} bytes)`);
 }

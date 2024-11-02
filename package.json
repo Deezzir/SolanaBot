@@ -1,13 +1,14 @@
 {
     "name": "solanabot",
     "version": "3.0.0",
-    "description": "Solana buy bot",
+    "description": "Solana bot",
     "main": "./src/bot.ts",
     "type": "module",
     "scripts": {
         "build": "npx tsc",
         "start": "node ./dist/bot.js",
-        "ts-prune": "ts-prune"
+        "prune": "ts-prune",
+        "format": "prettier --config .prettierrc 'src/**/*.ts' --write"
     },
     "author": "deezzir@gmail.com",
     "license": "ISC",
@@ -16,6 +17,7 @@
         "@types/figlet": "^1.5.8",
         "@types/inquirer": "^9.0.7",
         "@types/node": "^20.12.2",
+        "prettier": "^3.3.3",
         "ts-prune": "^0.10.3",
         "typescript": "^5.4.3"
     },

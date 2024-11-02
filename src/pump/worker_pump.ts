@@ -1,26 +1,26 @@
 import { parentPort, workerData } from 'worker_threads';
 import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey, TokenAmount } from '@solana/web3.js';
-import * as common from './common.js';
-import * as trade_common from './trade_common.js';
-import * as trade_pump from './trade_pump.js';
+import * as common from '../common/common.js';
+import * as snipe from '../common/snipe_common.js';
+import * as trade from '../common/trade_common.js';
+import * as pump from './trade_pump.js';
 import { Helius } from 'helius-sdk';
 
 const BUY_SLIPPAGE = 0.25;
-const SELL_SLIPPAGE = 0.50;
+const SELL_SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
 const MIN_BUY = 0.005;
 const MAX_RETRIES = 5;
 const TRADE_ITERATIONS = 1;
 
-const WORKER_CONF: common.WorkerConfig = workerData as common.WorkerConfig;
+const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
-const IS_BUMP: boolean = WORKER_CONF.inputs.is_bump;
 const RPC = process.env.RPC || '';
 global.CONNECTION = new Connection(RPC, 'confirmed');
 global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
-var MINT_METADATA: trade_pump.PumpTokenMeta;
+var MINT_METADATA: pump.PumpTokenMeta;
 var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
@@ -28,11 +28,11 @@ var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 
-function control_sleep(seconds: number): { promise: Promise<void>, cancel: () => void } {
+function control_sleep(seconds: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
-    let cancel: () => void = () => { };
+    let cancel: () => void = () => {};
 
-    const promise = new Promise<void>(resolve => {
+    const promise = new Promise<void>((resolve) => {
         timeout_id = setTimeout(resolve, seconds * 1000);
         cancel = () => {
             clearTimeout(timeout_id);
@@ -47,7 +47,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
     try {
         const sig = await promise;
         try {
-            const balance_change = await trade_common.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
+            const balance_change = await trade.get_balance_change(sig.toString(), WORKER_KEYPAIR.publicKey);
             CURRENT_SPENDINGS += balance_change;
         } catch (error) {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting balance change, continuing...`);
@@ -77,37 +77,21 @@ const buy = async () => {
         let transactions = [];
         let count = TRADE_ITERATIONS;
         while (count > 0) {
-            if (MINT_METADATA.raydium_pool === null) {
-                const buy_promise = trade_pump.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, BUY_SLIPPAGE, common.PriorityLevel.DEFAULT)
-                transactions.push(
-                    process_buy_tx(buy_promise, amount).then(result => {
-                        if (result) bought = true;
-                    })
-                );
-            } else {
-                const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                const mint = new PublicKey(MINT_METADATA.mint);
-                const sol_amount = trade_common.get_sol_token_amount(amount);
-                const buy_promise = trade_common.swap_raydium(sol_amount, WORKER_KEYPAIR, amm, mint, BUY_SLIPPAGE, common.PriorityLevel.HIGH)
-                transactions.push(
-                    process_buy_tx(buy_promise, amount).then(result => {
-                        if (result) bought = true;
-                    })
-                );
-            }
+            const buy_promise = pump.Trader.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, BUY_SLIPPAGE, trade.PriorityLevel.DEFAULT);
+            transactions.push(
+                process_buy_tx(buy_promise, amount).then((result) => {
+                    if (result) bought = true;
+                })
+            );
+
             count--;
             await common.sleep(1 * 1000);
         }
         await Promise.allSettled(transactions);
 
-        if (IS_BUMP) {
-            CURRENT_SPENDINGS -= amount;
-            CURRENT_BUY_AMOUNT = MIN_BUY;
-        } else {
-            CURRENT_BUY_AMOUNT = (WORKER_CONF.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
-        }
+        CURRENT_BUY_AMOUNT = (WORKER_CONF.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
     }
-}
+};
 
 async function process_sell_tx(promise: Promise<String>, balance: TokenAmount) {
     try {
@@ -130,7 +114,7 @@ const sell = async () => {
             let balance: TokenAmount | undefined = undefined;
 
             while (get_balance_retry < MAX_RETRIES) {
-                balance = await trade_common.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
+                balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
                 if (get_balance_retry < MAX_RETRIES) MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
@@ -147,22 +131,13 @@ const sell = async () => {
             let count = TRADE_ITERATIONS;
 
             while (count > 0 && balance !== undefined) {
-                if (MINT_METADATA.raydium_pool === null) {
-                    const sell_promise = trade_pump.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SELL_SLIPPAGE, common.PriorityLevel.HIGH)
-                    transactions.push(
-                        process_sell_tx(sell_promise, balance).then(result => {
-                            if (result) sold = true;
-                        })
-                    );
-                } else {
-                    const amm = new PublicKey(MINT_METADATA.raydium_pool);
-                    const sell_promise = trade_common.swap_raydium(balance, WORKER_KEYPAIR, amm, trade_common.SOL_MINT, SELL_SLIPPAGE, common.PriorityLevel.HIGH)
-                    transactions.push(
-                        process_sell_tx(sell_promise, balance).then(result => {
-                            if (result) sold = true;
-                        })
-                    );
-                }
+                const sell_promise = pump.Trader.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SELL_SLIPPAGE, trade.PriorityLevel.HIGH);
+                transactions.push(
+                    process_sell_tx(sell_promise, balance).then((result) => {
+                        if (result) sold = true;
+                    })
+                );
+
                 count--;
                 await common.sleep(1 * 1000);
             }
@@ -171,64 +146,63 @@ const sell = async () => {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting the balance, retrying...`);
         }
     }
-}
+};
 
-const control_loop = async () => new Promise<void>(async (resolve) => {
-    const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.inputs.mcap_threshold;
-    const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
-    const process = async () => {
-        if (should_sell()) {
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
-            START_SELL = true;
-            return true;
+const control_loop = async () =>
+    new Promise<void>(async (resolve) => {
+        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.inputs.mcap_threshold;
+        const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
+        const process = async () => {
+            if (should_sell()) {
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
+                START_SELL = true;
+                return true;
+            }
+
+            if (should_buy()) {
+                await buy();
+                if (WORKER_CONF.inputs.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.inputs.spend_limit;
+            } else {
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
+            }
+
+            return false;
+        };
+
+        while (!IS_DONE) {
+            if (MINT_METADATA && Object.keys(MINT_METADATA).length !== 0) {
+                if (await process()) break;
+            } else {
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Mint metadata not available`);
+            }
+
+            const sleep_for = common.normal_random(WORKER_CONF.inputs.buy_interval, 0.5 * WORKER_CONF.inputs.buy_interval);
+            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
+            parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+
+            if (!IS_DONE) {
+                const { promise, cancel } = control_sleep(sleep_for);
+                CANCEL_SLEEP = cancel;
+                await promise;
+            }
+            MESSAGE_BUFFER = [];
         }
 
-        if (should_buy()) {
-            await buy();
-            if (WORKER_CONF.inputs.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.inputs.spend_limit;
-        } else {
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
-        }
+        if (START_SELL) await sell();
 
-        if (IS_BUMP) {
-            await common.sleep(2 * 1000);
-            await sell();
-        }
-
-        return false;
-    };
-
-    while (!IS_DONE) {
-        if (MINT_METADATA && Object.keys(MINT_METADATA).length !== 0) {
-            if (await process()) break;
-        } else {
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Mint metadata not available`);
-        }
-
-        const sleep_for = common.normal_random(WORKER_CONF.inputs.buy_interval, 0.5 * WORKER_CONF.inputs.buy_interval);
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
         parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
-
-        if (!IS_DONE) {
-            const { promise, cancel } = control_sleep(sleep_for);
-            CANCEL_SLEEP = cancel;
-            await promise;
-        }
-        MESSAGE_BUFFER = [];
-    }
-
-    if (START_SELL) await sell();
-
-    parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
-    resolve();
-});
+        resolve();
+    });
 
 async function main() {
-    const balance = await trade_common.get_balance(WORKER_KEYPAIR.publicKey) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(WORKER_KEYPAIR.publicKey)) / LAMPORTS_PER_SOL;
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
     WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
 
-    parentPort?.postMessage({ command: 'started', data: `[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}` });
+    parentPort?.postMessage({
+        command: 'started',
+        data: `[Worker ${WORKER_CONF.id}] Started with Public Key: ${WORKER_KEYPAIR.publicKey.toString()}`
+    });
 
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
@@ -238,12 +212,11 @@ async function main() {
 
                 if (CURRENT_BUY_AMOUNT > WORKER_CONF.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.inputs.spend_limit;
                 if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
-                if (IS_BUMP) CURRENT_BUY_AMOUNT = MIN_BUY;
 
                 await control_loop();
 
                 parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
-                process.exit(0)
+                process.exit(0);
             case 'sell':
                 if (!START_SELL) {
                     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);
@@ -269,4 +242,6 @@ async function main() {
     });
 }
 
-main().catch(err => { throw err });
+main().catch((err) => {
+    throw err;
+});

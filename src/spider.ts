@@ -1,9 +1,9 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
-import * as common from './common.js';
+import * as common from './common/common.js';
 import * as commands from './commands.js';
-import * as trade from './trade_common.js';
+import * as trade from './common/trade_common.js';
 
 const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
 const MAX_RETRIES: number = 3;
@@ -11,15 +11,15 @@ const EXTRA_SOL: number = 0.005;
 const INTERVAL: number = 1000;
 
 type SpiderTreeNode = {
-    amount: number,
-    left: SpiderTreeNode | null,
-    right: SpiderTreeNode | null,
-    keypair: Keypair
+    amount: number;
+    left: SpiderTreeNode | null;
+    right: SpiderTreeNode | null;
+    keypair: Keypair;
 };
 
 type SpiderTree = {
-    head: SpiderTreeNode | null
-    depth: number
+    head: SpiderTreeNode | null;
+    depth: number;
 };
 
 function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, payer: Keypair): SpiderTree {
@@ -55,7 +55,7 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
         if (node.left) node.amount += EXTRA_SOL;
 
         return node;
-    }
+    };
 
     tree.head = _build_tree(tree.head, layer_cnt);
     return tree;
@@ -69,8 +69,8 @@ function display_spider_tree(tree: SpiderTree) {
     const _display_spider_tree = (node: SpiderTreeNode | null, layer_cnt: number = 0, prefix: string = '', isLeft: boolean = true) => {
         if (node === null) return;
 
-        const connector = layer_cnt === 0 ? ' ' : (isLeft ? '├── ' : '└── ');
-        const child_prefix = prefix + (layer_cnt === 0 ? ' ' : (isLeft ? '│   ' : '    '));
+        const connector = layer_cnt === 0 ? ' ' : isLeft ? '├── ' : '└── ';
+        const child_prefix = prefix + (layer_cnt === 0 ? ' ' : isLeft ? '│   ' : '    ');
         const node_display = `${node.amount.toFixed(4)} SOL - ${node.keypair.publicKey.toString()}`;
 
         common.log(`${prefix}${layer_cnt === 0 ? ' ' : '│'}`);
@@ -85,7 +85,7 @@ function display_spider_tree(tree: SpiderTree) {
                 _display_spider_tree(node.right, layer_cnt + 1, child_prefix, false);
             }
         }
-    }
+    };
 
     _display_spider_tree(tree.head);
     common.log('');
@@ -99,7 +99,7 @@ function setup_rescue_file(): string | undefined {
         if (!existsSync(RESCUE_DIR_PATH)) mkdirSync(RESCUE_DIR_PATH);
         try {
             if (existsSync(target_file_path)) throw 'Target already exists';
-            writeFileSync(target_file_path, common.KEYS_FILE_HEADERS.join(',') + '\n', 'utf-8')
+            writeFileSync(target_file_path, common.KEYS_FILE_HEADERS.join(',') + '\n', 'utf-8');
             return target_file_path;
         } catch (error) {
             common.error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${error}`);
@@ -154,13 +154,13 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
         }
 
         return true;
-    }
+    };
 
     const ok = _backup_spider_tree(tree.head);
     if (!ok) {
         common.error(`[ERROR] Something went wrong during the spider transfer, check the rescue file for wallet backups`);
     } else {
-        common.log(`[Main Worker] Successfully backed the keys up for the spider transfer`)
+        common.log(`[Main Worker] Successfully backed the keys up for the spider transfer`);
     }
     return target_file;
 }
@@ -184,9 +184,11 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             const receiver = node.left.keypair;
             const layer_name = `${layer_cnt}_${postfixes.get(layer_cnt) || 0}`;
 
-            common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`);
+            common.log(
+                `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`
+            );
 
-            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, common.PriorityLevel.HIGH, layer_name);
+            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, trade.PriorityLevel.HIGH, layer_name);
             if (!ok) return false;
 
             await common.sleep(INTERVAL);
@@ -202,9 +204,11 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             const receiver = node.right.keypair;
             const layer_name = `${layer_cnt}_${postfixes.get(layer_cnt) || 0}`;
 
-            common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`);
+            common.log(
+                `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`
+            );
 
-            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, common.PriorityLevel.HIGH, layer_name);
+            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, trade.PriorityLevel.HIGH, layer_name);
             if (!ok) return false;
 
             await common.sleep(INTERVAL);
@@ -214,9 +218,9 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
         }
 
         return true;
-    }
+    };
 
-    const ok = await _process_inner_transfers(tree.head)
+    const ok = await _process_inner_transfers(tree.head);
     if (!ok) {
         common.error(`[ERROR] Something went wrong during the spider transfer, check the logs for details`);
         return;
@@ -225,7 +229,14 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
     return entries;
 }
 
-async function send_lamports_with_retries(amount: number, sender: Keypair, receiver: Keypair, priority: common.PriorityLevel, name: string, max_retries: number = MAX_RETRIES): Promise<boolean> {
+async function send_lamports_with_retries(
+    amount: number,
+    sender: Keypair,
+    receiver: Keypair,
+    priority: trade.PriorityLevel,
+    name: string,
+    max_retries: number = MAX_RETRIES
+): Promise<boolean> {
     for (let attempt = 1; attempt <= max_retries; attempt++) {
         try {
             const signature = await trade.send_lamports(amount, sender, receiver.publicKey, priority);
@@ -259,14 +270,16 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
         const amount = await trade.get_balance(sender.publicKey);
         if (amount <= 0) continue;
 
-        common.log(`${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`);
-        transactions.push(send_lamports_with_retries(amount, sender, receiver, common.PriorityLevel.DEFAULT, wallet.name));
+        common.log(
+            `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`
+        );
+        transactions.push(send_lamports_with_retries(amount, sender, receiver, trade.PriorityLevel.DEFAULT, wallet.name));
 
         await common.sleep(50);
     }
 
     const results = await Promise.all(transactions);
-    if (results.every(result => result)) {
+    if (results.every((result) => result)) {
         common.log(`[Main Worker] All transactions completed successfully`);
     } else {
         common.error(`[Main Worker] Some transactions failed, check the logs for details`);
@@ -278,7 +291,7 @@ export async function run_spider_transfer(keys: common.Wallet[], amount: number,
 
     let tree = {
         head: null,
-        depth: Math.ceil(Math.log2(keys_cnt)) + 1,
+        depth: Math.ceil(Math.log2(keys_cnt)) + 1
     } as SpiderTree;
 
     tree = build_spider_tree(tree, amount, keys_cnt, payer);
@@ -299,5 +312,5 @@ export async function run_spider_transfer(keys: common.Wallet[], amount: number,
     }
 
     common.log(`\n[Main Worker] Performing cleanup of the temporary wallets...\n`);
-    await commands.collect(rescue_keys, payer.publicKey)
+    await commands.collect(rescue_keys, payer.publicKey);
 }
