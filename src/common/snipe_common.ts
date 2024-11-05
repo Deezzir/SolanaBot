@@ -4,24 +4,24 @@ import { clearLine, cursorTo, moveCursor } from 'readline';
 import { PublicKey } from '@solana/web3.js';
 import * as common from './common.js';
 import * as trade from './trade_common.js';
-import { PumpTrader } from '../pump/pump.js';
-import { MoonTrader } from '../moon/moon.js';
+import { Trader as PumpTrader } from '../pump/trade_pump.js';
+import { Trader as MoonTrader } from '../moon/trade_moon.js';
 
 const META_UPDATE_INTERVAL = 200;
 
-export interface BotConfig {
+export type BotConfig = {
     thread_cnt: number;
     buy_interval: number;
     spend_limit: number;
     start_buy: number;
     mcap_threshold: number;
     is_buy_once: boolean;
-    trader: trade.ProgramTrader;
+    trader: trade.IProgramTrader;
     start_interval: number | undefined;
     token_name: string | undefined;
     token_ticker: string | undefined;
     mint: PublicKey | undefined;
-}
+};
 
 export type WorkerConfig = {
     secret: Uint8Array;
@@ -41,14 +41,14 @@ enum Method {
 }
 
 const MethodStrings = ['Wait', 'Snipe'];
-export interface Sniper {
+export interface ISniper {
     workers: WorkerJob[];
     bot_config: BotConfig;
 
     snipe(wallets: common.Wallet[], sol_price: number): Promise<void>;
 }
 
-export abstract class SniperBase implements Sniper {
+export abstract class SniperBase implements ISniper {
     public workers: WorkerJob[];
     public bot_config: BotConfig;
 
@@ -60,10 +60,9 @@ export abstract class SniperBase implements Sniper {
     protected abstract wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null>;
     protected abstract wait_drop_unsub(): Promise<void>;
     protected abstract get_worker_path(): string;
-    protected abstract get_trader(): trade.ProgramTrader;
 
     public async snipe(wallets: common.Wallet[], sol_price: number): Promise<void> {
-        const trader = this.get_trader();
+        const trader = this.bot_config.trader;
         this.setup_cmd_interface();
 
         common.log('[Main Worker] Starting the bot...');
@@ -91,7 +90,7 @@ export abstract class SniperBase implements Sniper {
                 const interval = setInterval(async () => {
                     let updated_mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
                     if (updated_mint_meta) {
-                        const meta_printer = new trade.MintMetaPrinter(updated_mint_meta);
+                        const meta_printer = trader.get_meta_printer(updated_mint_meta);
                         common.log(`[Main Worker] Current MCAP: $${meta_printer.usd_mc.toFixed(3)}`);
                         mint_meta = updated_mint_meta;
                         this.workers_post_message('mint', updated_mint_meta);
@@ -284,15 +283,18 @@ export function validate_bot_config(json: any): BotConfig | undefined {
         return;
     }
 
-    if (trader && (trader === 'pump' || trader === 'moon')) {
-        json.trader = trader === 'pump' ? PumpTrader : MoonTrader;
+    if (trader) {
+        if (trader === 'pump' || trader === 'moon') {
+            json.trader = trader === 'pump' ? PumpTrader : MoonTrader;
+        } else {
+            common.error('[ERROR] Invalid trader.');
+            return;
+        }
     } else {
-        common.error('[ERROR] Invalid trader.');
-        return;
+        json.trader = PumpTrader;
     }
 
     if (!('is_buy_once' in json)) json.is_buy_once = false;
-    if (!('trader' in json)) json.trader = PumpTrader;
     if (!('start_interval' in json)) json.start_interval = undefined;
     if (json.mint) json.mint = new PublicKey(json.mint);
 
@@ -322,7 +324,7 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 name: 'start_interval',
                 message: 'Enter the start interval in seconds:',
                 default: 0,
-                validate: (value) => (common.validate_int(value, 0) ? true : 'Please enter a valid number greater than or equal to 0.')
+                validate: (value) => (value && value >= 0 ? true : 'Please enter a valid number greater than or equal to 0.')
             },
             {
                 type: 'input',

@@ -1,7 +1,6 @@
 import * as snipe from '../common/snipe_common.js';
 import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
-import { Trader } from './trade_moon.js';
 
 const WORKER_PATH = './dist/moon_worker.js';
 
@@ -13,10 +12,6 @@ export class Runner extends snipe.SniperBase {
     protected get_worker_path(): string {
         throw new Error('Not Implemented');
         return WORKER_PATH;
-    }
-
-    protected get_trader(): typeof Trader {
-        return Trader;
     }
 
     protected async wait_drop_unsub(): Promise<void> {

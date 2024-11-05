@@ -2,7 +2,6 @@ import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as common from './common/common.js';
-import * as commands from './commands.js';
 import * as trade from './common/trade_common.js';
 
 const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
@@ -286,7 +285,7 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
     }
 }
 
-export async function run_spider_transfer(keys: common.Wallet[], amount: number, payer: Keypair) {
+export async function run_spider_transfer(keys: common.Wallet[], amount: number, sender: Keypair): Promise<common.Wallet[] | undefined> {
     const keys_cnt = keys.length;
 
     let tree = {
@@ -294,7 +293,7 @@ export async function run_spider_transfer(keys: common.Wallet[], amount: number,
         depth: Math.ceil(Math.log2(keys_cnt)) + 1
     } as SpiderTree;
 
-    tree = build_spider_tree(tree, amount, keys_cnt, payer);
+    tree = build_spider_tree(tree, amount, keys_cnt, sender);
     display_spider_tree(tree);
 
     const target_file = backup_spider_tree(tree);
@@ -311,6 +310,5 @@ export async function run_spider_transfer(keys: common.Wallet[], amount: number,
         await common.sleep(INTERVAL * 2);
     }
 
-    common.log(`\n[Main Worker] Performing cleanup of the temporary wallets...\n`);
-    await commands.collect(rescue_keys, payer.publicKey);
+    return rescue_keys;
 }

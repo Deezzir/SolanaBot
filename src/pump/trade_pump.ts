@@ -55,7 +55,34 @@ export type PumpTokenMeta = {
     is_currently_live: boolean;
 };
 
-export function isPumpMeta(obj: any): obj is PumpTokenMeta {
+class Printer implements trade.IMintMetaPrinter {
+    private mint_meta: PumpTokenMeta;
+
+    constructor(mintMeta: object) {
+        if (!isPumpMeta(mintMeta)) {
+            throw new Error('Invalid mint meta object');
+        }
+        this.mint_meta = mintMeta;
+    }
+
+    public get name(): string {
+        return this.mint_meta.name;
+    }
+
+    public get mint(): string {
+        return this.mint_meta.mint;
+    }
+
+    public get symbol(): string {
+        return this.mint_meta.symbol;
+    }
+
+    public get usd_mc(): number {
+        return this.mint_meta.usd_market_cap;
+    }
+}
+
+function isPumpMeta(obj: any): obj is PumpTokenMeta {
     return (
         typeof obj === 'object' &&
         obj !== null &&
@@ -78,17 +105,21 @@ const CURVE_STATE_OFFSETS = {
     COMPLETE: 0x30
 };
 
-interface CurveState {
+type CurveState = {
     virtual_token_reserves: bigint;
     virtual_sol_reserves: bigint;
     real_token_reserves: bigint;
     real_sol_reserves: bigint;
     token_total_supply: bigint;
     complete: boolean;
-}
+};
 
-@common.staticImplements<trade.ProgramTrader>()
+@common.staticImplements<trade.IProgramTrader>()
 export class Trader {
+    public static get_meta_printer(mint_meta: PumpTokenMeta): Printer {
+        return new Printer(mint_meta);
+    }
+
     public static async buy_token(
         sol_amount: number,
         buyer: Signer,

@@ -77,7 +77,8 @@ export function error(message: string): void {
 }
 
 export function check_reserve_exists(keys: Wallet[]): boolean {
-    return keys.some((wallet) => wallet.is_reserve);
+    const reserveCount = keys.filter((wallet) => wallet.is_reserve).length;
+    return reserveCount === 1;
 }
 
 export function filter_wallets(wallet: Wallet[], from?: number, to?: number, list?: number[]): Wallet[] {

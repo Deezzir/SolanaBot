@@ -3,7 +3,7 @@ import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
-import { PumpTokenMeta, PUMP_TRADE_PROGRAM_ID, METAPLEX_PROGRAM_ID, FETCH_MINT_API_URL, Trader } from './trade_pump.js';
+import { PumpTokenMeta, PUMP_TRADE_PROGRAM_ID, METAPLEX_PROGRAM_ID, FETCH_MINT_API_URL } from './trade_pump.js';
 
 const WORKER_PATH = './dist/pump/worker_pump.js';
 
@@ -11,10 +11,6 @@ export class Runner extends snipe.SniperBase {
     private _subscription_id: number | undefined;
     private _logs_stop_func: (() => void) | null = null;
     private _fetch_stop_func: (() => void) | null = null;
-
-    protected get_trader(): typeof Trader {
-        return Trader;
-    }
 
     protected get_worker_path(): string {
         return WORKER_PATH;

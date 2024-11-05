@@ -42,9 +42,6 @@ import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
 import BN from 'bn.js';
 import * as common from './common.js';
-import { isMoonMeta, MoonshotTokenMeta } from '../moon/moon.js';
-import { isPumpMeta, PumpTokenMeta } from '../pump/pump.js';
-import * as jito from 'jito-ts';
 import bs58 from 'bs58';
 
 const SWAP_SEED = 'swap';
@@ -53,15 +50,19 @@ const DEFAULT_CURVE_TOKEN_DECIMALS = 6;
 export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
 
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const JITOTIP_AUTH_KEY = Keypair.fromSecretKey(bs58.decode(process.env.JITOTIP_AUTH_KEY || ''));
-const JITOTIP = new PublicKey(process.env.JITOTIP || 'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe');
-const JITOTIP_BLOCK_URL = process.env.JITOTIP_BLOCK_URL || 'ny.mainnet.block-engine.jito.wtf';
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
 const MAX_RETRIES = 2;
 
-export interface ProgramTrader {
+export interface IMintMetaPrinter {
+    readonly name: string;
+    readonly symbol: string;
+    readonly mint: string;
+    readonly usd_mc: number;
+}
+
+export interface IProgramTrader {
     buy_token(sol_amount: number, buyer: Signer, mint_meta: object, slippage: number, priority?: PriorityLevel): Promise<String>;
     sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: Partial<object>, slippage: number, priority?: PriorityLevel): Promise<String>;
     get_mint_meta(mint: string): Promise<object | undefined>;
@@ -69,29 +70,7 @@ export interface ProgramTrader {
     get_random_mints(count: number): Promise<object[]>;
     init_mint_meta(mint: PublicKey, sol_price: number): Promise<object>;
     update_mint_meta_reserves(mint_meta: object, sol_price: number): Promise<object | undefined>;
-}
-
-export class MintMetaPrinter {
-    private mintMeta: PumpTokenMeta | MoonshotTokenMeta;
-
-    constructor(mintMeta: object) {
-        if (!isMoonMeta(mintMeta) && !isPumpMeta(mintMeta)) {
-            throw new Error('Invalid mint meta object');
-        }
-        this.mintMeta = mintMeta;
-    }
-
-    public get name(): string {
-        return isMoonMeta(this.mintMeta) ? this.mintMeta.baseToken.name : this.mintMeta.name;
-    }
-
-    public get mint(): string {
-        return isMoonMeta(this.mintMeta) ? this.mintMeta.baseToken.address : this.mintMeta.mint;
-    }
-
-    public get usd_mc(): number {
-        return isMoonMeta(this.mintMeta) ? this.mintMeta.marketCap : this.mintMeta.usd_market_cap;
-    }
+    get_meta_printer(mint_meta: object): IMintMetaPrinter;
 }
 
 export enum PriorityLevel {
@@ -159,50 +138,50 @@ export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.CONNECTION.getBalance(pubkey);
 }
 
-function is_bundle_error<T>(value: T | Error): value is Error {
-    return value instanceof Error;
-}
+// function is_bundle_error<T>(value: T | Error): value is Error {
+//     return value instanceof Error;
+// }
 
-export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
-    try {
-        const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-        const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, JITOTIP_AUTH_KEY);
+// export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
+//     try {
+//         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
+//         const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, JITOTIP_AUTH_KEY);
 
-        instructions.unshift(
-            SystemProgram.transfer({
-                fromPubkey: payer.publicKey,
-                toPubkey: JITOTIP,
-                lamports: tip * LAMPORTS_PER_SOL
-            })
-        );
+//         instructions.unshift(
+//             SystemProgram.transfer({
+//                 fromPubkey: payer.publicKey,
+//                 toPubkey: JITOTIP,
+//                 lamports: tip * LAMPORTS_PER_SOL
+//             })
+//         );
 
-        const versioned_tx = new VersionedTransaction(
-            new TransactionMessage({
-                payerKey: payer.publicKey,
-                recentBlockhash: ctx.value.blockhash,
-                instructions: instructions.filter(Boolean)
-            }).compileToV0Message()
-        );
-        versioned_tx.sign(signers);
+//         const versioned_tx = new VersionedTransaction(
+//             new TransactionMessage({
+//                 payerKey: payer.publicKey,
+//                 recentBlockhash: ctx.value.blockhash,
+//                 instructions: instructions.filter(Boolean)
+//             }).compileToV0Message()
+//         );
+//         versioned_tx.sign(signers);
 
-        let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
-        let bundle = new jito.bundle.Bundle([versioned_tx], 1);
+//         let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
+//         let bundle = new jito.bundle.Bundle([versioned_tx], 1);
 
-        if (!is_bundle_error(bundle)) {
-            try {
-                await c.sendBundle(bundle);
-                await check_transaction_status(signature, ctx);
-                return signature;
-            } catch (e) {
-                throw new Error(`Failed to send a bundle: ${e}`);
-            }
-        } else {
-            throw new Error(`Failed to create a bundle: ${bundle}`);
-        }
-    } catch (err) {
-        throw new Error(`Failed to send tipped transaction: ${err}`);
-    }
-}
+//         if (!is_bundle_error(bundle)) {
+//             try {
+//                 await c.sendBundle(bundle);
+//                 await check_transaction_status(signature, ctx);
+//                 return signature;
+//             } catch (e) {
+//                 throw new Error(`Failed to send a bundle: ${e}`);
+//             }
+//         } else {
+//             throw new Error(`Failed to create a bundle: ${bundle}`);
+//         }
+//     } catch (err) {
+//         throw new Error(`Failed to send tipped transaction: ${err}`);
+//     }
+// }
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
     let current_block_height = await global.CONNECTION.getBlockHeight('confirmed');

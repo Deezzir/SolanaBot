@@ -5,7 +5,7 @@ import * as common from '../common/common.js';
 
 const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 
-export interface MoonshotTokenMeta {
+export type MoonshotTokenMeta = {
     url: string;
     chainId: string;
     dexId: string;
@@ -38,9 +38,36 @@ export interface MoonshotTokenMeta {
         curvePosition: string;
         marketcapThreshold: string;
     };
+};
+
+class Printer implements trade.IMintMetaPrinter {
+    private mint_meta: MoonshotTokenMeta;
+
+    constructor(mintMeta: object) {
+        if (!isMoonMeta(mintMeta)) {
+            throw new Error('Invalid mint meta object');
+        }
+        this.mint_meta = mintMeta;
+    }
+
+    public get name(): string {
+        return this.mint_meta.baseToken.name;
+    }
+
+    public get mint(): string {
+        return this.mint_meta.baseToken.address;
+    }
+
+    public get symbol(): string {
+        return this.mint_meta.baseToken.symbol;
+    }
+
+    public get usd_mc(): number {
+        return this.mint_meta.marketCap;
+    }
 }
 
-export function isMoonMeta(obj: any): obj is MoonshotTokenMeta {
+function isMoonMeta(obj: any): obj is MoonshotTokenMeta {
     return (
         typeof obj === 'object' &&
         obj !== null &&
@@ -53,8 +80,12 @@ export function isMoonMeta(obj: any): obj is MoonshotTokenMeta {
     );
 }
 
-@common.staticImplements<trade.ProgramTrader>()
+@common.staticImplements<trade.IProgramTrader>()
 export class Trader {
+    public static get_meta_printer(mint_meta: MoonshotTokenMeta): Printer {
+        return new Printer(mint_meta);
+    }
+
     public static async buy_token(
         sol_amount: number,
         buyer: Signer,

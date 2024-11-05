@@ -58,7 +58,7 @@ export async function create_token(
     common.log('Creating a token...\n');
 
     let meta: common.IPFSMetadata;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -109,7 +109,7 @@ export async function promote(times: number, cid: string, creator: Keypair, prog
     common.log(`Promoting ${times} accounts with CID ${cid}...\n`);
 
     let meta: common.IPFSMetadata;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -249,7 +249,7 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
     common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -290,12 +290,12 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
             return;
         }
     } catch (error) {
-        common.error('[ERROR] Failed to process payer file');
+        common.error('[ERROR] Failed to process payer wallet');
         return;
     }
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -341,7 +341,7 @@ export async function warmup(wallets: common.Wallet[], program: common.Program =
 
     const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (MAX - MIN) + MIN));
     common.log(`Warming up ${wallets.length} accounts...`);
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -376,7 +376,7 @@ export async function warmup(wallets: common.Wallet[], program: common.Program =
 
         common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`);
         for (const mint of mints) {
-            const mint_printer = new trade.MintMetaPrinter(mint);
+            const mint_printer = trader.get_meta_printer(mint);
             let amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
             if (amount === 0) amount = 0.001;
 
@@ -501,7 +501,7 @@ export async function buy_token(wallets: common.Wallet[], amount: number, mint: 
     }
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -563,7 +563,7 @@ export async function sell_token(wallets: common.Wallet[], mint: PublicKey, prog
     }
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.ProgramTrader;
+    let trader: trade.IProgramTrader;
 
     switch (program) {
         case common.Program.Pump: {
@@ -630,7 +630,7 @@ export async function topup(wallets: common.Wallet[], amount: number, sender: Ke
             return;
         }
     } catch (error) {
-        common.error(`[ERROR] Failed to process payer file: ${error}`);
+        common.error(`[ERROR] Failed to process payer wallet: ${error}`);
         return;
     }
 
@@ -659,10 +659,14 @@ export async function topup(wallets: common.Wallet[], amount: number, sender: Ke
 
         if (failed.length > 0) {
             common.log(`\nFailed transactions:`);
-            for (const item of failed) common.log(`File: ${item}`);
+            for (const item of failed) common.log(`Wallet: ${item}`);
         }
     } else {
-        await spider.run_spider_transfer(wallets, amount, sender);
+        const rescue_keys = await spider.run_spider_transfer(wallets, amount, sender);
+        if (rescue_keys) {
+            common.log(`\n[Main Worker] Performing cleanup of the temporary wallets...\n`);
+            await collect(rescue_keys, sender.publicKey);
+        }
     }
 }
 
@@ -673,7 +677,7 @@ export async function start(wallets: common.Wallet[], bot_config: snipe.BotConfi
     }
 
     const sol_price = await common.fetch_sol_price();
-    let sniper: snipe.Sniper;
+    let sniper: snipe.ISniper;
 
     switch (program) {
         case common.Program.Pump: {
