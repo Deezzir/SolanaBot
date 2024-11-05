@@ -286,7 +286,10 @@ export function validate_bot_config(json: any): BotConfig | undefined {
         return;
     }
 
-    if ((token_name === undefined && token_ticker !== undefined) || (token_name !== undefined && token_ticker === undefined)) {
+    if (
+        (token_name === undefined && token_ticker !== undefined) ||
+        (token_name !== undefined && token_ticker === undefined)
+    ) {
         common.error('[ERROR] Both token name and token ticker are required.');
         return;
     }
@@ -318,7 +321,9 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 name: 'thread_cnt',
                 message: `Enter the number of bots to run(${keys_cnt} accounts available):`,
                 validate: (value) =>
-                    common.validate_int(value, 1, keys_cnt) ? true : `Please enter a valid number greater than 0 and less or equal to ${keys_cnt}.`,
+                    common.validate_int(value, 1, keys_cnt)
+                        ? true
+                        : `Please enter a valid number greater than 0 and less or equal to ${keys_cnt}.`,
                 filter: (value) => (common.validate_int(value, 1, keys_cnt) ? parseInt(value, 10) : value)
             },
             {
@@ -332,34 +337,39 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 name: 'start_interval',
                 message: 'Enter the start interval in seconds:',
                 default: 0,
-                validate: (value) => (!value || (value && value >= 0) ? true : 'Please enter a valid number greater than or equal to 0.')
+                validate: (value) =>
+                    !value || (value && value >= 0) ? true : 'Please enter a valid number greater than or equal to 0.'
             },
             {
                 type: 'input',
                 name: 'buy_interval',
                 message: 'Enter the interval between each buy in seconds:',
-                validate: (value) => (common.validate_int(value, 1) ? true : 'Please enter a valid number greater than 0.'),
+                validate: (value) =>
+                    common.validate_int(value, 1) ? true : 'Please enter a valid number greater than 0.',
                 filter: (value) => (common.validate_int(value, 1) ? parseInt(value, 10) : value)
             },
             {
                 type: 'input',
                 name: 'spend_limit',
                 message: 'Enter the limit of Solana that each bot can spend:',
-                validate: (value) => (common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.'),
+                validate: (value) =>
+                    common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.',
                 filter: (value) => (common.validate_float(value, 0.001) ? parseFloat(value) : value)
             },
             {
                 type: 'input',
                 name: 'start_buy',
                 message: 'Enter the start Solana amount that the bot will buy the token for:',
-                validate: (value) => (common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.'),
+                validate: (value) =>
+                    common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.',
                 filter: (value) => (common.validate_float(value, 0.001) ? parseFloat(value) : value)
             },
             {
                 type: 'input',
                 name: 'mcap_threshold',
                 message: 'Enter the threshold market cap:',
-                validate: (value) => (common.validate_int(value, 5000) ? true : 'Please enter a valid number greater than 5000'),
+                validate: (value) =>
+                    common.validate_int(value, 5000) ? true : 'Please enter a valid number greater than 5000',
                 filter: (value) => (common.validate_int(value, 5000) ? parseInt(value, 10) : value)
             },
             {
@@ -379,7 +389,10 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 message: 'Choose the type of the sniping:',
                 choices: ['Wait for the token to drop', 'Snipe an existing token'],
                 default: 0,
-                filter: (input) => (input.toLowerCase().includes(MethodStrings[Method.Wait].toLocaleLowerCase()) ? Method.Wait : Method.Snipe)
+                filter: (input) =>
+                    input.toLowerCase().includes(MethodStrings[Method.Wait].toLocaleLowerCase())
+                        ? Method.Wait
+                        : Method.Snipe
             }
         ]);
 

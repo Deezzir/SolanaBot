@@ -16,9 +16,13 @@ const FEE_RECIPIENT_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7Abicf
 const EVENT_AUTHORITUY_ACCOUNT = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
 const MINT_AUTHORITY_ACCOUNT = new PublicKey('TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
 
-const METAPLEX_TOKEN_META = new PublicKey(process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+const METAPLEX_TOKEN_META = new PublicKey(
+    process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s'
+);
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+    process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+);
 const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
@@ -133,19 +137,7 @@ export class Trader {
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.mint);
-            try {
-                return trade.swap_raydium(sol_token_amount, buyer, amm, mint, slippage);
-            } catch (error) {
-                common.error(`Raydium Transaction failed: ${error}`);
-                try {
-                    const signature = await trade.swap_jupiter(sol_token_amount, buyer, trade.SOL_MINT, mint, slippage);
-                    common.log(`Jupiter Transaction completed, signature: ${signature}`);
-                    return signature;
-                } catch (error) {
-                    common.error(`Pump Transaction failed: ${error}`);
-                    throw new Error(`Both Raydium and Pump transactions failed.`);
-                }
-            }
+            return trade.swap(sol_token_amount, buyer, mint, trade.SOL_MINT, amm, slippage);
         }
     }
 
@@ -161,21 +153,7 @@ export class Trader {
             return this.sell_token_pump(token_amount, seller, mint_meta, slippage, priority);
         } else {
             const mint = new PublicKey(mint_meta.mint);
-            try {
-                const signature = await trade.swap_raydium(token_amount, seller, amm, trade.SOL_MINT, slippage);
-                common.log(`Raydium Transaction completed, signature: ${signature}`);
-                return signature;
-            } catch (error) {
-                common.error(`Raydium Transaction failed: ${error}`);
-                try {
-                    const signature = await trade.swap_jupiter(token_amount, seller, mint, trade.SOL_MINT, slippage);
-                    common.log(`Jupiter Transaction completed, signature: ${signature}`);
-                    return signature;
-                } catch (error) {
-                    common.error(`Jupiter Transaction failed: ${error}`);
-                    throw new Error(`Both Raydium and Jupiter transactions failed.`);
-                }
-            }
+            return trade.swap(token_amount, seller, trade.SOL_MINT, mint, amm, slippage);
         }
     }
 
@@ -195,7 +173,9 @@ export class Trader {
     public static async get_random_mints(count: number): Promise<PumpTokenMeta[]> {
         const limit = 50;
         const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
-        return fetch(`${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`)
+        return fetch(
+            `${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
+        )
             .then((response) => response.json())
             .then((data: any) => {
                 if (!data || data.statusCode !== undefined) return [] as PumpTokenMeta[];
@@ -259,7 +239,10 @@ export class Trader {
         }
     }
 
-    public static async update_mint_meta_reserves(mint_meta: PumpTokenMeta, sol_price: number): Promise<PumpTokenMeta | undefined> {
+    public static async update_mint_meta_reserves(
+        mint_meta: PumpTokenMeta,
+        sol_price: number
+    ): Promise<PumpTokenMeta | undefined> {
         try {
             const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));
             if (!curve_state) {
@@ -267,7 +250,10 @@ export class Trader {
                 return;
             }
 
-            const token_price_sol = this.calculate_curve_price(curve_state.virtual_sol_reserves, curve_state.virtual_token_reserves);
+            const token_price_sol = this.calculate_curve_price(
+                curve_state.virtual_sol_reserves,
+                curve_state.virtual_token_reserves
+            );
 
             const token_mc = this.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
 
@@ -392,7 +378,9 @@ export class Trader {
 
         let instructions: TransactionInstruction[] = [];
         if (!exists) {
-            instructions.push(createAssociatedTokenAccountInstruction(buyer.publicKey, assoc_address, buyer.publicKey, mint));
+            instructions.push(
+                createAssociatedTokenAccountInstruction(buyer.publicKey, assoc_address, buyer.publicKey, mint)
+            );
         }
         instructions.push(
             new TransactionInstruction({
@@ -493,7 +481,10 @@ export class Trader {
         const instruction_data = this.create_data(meta.name, meta.symbol, meta_link);
         const [bonding] = this.calc_token_bonding_curve(mint.publicKey);
         const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint.publicKey, bonding);
-        const [metaplex] = PublicKey.findProgramAddressSync([META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()], METAPLEX_TOKEN_META);
+        const [metaplex] = PublicKey.findProgramAddressSync(
+            [META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()],
+            METAPLEX_TOKEN_META
+        );
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(
@@ -527,15 +518,27 @@ export class Trader {
     }
 
     private static calc_token_assoc_bonding_curve(mint: PublicKey, bonding: PublicKey): [PublicKey, number] {
-        return PublicKey.findProgramAddressSync([bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID);
+        return PublicKey.findProgramAddressSync(
+            [bonding.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+            ASSOCIATED_TOKEN_PROGRAM_ID
+        );
     }
 
     private static calculate_curve_price(virtual_sol_reserves: bigint, virtual_token_reserves: bigint): number {
-        if (virtual_token_reserves <= 0 || virtual_sol_reserves <= 0) throw new RangeError('curve state contains invalid reserve data');
-        return Number(virtual_sol_reserves) / LAMPORTS_PER_SOL / (Number(virtual_token_reserves) / 10 ** CURVE_TOKEN_DECIMALS);
+        if (virtual_token_reserves <= 0 || virtual_sol_reserves <= 0)
+            throw new RangeError('curve state contains invalid reserve data');
+        return (
+            Number(virtual_sol_reserves) /
+            LAMPORTS_PER_SOL /
+            (Number(virtual_token_reserves) / 10 ** CURVE_TOKEN_DECIMALS)
+        );
     }
 
-    private static calculate_token_mc(sol_price: number, token_price_sol: number, token_total_supply: bigint): { sol_mc: number; usd_mc: number } {
+    private static calculate_token_mc(
+        sol_price: number,
+        token_price_sol: number,
+        token_total_supply: bigint
+    ): { sol_mc: number; usd_mc: number } {
         const sol_mc = (token_price_sol * Number(token_total_supply)) / 10 ** CURVE_TOKEN_DECIMALS;
         const usd_mc = sol_mc * sol_price;
         return { sol_mc, usd_mc };
@@ -543,7 +546,11 @@ export class Trader {
 
     private static async get_curve_state(bond_curve_addr: PublicKey): Promise<CurveState> {
         const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, 'confirmed');
-        if (!acc_info || !acc_info.data || acc_info.data.byteLength < CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE) {
+        if (
+            !acc_info ||
+            !acc_info.data ||
+            acc_info.data.byteLength < CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE
+        ) {
             throw new Error('unexpected curve state');
         }
 
@@ -553,7 +560,11 @@ export class Trader {
         }
 
         return {
-            virtual_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
+            virtual_token_reserves: common.read_biguint_le(
+                acc_info.data,
+                CURVE_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES,
+                8
+            ),
             virtual_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
             real_token_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
             real_sol_reserves: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.REAL_SOL_RESERVES, 8),

@@ -65,7 +65,12 @@ function display_spider_tree(tree: SpiderTree) {
 
     common.log(`[Main Worker] Spider tree depth: ${tree.depth}`);
 
-    const _display_spider_tree = (node: SpiderTreeNode | null, layer_cnt: number = 0, prefix: string = '', isLeft: boolean = true) => {
+    const _display_spider_tree = (
+        node: SpiderTreeNode | null,
+        layer_cnt: number = 0,
+        prefix: string = '',
+        isLeft: boolean = true
+    ) => {
         if (node === null) return;
 
         const connector = layer_cnt === 0 ? ' ' : isLeft ? '├── ' : '└── ';
@@ -157,7 +162,9 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
 
     const ok = _backup_spider_tree(tree.head);
     if (!ok) {
-        common.error(`[ERROR] Something went wrong during the spider transfer, check the rescue file for wallet backups`);
+        common.error(
+            `[ERROR] Something went wrong during the spider transfer, check the rescue file for wallet backups`
+        );
     } else {
         common.log(`[Main Worker] Successfully backed the keys up for the spider transfer`);
     }
@@ -187,7 +194,13 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`
             );
 
-            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, trade.PriorityLevel.HIGH, layer_name);
+            let ok = await send_lamports_with_retries(
+                sol_amount,
+                sender,
+                receiver,
+                trade.PriorityLevel.HIGH,
+                layer_name
+            );
             if (!ok) return false;
 
             await common.sleep(INTERVAL);
@@ -207,7 +220,13 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`
             );
 
-            let ok = await send_lamports_with_retries(sol_amount, sender, receiver, trade.PriorityLevel.HIGH, layer_name);
+            let ok = await send_lamports_with_retries(
+                sol_amount,
+                sender,
+                receiver,
+                trade.PriorityLevel.HIGH,
+                layer_name
+            );
             if (!ok) return false;
 
             await common.sleep(INTERVAL);
@@ -272,7 +291,9 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
         common.log(
             `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`
         );
-        transactions.push(send_lamports_with_retries(amount, sender, receiver, trade.PriorityLevel.DEFAULT, wallet.name));
+        transactions.push(
+            send_lamports_with_retries(amount, sender, receiver, trade.PriorityLevel.DEFAULT, wallet.name)
+        );
 
         await common.sleep(50);
     }
@@ -285,7 +306,11 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
     }
 }
 
-export async function run_spider_transfer(keys: common.Wallet[], amount: number, sender: Keypair): Promise<common.Wallet[] | undefined> {
+export async function run_spider_transfer(
+    keys: common.Wallet[],
+    amount: number,
+    sender: Keypair
+): Promise<common.Wallet[] | undefined> {
     const keys_cnt = keys.length;
 
     let tree = {

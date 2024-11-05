@@ -99,19 +99,7 @@ export class Trader {
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.baseToken.address);
-            try {
-                return trade.swap_raydium(sol_token_amount, buyer, amm, mint, slippage);
-            } catch (error) {
-                common.error(`Raydium Transaction failed: ${error}`);
-                try {
-                    const signature = await trade.swap_jupiter(sol_token_amount, buyer, trade.SOL_MINT, mint, slippage);
-                    common.log(`Jupiter Transaction completed, signature: ${signature}`);
-                    return signature;
-                } catch (error) {
-                    common.error(`Pump Transaction failed: ${error}`);
-                    throw new Error(`Both Raydium and Pump transactions failed.`);
-                }
-            }
+            return trade.swap(sol_token_amount, buyer, mint, trade.SOL_MINT, amm, slippage);
         }
     }
 
@@ -127,21 +115,7 @@ export class Trader {
             return this.sell_token_moon(token_amount, seller, mint_meta, slippage, priority);
         } else {
             const mint = new PublicKey(mint_meta.baseToken.address);
-            try {
-                const signature = await trade.swap_raydium(token_amount, seller, amm, trade.SOL_MINT, slippage);
-                common.log(`Raydium Transaction completed, signature: ${signature}`);
-                return signature;
-            } catch (error) {
-                common.error(`Raydium Transaction failed: ${error}`);
-                try {
-                    const signature = await trade.swap_jupiter(token_amount, seller, mint, trade.SOL_MINT, slippage);
-                    common.log(`Jupiter Transaction completed, signature: ${signature}`);
-                    return signature;
-                } catch (error) {
-                    common.error(`Jupiter Transaction failed: ${error}`);
-                    throw new Error(`Both Raydium and Jupiter transactions failed.`);
-                }
-            }
+            return trade.swap(token_amount, seller, trade.SOL_MINT, mint, amm, slippage);
         }
     }
 
@@ -176,7 +150,10 @@ export class Trader {
         throw new Error('Not Implemented');
     }
 
-    public static async update_mint_meta_reserves(_mint_meta: MoonshotTokenMeta, _sol_price: number): Promise<MoonshotTokenMeta | undefined> {
+    public static async update_mint_meta_reserves(
+        _mint_meta: MoonshotTokenMeta,
+        _sol_price: number
+    ): Promise<MoonshotTokenMeta | undefined> {
         throw new Error('Not Implemented');
     }
 

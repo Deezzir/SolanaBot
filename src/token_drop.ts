@@ -22,7 +22,13 @@ const DB_CLIENT = new MongoClient(MONGO_URI, {
     }
 });
 
-async function send_tokens(token_amount: number, mint: PublicKey, sender: PublicKey, receiver: PublicKey, payer: Signer): Promise<String> {
+async function send_tokens(
+    token_amount: number,
+    mint: PublicKey,
+    sender: PublicKey,
+    receiver: PublicKey,
+    payer: Signer
+): Promise<String> {
     let instructions: TransactionInstruction[] = [];
 
     const ata = await trade.calc_assoc_token_addr(receiver, mint);
@@ -68,7 +74,10 @@ function calc_airdrop_amount(airdrop_percent: number, total_tokens: number, reco
     return Math.floor(airdrop_amount);
 }
 
-async function calc_presale_amounts(presale_percent: number, total_tokens: number): Promise<{ presale_tokens: number; presale_sol: number }> {
+async function calc_presale_amounts(
+    presale_percent: number,
+    total_tokens: number
+): Promise<{ presale_tokens: number; presale_sol: number }> {
     if (!DB) {
         await connect_db();
     }
@@ -198,7 +207,9 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.Min
                 const xUsername = record.xUsername;
                 const token_amount_raw = token_amount * 10 ** mint_meta.token_decimals;
 
-                console.log(`Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`);
+                console.log(
+                    `Airdroping ${token_amount} tokens to ${receiver.toString().padEnd(44, ' ')} | ${xUsername}...`
+                );
                 transactions.push(
                     send_tokens(token_amount_raw, mint_meta.mint, drop_assoc_addr, receiver, drop)
                         .then((signature) => {
@@ -246,7 +257,9 @@ async function airdrop(percent: number, ui_balance: number, mint_meta: trade.Min
     }
 
     const airdrop_amount = calc_airdrop_amount(percent, ui_balance, airdrop_count);
-    console.log(`Airdrop | Total token amount of ${mint_meta.token_symbol}: ${airdrop_amount} | Record count: ${airdrop_count}`);
+    console.log(
+        `Airdrop | Total token amount of ${mint_meta.token_symbol}: ${airdrop_amount} | Record count: ${airdrop_count}`
+    );
 
     common.setup_readline();
     await new Promise<void>((resolve) => global.RL.question('Press ENTER to start the airdrop...', () => resolve()));
@@ -265,7 +278,9 @@ async function presale(percent: number, ui_balance: number, mint_meta: trade.Min
     }
 
     const { presale_tokens, presale_sol } = await calc_presale_amounts(percent, ui_balance);
-    console.log(`Presale | Total Amount ${mint_meta.token_symbol}: ${presale_tokens} | Total SOL: ${presale_sol} | Record count: ${presale_count}`);
+    console.log(
+        `Presale | Total Amount ${mint_meta.token_symbol}: ${presale_tokens} | Total SOL: ${presale_sol} | Record count: ${presale_count}`
+    );
 
     await new Promise<void>((resolve) => global.RL.question('Press ENTER to start the presale...', () => resolve()));
 
@@ -275,7 +290,12 @@ async function presale(percent: number, ui_balance: number, mint_meta: trade.Min
     console.log(`Presale drop completed`);
 }
 
-export async function drop(airdrop_percent: number, mint: PublicKey, drop: Keypair, presale_percent: number = 0): Promise<void> {
+export async function drop(
+    airdrop_percent: number,
+    mint: PublicKey,
+    drop: Keypair,
+    presale_percent: number = 0
+): Promise<void> {
     console.log(`Dropping the mint ${mint.toString()}...`);
     console.log(`Airdrop percent: ${airdrop_percent}% | Presale percent: ${presale_percent}%`);
 

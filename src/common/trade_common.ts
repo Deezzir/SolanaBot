@@ -25,7 +25,10 @@ import {
     getMint
 } from '@solana/spl-token';
 import { Metaplex } from '@metaplex-foundation/js';
-import { CreateMetadataAccountV3InstructionData, getCreateMetadataAccountV3InstructionDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
+import {
+    CreateMetadataAccountV3InstructionData,
+    getCreateMetadataAccountV3InstructionDataSerializer
+} from '@metaplex-foundation/mpl-token-metadata';
 import {
     Liquidity,
     LiquidityPoolInfo,
@@ -63,10 +66,28 @@ export interface IMintMetaPrinter {
 }
 
 export interface IProgramTrader {
-    buy_token(sol_amount: number, buyer: Signer, mint_meta: object, slippage: number, priority?: PriorityLevel): Promise<String>;
-    sell_token(token_amount: TokenAmount, seller: Signer, mint_meta: Partial<object>, slippage: number, priority?: PriorityLevel): Promise<String>;
+    buy_token(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: object,
+        slippage: number,
+        priority?: PriorityLevel
+    ): Promise<String>;
+    sell_token(
+        token_amount: TokenAmount,
+        seller: Signer,
+        mint_meta: Partial<object>,
+        slippage: number,
+        priority?: PriorityLevel
+    ): Promise<String>;
     get_mint_meta(mint: string): Promise<object | undefined>;
-    create_token(creator: Signer, meta: common.IPFSMetadata, cid: string, mint?: Keypair, sol_amount?: number): Promise<[String, PublicKey]>;
+    create_token(
+        creator: Signer,
+        meta: common.IPFSMetadata,
+        cid: string,
+        mint?: Keypair,
+        sol_amount?: number
+    ): Promise<[String, PublicKey]>;
     get_random_mints(count: number): Promise<object[]>;
     init_mint_meta(mint: PublicKey, sol_price: number): Promise<object>;
     update_mint_meta_reserves(mint_meta: object, sol_price: number): Promise<object | undefined>;
@@ -199,7 +220,10 @@ async function check_transaction_status(
         });
 
         if (status) {
-            if ((status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') && status.err === null) {
+            if (
+                (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') &&
+                status.err === null
+            ) {
                 return;
             }
             if (status.err) throw new Error(`Transaction failed | Signature: ${signature} | Error: ${status.err}`);
@@ -230,7 +254,11 @@ export async function create_and_send_smart_tx(instructions: TransactionInstruct
     });
 }
 
-export async function create_and_send_tx(instructions: TransactionInstruction[], signers: Signer[], priority?: PriorityOptions): Promise<String> {
+export async function create_and_send_tx(
+    instructions: TransactionInstruction[],
+    signers: Signer[],
+    priority?: PriorityOptions
+): Promise<String> {
     if (signers.length === 0) throw new Error(`[ERROR] No signers provided.`);
 
     if (priority) {
@@ -270,7 +298,9 @@ export async function get_balance_change(signature: string, address: PublicKey):
             maxSupportedTransactionVersion: 0
         });
         if (!tx_details) throw new Error(`[ERROR] Transaction not found: ${signature}`);
-        const balance_index = tx_details?.transaction.message.getAccountKeys().staticAccountKeys.findIndex((i) => i.equals(address));
+        const balance_index = tx_details?.transaction.message
+            .getAccountKeys()
+            .staticAccountKeys.findIndex((i) => i.equals(address));
         if (balance_index !== undefined && balance_index !== -1) {
             const pre_balance = tx_details?.meta?.preBalances[balance_index] || 0;
             const post_balance = tx_details?.meta?.postBalances[balance_index] || 0;
@@ -292,7 +322,9 @@ export async function check_has_balances(wallets: common.Wallet[], min_balance: 
                 const lamports = await get_balance(holder.publicKey);
                 const sol_balance = lamports / LAMPORTS_PER_SOL;
                 if (sol_balance <= min_balance) {
-                    common.error(`Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`);
+                    common.error(
+                        `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
+                    );
                     ok = false;
                 }
             } catch (err) {
@@ -311,7 +343,12 @@ export async function check_has_balances(wallets: common.Wallet[], min_balance: 
     }
 }
 
-export async function send_lamports(lamports: number, sender: Signer, receiver: PublicKey, priority?: PriorityLevel): Promise<String> {
+export async function send_lamports(
+    lamports: number,
+    sender: Signer,
+    receiver: PublicKey,
+    priority?: PriorityLevel
+): Promise<String> {
     let instructions: TransactionInstruction[] = [];
     let fees = 0;
     let units = 500;
@@ -372,7 +409,11 @@ export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
     throw new Error(`Failed to get the token metadata.`);
 }
 
-export async function get_token_balance(pubkey: PublicKey, mint: PublicKey, commitment: Commitment = 'finalized'): Promise<TokenAmount> {
+export async function get_token_balance(
+    pubkey: PublicKey,
+    mint: PublicKey,
+    commitment: Commitment = 'finalized'
+): Promise<TokenAmount> {
     try {
         const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
         const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
@@ -386,7 +427,12 @@ export async function get_token_balance(pubkey: PublicKey, mint: PublicKey, comm
     }
 }
 
-export async function send_tokens(token_amount: number, sender: PublicKey, receiver: PublicKey, owner: Signer): Promise<String> {
+export async function send_tokens(
+    token_amount: number,
+    sender: PublicKey,
+    receiver: PublicKey,
+    owner: Signer
+): Promise<String> {
     let instructions: TransactionInstruction[] = [];
     instructions.push(createTransferInstruction(sender, receiver, owner.publicKey, token_amount));
 
@@ -407,7 +453,7 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function swap_jupiter(
+async function swap_jupiter(
     amount: TokenAmount,
     seller: Signer,
     from: PublicKey,
@@ -511,9 +557,13 @@ async function calc_raydium_amounts(
     raw_slippage: number
 ): Promise<RaydiumAmounts> {
     let mint_token_out = token_buy;
-    let token_out_decimals = pool_keys.baseMint.equals(mint_token_out) ? pool_info.baseDecimals : pool_keys.quoteDecimals;
+    let token_out_decimals = pool_keys.baseMint.equals(mint_token_out)
+        ? pool_info.baseDecimals
+        : pool_keys.quoteDecimals;
     let mint_token_in = pool_keys.baseMint.equals(mint_token_out) ? pool_keys.quoteMint : pool_keys.baseMint;
-    let token_in_decimals = pool_keys.baseMint.equals(mint_token_out) ? pool_info.quoteDecimals : pool_info.baseDecimals;
+    let token_in_decimals = pool_keys.baseMint.equals(mint_token_out)
+        ? pool_info.quoteDecimals
+        : pool_info.baseDecimals;
 
     const token_in = new Token(TOKEN_PROGRAM_ID, mint_token_in, token_in_decimals);
     const token_amount_in = new RayTokenAmount(token_in, amount_in, false);
@@ -534,7 +584,11 @@ async function calc_raydium_amounts(
     };
 }
 
-async function get_swap_acc_intsruction(seller: Signer, token_acc: PublicKey, lamports: number = 0): Promise<TransactionInstruction[]> {
+async function get_swap_acc_intsruction(
+    seller: Signer,
+    token_acc: PublicKey,
+    lamports: number = 0
+): Promise<TransactionInstruction[]> {
     let instructions: TransactionInstruction[] = [];
     instructions.push(
         SystemProgram.createAccountWithSeed({
@@ -561,7 +615,13 @@ async function create_raydium_swap_tx(
     priority?: PriorityLevel
 ) {
     const raw_amount_in = parseInt(amount.amount, 10);
-    const { amount_in, token_in, token_out, min_amount_out } = await calc_raydium_amounts(pool_keys, pool_info, token_buy, amount.uiAmount || 0, slippage);
+    const { amount_in, token_in, token_out, min_amount_out } = await calc_raydium_amounts(
+        pool_keys,
+        pool_info,
+        token_buy,
+        amount.uiAmount || 0,
+        slippage
+    );
 
     let token_in_acc: PublicKey;
     let token_out_acc: PublicKey;
@@ -570,7 +630,9 @@ async function create_raydium_swap_tx(
     if (token_in.equals(SOL_MINT)) {
         token_out_acc = await calc_assoc_token_addr(seller.publicKey, token_out);
         if (!(await check_account_exists(token_out_acc))) {
-            instructions.push(createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out));
+            instructions.push(
+                createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
+            );
         }
         token_in_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
         instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
@@ -658,7 +720,13 @@ async function create_raydium_swap_tx(
                 { pubkey: token_out_acc, isSigner: false, isWritable: true },
                 { pubkey: seller.publicKey, isSigner: true, isWritable: false }
             ],
-            data: Buffer.from(Uint8Array.of(9, ...new BN(amount_in.raw).toArray('le', 8), ...new BN(min_amount_out.raw).toArray('le', 8)))
+            data: Buffer.from(
+                Uint8Array.of(
+                    9,
+                    ...new BN(amount_in.raw).toArray('le', 8),
+                    ...new BN(min_amount_out.raw).toArray('le', 8)
+                )
+            )
         })
     );
     if (token_in.equals(SOL_MINT)) {
@@ -718,7 +786,7 @@ async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys |
     return undefined;
 }
 
-export async function swap_raydium(
+async function swap_raydium(
     amount: TokenAmount,
     seller: Signer,
     amm: PublicKey,
@@ -755,4 +823,25 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
         amount: ((BigInt(token_amount.amount) * BigInt(percent)) / BigInt(100)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
+}
+
+export async function swap(
+    amount: TokenAmount,
+    buyer: Signer,
+    swap_to: PublicKey,
+    swap_from: PublicKey,
+    amm: PublicKey,
+    slippage: number = 0.05,
+    _priority: PriorityLevel = PriorityLevel.DEFAULT
+): Promise<String> {
+    try {
+        return swap_raydium(amount, buyer, amm, swap_to, slippage);
+    } catch (error) {
+        try {
+            const signature = await swap_jupiter(amount, buyer, swap_from, swap_to, slippage);
+            return signature;
+        } catch (error) {
+            throw new Error(`Both Raydium and Jupiter transactions failed.`);
+        }
+    }
 }

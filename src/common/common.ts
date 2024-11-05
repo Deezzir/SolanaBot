@@ -308,3 +308,59 @@ export function read_bool(buf: Buffer, offset: number, length: number): boolean 
     }
     return false;
 }
+
+export const COLUMN_WIDTHS = {
+    id: 4,
+    name: 11,
+    publicKey: 44,
+    solBalance: 13,
+    allocation: 10,
+    tokenBalance: 18
+};
+
+const BORDER_CHARS = {
+    topLeft: '╭',
+    topRight: '╮',
+    bottomLeft: '╰',
+    bottomRight: '╯',
+    horizontal: '─',
+    vertical: '│',
+    middle: '┼',
+    topMiddle: '┬',
+    bottomMiddle: '┴'
+};
+
+function format_column(content: string, width: number, align: 'left' | 'right' = 'left'): string {
+    if (align === 'left') {
+        return content.padEnd(width, ' ');
+    }
+    return content.padStart(width, ' ');
+}
+
+export function print_header(columns: { title: string; width: number; align?: 'left' | 'right' }[]) {
+    const top_border = columns.map((col) => BORDER_CHARS.horizontal.repeat(col.width + 2)).join(BORDER_CHARS.topMiddle);
+
+    const header = columns
+        .map((col) => ` ${format_column(col.title, col.width, col.align)} `)
+        .join(`${BORDER_CHARS.vertical}`);
+
+    const separator = columns.map((col) => BORDER_CHARS.horizontal.repeat(col.width + 2)).join(BORDER_CHARS.middle);
+
+    log(`${BORDER_CHARS.topLeft}${top_border}${BORDER_CHARS.topRight}`);
+    log(`${BORDER_CHARS.vertical}${header}${BORDER_CHARS.vertical}`);
+    log(`${BORDER_CHARS.vertical}${separator}${BORDER_CHARS.vertical}`);
+}
+
+export function print_row(columns: { content: string; width: number; align?: 'left' | 'right' }[]) {
+    const row = columns
+        .map((col) => format_column(col.content, col.width, col.align))
+        .join(` ${BORDER_CHARS.vertical} `);
+    log(`${BORDER_CHARS.vertical} ${row} ${BORDER_CHARS.vertical}`);
+}
+
+export function print_footer(columns: { width: number }[]) {
+    const bottomBorder = columns
+        .map((col) => BORDER_CHARS.horizontal.repeat(col.width + 2))
+        .join(BORDER_CHARS.bottomMiddle);
+    log(`${BORDER_CHARS.bottomLeft}${bottomBorder}${BORDER_CHARS.bottomRight}`);
+}

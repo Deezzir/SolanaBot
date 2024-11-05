@@ -78,7 +78,9 @@ async function main() {
     program
         .command('generate')
         .alias('g')
-        .description('Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.')
+        .description(
+            'Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.'
+        )
         .argument('<count>', 'Number of wallets to generate', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
@@ -124,27 +126,32 @@ async function main() {
         .alias('w')
         .description('Warmup the accounts with the tokens')
         .option('-f, --from <value>', 'Warmup starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Warmup ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-m, --min <value>', 'Minimum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 1) throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
+            if (parsed_value < 1)
+                throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
             return parsed_value;
         })
         .option('-M, --max <value>', 'Maximum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 1 || parsed_value > 50) throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50');
+            if (parsed_value < 1 || parsed_value > 50)
+                throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50');
             return parsed_value;
         })
         .addOption(
@@ -167,15 +174,18 @@ async function main() {
             return new PublicKey(value);
         })
         .option('-f, --from <value>', 'Colllect starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Collect ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
@@ -198,7 +208,8 @@ async function main() {
             return new PublicKey(value);
         })
         .argument('<buyer_index>', 'Index of the buyer wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const buyer_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!buyer_wallet) throw new InvalidArgumentError('Invalid index.');
             return buyer_wallet.keypair;
@@ -223,7 +234,8 @@ async function main() {
             return new PublicKey(value);
         })
         .argument('<seller_index>', 'Index of the seller wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const seller_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!seller_wallet) throw new InvalidArgumentError('Invalid index.');
             return seller_wallet.keypair;
@@ -231,7 +243,8 @@ async function main() {
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 100.0) throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
+            if (parsed_value < 0.0 || parsed_value > 100.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
             return parsed_value;
         })
         .addOption(
@@ -259,15 +272,18 @@ async function main() {
             return new PublicKey(value);
         })
         .option('-f, --from <value>', 'Buy starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Buy ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .addOption(
@@ -290,21 +306,25 @@ async function main() {
             return new PublicKey(value);
         })
         .option('-f, --from <value>', 'Sell starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Sell ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 100.0) throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
+            if (parsed_value < 0.0 || parsed_value > 100.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
             return parsed_value;
         })
         .addOption(
@@ -333,7 +353,8 @@ async function main() {
             return new PublicKey(value);
         })
         .argument('<sender_index>', 'Index of the sender wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
@@ -356,15 +377,18 @@ async function main() {
             return new PublicKey(value);
         })
         .option('-f, --from <value>', 'Collect starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Collect ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
@@ -384,21 +408,25 @@ async function main() {
             return parsed_value;
         })
         .argument('<sender_index>', 'Index of the sender wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
         })
         .option('-f, --from <value>', 'Topup starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-t, --to <value>', 'Topup ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
         .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-s, --spider', 'Topup the account using the spider')
@@ -439,7 +467,8 @@ async function main() {
         })
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
         .argument('<creator_index>', 'Index of the creator wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
             return creator_wallet.keypair;
@@ -460,7 +489,8 @@ async function main() {
         .description('Create a token')
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
         .argument('<creator_index>', 'Index to the creator wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
             return creator_wallet;
@@ -505,7 +535,8 @@ async function main() {
             return new PublicKey(value);
         })
         .argument('<drop_index>', 'Index of the drop wallet', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt)) throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const drop_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!drop_wallet) throw new InvalidArgumentError('Invalid index.');
             return drop_wallet.keypair;

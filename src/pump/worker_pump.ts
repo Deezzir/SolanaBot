@@ -52,7 +52,9 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         } catch (error) {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting balance change, continuing...`);
         }
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`);
+        MESSAGE_BUFFER.push(
+            `[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`
+        );
         return true;
     } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
@@ -77,7 +79,13 @@ const buy = async () => {
         let transactions = [];
         let count = TRADE_ITERATIONS;
         while (count > 0) {
-            const buy_promise = pump.Trader.buy_token(amount, WORKER_KEYPAIR, MINT_METADATA, BUY_SLIPPAGE, trade.PriorityLevel.DEFAULT);
+            const buy_promise = pump.Trader.buy_token(
+                amount,
+                WORKER_KEYPAIR,
+                MINT_METADATA,
+                BUY_SLIPPAGE,
+                trade.PriorityLevel.DEFAULT
+            );
             transactions.push(
                 process_buy_tx(buy_promise, amount).then((result) => {
                     if (result) bought = true;
@@ -117,7 +125,8 @@ const sell = async () => {
                 balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
-                if (get_balance_retry < MAX_RETRIES) MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
+                if (get_balance_retry < MAX_RETRIES)
+                    MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
                 if (get_balance_retry === MAX_RETRIES) {
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
                     sold = true;
@@ -131,7 +140,13 @@ const sell = async () => {
             let count = TRADE_ITERATIONS;
 
             while (count > 0 && balance !== undefined) {
-                const sell_promise = pump.Trader.sell_token(balance, WORKER_KEYPAIR, MINT_METADATA, SELL_SLIPPAGE, trade.PriorityLevel.HIGH);
+                const sell_promise = pump.Trader.sell_token(
+                    balance,
+                    WORKER_KEYPAIR,
+                    MINT_METADATA,
+                    SELL_SLIPPAGE,
+                    trade.PriorityLevel.HIGH
+                );
                 transactions.push(
                     process_sell_tx(sell_promise, balance).then((result) => {
                         if (result) sold = true;
@@ -236,7 +251,9 @@ async function main() {
                 MINT_METADATA = msg.data;
                 break;
             default:
-                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Unknown command from the main thread: ${msg.command}`);
+                parentPort?.postMessage(
+                    `[Worker ${WORKER_CONF.id}] Unknown command from the main thread: ${msg.command}`
+                );
                 break;
         }
     });

@@ -17,11 +17,12 @@ const SELL_SLIPPAGE = 0.5;
 const BUY_SLIPPAGE = 0.1;
 
 export async function clean(wallets: common.Wallet[]): Promise<void> {
-    common.log('Cleaning all the accounts...\n');
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
+    common.log('Cleaning all the accounts...\n');
 
     let unsold_set: string[] = [];
 
@@ -105,7 +106,12 @@ export async function create_token(
     }
 }
 
-export async function promote(times: number, cid: string, creator: Keypair, program: common.Program = common.Program.Pump): Promise<void> {
+export async function promote(
+    times: number,
+    cid: string,
+    creator: Keypair,
+    program: common.Program = common.Program.Pump
+): Promise<void> {
     common.log(`Promoting ${times} accounts with CID ${cid}...\n`);
 
     let meta: common.IPFSMetadata;
@@ -155,6 +161,11 @@ export async function promote(times: number, cid: string, creator: Keypair, prog
 }
 
 export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
+    if (wallets.length === 0) {
+        common.error('[ERROR] No keys available.');
+        return;
+    }
+
     try {
         common.log(`Getting the token balance of the keys by the mint ${mint.toString()}...`);
         common.log(`Bot count: ${wallets.length}\n`);
@@ -162,17 +173,15 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
         const { token_name, token_symbol } = await trade.get_token_meta(mint);
         const { supply, decimals } = await trade.get_token_supply(mint);
         const supply_num = parseInt(supply.toString());
-        common.log(`Token: '${token_name}' | Symbol: '$${token_symbol}'\n`);
+        common.log(`Token: ${token_name} | Symbol: $${token_symbol}\n`);
 
-        if (wallets.length === 0) {
-            common.error('[ERROR] No keys available.');
-            return;
-        }
-
-        common.log(
-            `${'Id'.padEnd(4, ' ')} | ${'Name'.padEnd(11, ' ')} | ${'Public Key'.padEnd(44, ' ')} | ${'Allocation'.padEnd(10, ' ')} | ${`$${token_symbol} Balance`.padStart(18, ' ')}`
-        );
-        common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(12)}|${'-'.repeat(19)}`);
+        common.print_header([
+            { title: 'Id', width: common.COLUMN_WIDTHS.id },
+            { title: 'Name', width: common.COLUMN_WIDTHS.name },
+            { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
+            { title: 'Allocation', width: common.COLUMN_WIDTHS.allocation, align: 'right' },
+            { title: `$${token_symbol} Balance`, width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' }
+        ]);
 
         let total = 0;
         for (const wallet of wallets) {
@@ -180,16 +189,30 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
             const ui_balance = balance.uiAmount || 0;
             if (ui_balance === 0) continue;
 
-            const key_alloc = (ui_balance / (supply_num / 10 ** decimals)) * 100;
+            const alloc = (ui_balance / (supply_num / 10 ** decimals)) * 100;
             total += ui_balance;
-            common.log(
-                `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${key_alloc.toFixed(2).padStart(9, ' ')}% | ${ui_balance.toFixed(2).padStart(18, ' ')}`
-            );
+
+            common.print_row([
+                { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
+                { content: wallet.name, width: common.COLUMN_WIDTHS.name },
+                { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
+                { content: `${alloc.toFixed(2)}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
+                { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' }
+            ]);
         }
+
+        common.print_footer([
+            { width: common.COLUMN_WIDTHS.id },
+            { width: common.COLUMN_WIDTHS.name },
+            { width: common.COLUMN_WIDTHS.publicKey },
+            { width: common.COLUMN_WIDTHS.allocation },
+            { width: common.COLUMN_WIDTHS.tokenBalance }
+        ]);
+
         const allocation = (total / (supply_num / 10 ** decimals)) * 100;
 
         common.log(`\nTotal balance: ${total} ${token_symbol}`);
-        common.log(`Total allocation: ${allocation.toFixed(2)}%`);
+        common.log(`Total allocation: ${allocation.toFixed(2)}%\n`);
     } catch (error) {
         common.error(`[ERROR] ${error}`);
     }
@@ -215,27 +238,50 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
 }
 
 export async function balance(wallets: common.Wallet[]): Promise<void> {
-    common.log('Getting the balance of the keys...');
-    common.log(`Bot count: ${wallets.length}\n`);
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
     let total = 0;
-    common.log(`${'Id'.padEnd(4, ' ')} | ${'Name'.padEnd(11, ' ')} | ${'Public Key'.padEnd(44, ' ')} | SOL Balance`);
-    common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(14)}`);
+    common.log('Getting the balance of the keys...');
+    common.log(`Bot count: ${wallets.length}\n`);
+
+    common.print_header([
+        { title: 'Id', width: common.COLUMN_WIDTHS.id },
+        { title: 'Name', width: common.COLUMN_WIDTHS.name },
+        { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
+        { title: 'SOL Balance', width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
+    ]);
+
     for (const wallet of wallets) {
         const balance = (await trade.get_balance(wallet.keypair.publicKey)) / LAMPORTS_PER_SOL;
         total += balance;
-        common.log(
-            `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${balance.toFixed(9).padStart(13, ' ')} ${wallet.is_reserve ? '| (Reserve)' : ''}`
-        );
+
+        common.print_row([
+            { content: wallet.id.toString().concat(wallet.is_reserve ? '*' : ''), width: common.COLUMN_WIDTHS.id },
+            { content: wallet.name, width: common.COLUMN_WIDTHS.name },
+            { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
+            { content: balance.toFixed(9), width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
+        ]);
     }
 
-    common.log(`\nTotal balance: ${total} SOL`);
+    common.print_footer([
+        { width: common.COLUMN_WIDTHS.id },
+        { width: common.COLUMN_WIDTHS.name },
+        { width: common.COLUMN_WIDTHS.publicKey },
+        { width: common.COLUMN_WIDTHS.solBalance }
+    ]);
+
+    common.log(`\nTotal balance: ${total} SOL\n`);
 }
 
-export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?: number, program: common.Program = common.Program.Pump): Promise<void> {
+export async function sell_token_once(
+    mint: PublicKey,
+    seller: Keypair,
+    percent?: number,
+    program: common.Program = common.Program.Pump
+): Promise<void> {
     const PERCENT = percent || 100.0;
     common.log(`Selling the token by the mint ${mint.toString()}...`);
     common.log(`Selling ${PERCENT}% of the tokens...`);
@@ -248,7 +294,9 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
     }
     const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
 
-    common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`);
+    common.log(
+        `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`
+    );
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
     let trader: trade.IProgramTrader;
@@ -281,7 +329,12 @@ export async function sell_token_once(mint: PublicKey, seller: Keypair, percent?
         .catch((error) => common.error(`Transaction failed: ${error.message}`));
 }
 
-export async function buy_token_once(amount: number, mint: PublicKey, buyer: Keypair, program: common.Program = common.Program.Pump): Promise<void> {
+export async function buy_token_once(
+    amount: number,
+    mint: PublicKey,
+    buyer: Keypair,
+    program: common.Program = common.Program.Pump
+): Promise<void> {
     common.log(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`);
 
     try {
@@ -327,7 +380,12 @@ export async function buy_token_once(amount: number, mint: PublicKey, buyer: Key
         .catch((error) => common.error(`Transaction failed: ${error.message}`));
 }
 
-export async function warmup(wallets: common.Wallet[], program: common.Program = common.Program.Pump, min?: number, max?: number): Promise<void> {
+export async function warmup(
+    wallets: common.Wallet[],
+    program: common.Program = common.Program.Pump,
+    min?: number,
+    max?: number
+): Promise<void> {
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
@@ -376,7 +434,9 @@ export async function warmup(wallets: common.Wallet[], program: common.Program =
             await common.sleep(2000);
         }
 
-        common.log(`Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`);
+        common.log(
+            `Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
+        );
         for (const mint of mints) {
             const mint_printer = trader.get_meta_printer(mint);
             let amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
@@ -409,7 +469,9 @@ export async function warmup(wallets: common.Wallet[], program: common.Program =
                 try {
                     const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_printer.mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                        common.log(`No tokens yet to sell for ${wallet.name} and mint ${mint_printer.mint}, waiting...`);
+                        common.log(
+                            `No tokens yet to sell for ${wallet.name} and mint ${mint_printer.mint}, waiting...`
+                        );
                         sell_attempts--;
                         continue;
                     }
@@ -426,13 +488,13 @@ export async function warmup(wallets: common.Wallet[], program: common.Program =
 }
 
 export async function collect(wallets: common.Wallet[], receiver: PublicKey): Promise<void> {
-    common.log(`Collecting all the SOL from the accounts to ${receiver}...`);
-    common.log(`Receiver address: ${receiver.toString()}\n`);
-
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
+    common.log(`Collecting all the SOL from the accounts to ${receiver}...`);
+    common.log(`Receiver address: ${receiver.toString()}\n`);
 
     const transactions = [];
 
@@ -441,7 +503,9 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
         const amount = await trade.get_balance(sender.publicKey);
         if (amount === 0 || receiver.equals(sender.publicKey)) continue;
 
-        common.log(`Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+        common.log(
+            `Collecting ${amount / LAMPORTS_PER_SOL} SOL from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+        );
         transactions.push(
             trade
                 .send_lamports(amount, sender, receiver, trade.PriorityLevel.VERY_HIGH)
@@ -456,12 +520,12 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
 }
 
 export async function collect_token(wallets: common.Wallet[], mint: PublicKey, receiver: PublicKey): Promise<void> {
-    common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
-
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
+    common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
 
     try {
         const receiver_assoc_addr = await trade.create_assoc_token_account(wallets[0].keypair, receiver, mint);
@@ -473,14 +537,24 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
             const token_amount = await trade.get_token_balance(sender.publicKey, mint);
             const token_amount_raw = parseInt(token_amount.amount);
 
-            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount || sender.publicKey.equals(receiver)) continue;
+            if (
+                !token_amount ||
+                token_amount.uiAmount === 0 ||
+                !token_amount.uiAmount ||
+                sender.publicKey.equals(receiver)
+            )
+                continue;
             const sender_assoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
 
-            common.log(`Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+            common.log(
+                `Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            );
             transactions.push(
                 trade
                     .send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender)
-                    .then((signature) => common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                    .then((signature) =>
+                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                    )
                     .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
             );
 
@@ -493,14 +567,19 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
     }
 }
 
-export async function buy_token(wallets: common.Wallet[], amount: number, mint: PublicKey, program: common.Program = common.Program.Pump): Promise<void> {
-    common.log(`Buying the tokens from the accounts by the mint ${mint.toString()}...`);
-    common.log(`Buying ${amount} SOL of the token...\n`);
-
+export async function buy_token(
+    wallets: common.Wallet[],
+    amount: number,
+    mint: PublicKey,
+    program: common.Program = common.Program.Pump
+): Promise<void> {
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
+    common.log(`Buying the tokens from the accounts by the mint ${mint.toString()}...`);
+    common.log(`Buying ${amount} SOL of the token...\n`);
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
     let trader: trade.IProgramTrader;
@@ -536,12 +615,16 @@ export async function buy_token(wallets: common.Wallet[], amount: number, mint: 
             const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
             if (balance < amount) continue;
 
-            common.log(`Buying ${amount} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+            common.log(
+                `Buying ${amount} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            );
 
             transactions.push(
                 trader
                     .buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
-                    .then((signature) => common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                    .then((signature) =>
+                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                    )
                     .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
             );
 
@@ -554,15 +637,20 @@ export async function buy_token(wallets: common.Wallet[], amount: number, mint: 
     await Promise.allSettled(transactions);
 }
 
-export async function sell_token(wallets: common.Wallet[], mint: PublicKey, program: common.Program = common.Program.Pump, percent?: number): Promise<void> {
-    const PERCENT = percent || 100.0;
-    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
-    common.log(`Selling ${PERCENT}% of the tokens...\n`);
-
+export async function sell_token(
+    wallets: common.Wallet[],
+    mint: PublicKey,
+    program: common.Program = common.Program.Pump,
+    percent?: number
+): Promise<void> {
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
     }
+
+    const PERCENT = percent || 100.0;
+    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
+    common.log(`Selling ${PERCENT}% of the tokens...\n`);
 
     let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
     let trader: trade.IProgramTrader;
@@ -599,12 +687,16 @@ export async function sell_token(wallets: common.Wallet[], mint: PublicKey, prog
 
             const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
 
-            common.log(`Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+            common.log(
+                `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            );
 
             transactions.push(
                 trader
                     .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
-                    .then((signature) => common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                    .then((signature) =>
+                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                    )
                     .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
             );
             // await common.sleep(INTERVAL);
@@ -616,7 +708,12 @@ export async function sell_token(wallets: common.Wallet[], mint: PublicKey, prog
     await Promise.allSettled(transactions);
 }
 
-export async function topup(wallets: common.Wallet[], amount: number, sender: Keypair, is_spider: boolean): Promise<void> {
+export async function topup(
+    wallets: common.Wallet[],
+    amount: number,
+    sender: Keypair,
+    is_spider: boolean
+): Promise<void> {
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
@@ -648,7 +745,9 @@ export async function topup(wallets: common.Wallet[], amount: number, sender: Ke
             transactions.push(
                 trade
                     .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, trade.PriorityLevel.VERY_HIGH)
-                    .then((signature) => common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                    .then((signature) =>
+                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                    )
                     .catch((error) => {
                         common.error(`Transaction failed for ${wallet.name}: ${error.message}`);
                         failed.push(wallet.name);
@@ -672,7 +771,11 @@ export async function topup(wallets: common.Wallet[], amount: number, sender: Ke
     }
 }
 
-export async function start(wallets: common.Wallet[], bot_config: snipe.BotConfig, program: common.Program = common.Program.Pump): Promise<void> {
+export async function start(
+    wallets: common.Wallet[],
+    bot_config: snipe.BotConfig,
+    program: common.Program = common.Program.Pump
+): Promise<void> {
     if (wallets.length === 0) {
         common.error('[ERROR] No keys available.');
         return;
@@ -725,7 +828,8 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
             }
         });
     } else {
-        for (let i = 0; i < count; i++) wallets.push({ keypair: Keypair.generate(), name: `wallet[${i + starting_index}]`, is_reserve: false });
+        for (let i = 0; i < count; i++)
+            wallets.push({ keypair: Keypair.generate(), name: `wallet[${i + starting_index}]`, is_reserve: false });
     }
 
     if (reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
@@ -734,7 +838,9 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     writeStream.write(common.KEYS_FILE_HEADERS.join(',') + '\n');
     wallets.forEach((wallet) => {
         if (wallet.name && wallet.is_reserve && wallet.keypair) {
-            const row = [wallet.name, JSON.stringify(Array.from(wallet.keypair.secretKey)), wallet.is_reserve].join(',');
+            const row = [wallet.name, JSON.stringify(Array.from(wallet.keypair.secretKey)), wallet.is_reserve].join(
+                ','
+            );
             writeStream.write(row + '\n');
         }
     });
@@ -742,7 +848,12 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     common.log('Wallet generation completed');
 }
 
-export async function benchmark(NUM_REQUESTS: number, test_public_key: string, batch_size = 10, update_interval = 10): Promise<void> {
+export async function benchmark(
+    NUM_REQUESTS: number,
+    test_public_key: string,
+    batch_size = 10,
+    update_interval = 10
+): Promise<void> {
     const public_key = new PublicKey(test_public_key);
     const limit = pLimit(batch_size);
 

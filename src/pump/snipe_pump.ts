@@ -50,9 +50,13 @@ export class Runner extends snipe.SniperBase {
                 socket.prependAny(async (event, ...obj) => {
                     if (event !== 'newCoinCreated') return;
                     const data_raw = obj[0];
-                    if (!data_raw || !data_raw.data || !data_raw.data.subscribe || !data_raw.data.subscribe.data) return;
+                    if (!data_raw || !data_raw.data || !data_raw.data.subscribe || !data_raw.data.subscribe.data)
+                        return;
                     const token_meta = JSON.parse(data_raw.data.subscribe.data).payload as PumpTokenMeta;
-                    if (token_meta.name.toLowerCase() === token_name.toLowerCase() && token_meta.symbol.toLowerCase() === ticker.toLocaleLowerCase()) {
+                    if (
+                        token_meta.name.toLowerCase() === token_name.toLowerCase() &&
+                        token_meta.symbol.toLowerCase() === ticker.toLocaleLowerCase()
+                    ) {
                         this._logs_stop_func = null;
                         await this.wait_drop_unsub();
                         common.log(`[Main Worker] Found the mint using Websocket`);
@@ -89,8 +93,12 @@ export class Runner extends snipe.SniperBase {
                                         const partial = instruction as PartiallyDecodedInstruction;
                                         const [meta, bytes_read] = trade.decode_metaplex_instr(partial.data);
                                         if (bytes_read <= 0) continue;
-                                        if (meta.data.name.toLowerCase() === name.toLowerCase() && meta.data.symbol.toLowerCase() === ticker.toLowerCase()) {
-                                            if (tx.meta.postTokenBalances[0].mint) mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
+                                        if (
+                                            meta.data.name.toLowerCase() === name.toLowerCase() &&
+                                            meta.data.symbol.toLowerCase() === ticker.toLowerCase()
+                                        ) {
+                                            if (tx.meta.postTokenBalances[0].mint)
+                                                mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
                                             else mint = partial.accounts[1];
                                         }
                                     }
