@@ -310,10 +310,10 @@ export function read_bool(buf: Buffer, offset: number, length: number): boolean 
 }
 
 export const COLUMN_WIDTHS = {
-    id: 4,
-    name: 11,
+    id: 5,
+    name: 12,
     publicKey: 44,
-    solBalance: 13,
+    solBalance: 14,
     allocation: 10,
     tokenBalance: 18
 };
@@ -327,8 +327,14 @@ const BORDER_CHARS = {
     vertical: '│',
     middle: '┼',
     topMiddle: '┬',
-    bottomMiddle: '┴'
+    bottomMiddle: '┴',
+    horizontalLeft: '├',
+    horizontalRight: '┤'
 };
+
+export function format_name(name: string): string {
+    return name.length > COLUMN_WIDTHS.name ? name.slice(0, COLUMN_WIDTHS.name - 3) + '...' : name;
+}
 
 function format_column(content: string, width: number, align: 'left' | 'right' = 'left'): string {
     if (align === 'left') {
@@ -348,7 +354,7 @@ export function print_header(columns: { title: string; width: number; align?: 'l
 
     log(`${BORDER_CHARS.topLeft}${top_border}${BORDER_CHARS.topRight}`);
     log(`${BORDER_CHARS.vertical}${header}${BORDER_CHARS.vertical}`);
-    log(`${BORDER_CHARS.vertical}${separator}${BORDER_CHARS.vertical}`);
+    log(`${BORDER_CHARS.horizontalLeft}${separator}${BORDER_CHARS.horizontalRight}`);
 }
 
 export function print_row(columns: { content: string; width: number; align?: 'left' | 'right' }[]) {

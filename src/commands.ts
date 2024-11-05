@@ -194,7 +194,7 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
 
             common.print_row([
                 { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
-                { content: wallet.name, width: common.COLUMN_WIDTHS.name },
+                { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
                 { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
                 { content: `${alloc.toFixed(2)}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
                 { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' }
@@ -260,7 +260,7 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
 
         common.print_row([
             { content: wallet.id.toString().concat(wallet.is_reserve ? '*' : ''), width: common.COLUMN_WIDTHS.id },
-            { content: wallet.name, width: common.COLUMN_WIDTHS.name },
+            { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
             { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
             { content: balance.toFixed(9), width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
         ]);

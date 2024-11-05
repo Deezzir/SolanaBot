@@ -44,6 +44,8 @@ enum Method {
     Snipe = 1
 }
 
+type WorkerMessage = 'stop' | 'buy' | 'mint' | 'sell';
+
 const MethodStrings = ['Wait', 'Snipe'];
 export interface ISniper {
     workers: WorkerJob[];
@@ -124,7 +126,7 @@ export abstract class SniperBase implements ISniper {
         }
     }
 
-    protected async workers_post_message(message: string, data: any = {}): Promise<void> {
+    protected async workers_post_message(message: WorkerMessage, data: any = {}): Promise<void> {
         if (message === 'stop') await this.wait_drop_unsub();
         if (message === 'buy') {
             for (const worker of this.workers) {
