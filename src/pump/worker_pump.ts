@@ -89,7 +89,7 @@ const buy = async () => {
         }
         await Promise.allSettled(transactions);
 
-        CURRENT_BUY_AMOUNT = (WORKER_CONF.inputs.spend_limit - CURRENT_SPENDINGS) * 0.95;
+        CURRENT_BUY_AMOUNT = (WORKER_CONF.spend_limit - CURRENT_SPENDINGS) * 0.95;
     }
 };
 
@@ -150,8 +150,8 @@ const sell = async () => {
 
 const control_loop = async () =>
     new Promise<void>(async (resolve) => {
-        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.inputs.mcap_threshold;
-        const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.inputs.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
+        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.mcap_threshold;
+        const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
         const process = async () => {
             if (should_sell()) {
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
@@ -161,7 +161,7 @@ const control_loop = async () =>
 
             if (should_buy()) {
                 await buy();
-                if (WORKER_CONF.inputs.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.inputs.spend_limit;
+                if (WORKER_CONF.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.spend_limit;
             } else {
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
             }
@@ -176,7 +176,7 @@ const control_loop = async () =>
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Mint metadata not available`);
             }
 
-            const sleep_for = common.normal_random(WORKER_CONF.inputs.buy_interval, 0.5 * WORKER_CONF.inputs.buy_interval);
+            const sleep_for = common.normal_random(WORKER_CONF.buy_interval, 0.5 * WORKER_CONF.buy_interval);
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
             parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
 
@@ -196,8 +196,8 @@ const control_loop = async () =>
 
 async function main() {
     const balance = (await trade.get_balance(WORKER_KEYPAIR.publicKey)) / LAMPORTS_PER_SOL;
-    const adjusted_spend_limit = Math.min(balance, WORKER_CONF.inputs.spend_limit) - MIN_BALANCE_THRESHOLD;
-    WORKER_CONF.inputs.spend_limit = adjusted_spend_limit;
+    const adjusted_spend_limit = Math.min(balance, WORKER_CONF.spend_limit) - MIN_BALANCE_THRESHOLD;
+    WORKER_CONF.spend_limit = adjusted_spend_limit;
 
     parentPort?.postMessage({
         command: 'started',
@@ -207,10 +207,10 @@ async function main() {
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
             case `buy${WORKER_CONF.id}`:
-                const std = WORKER_CONF.inputs.start_buy * 0.05;
-                CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.inputs.start_buy, std);
+                const std = WORKER_CONF.start_buy * 0.05;
+                CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.start_buy, std);
 
-                if (CURRENT_BUY_AMOUNT > WORKER_CONF.inputs.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.inputs.spend_limit;
+                if (CURRENT_BUY_AMOUNT > WORKER_CONF.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.spend_limit;
                 if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
 
                 await control_loop();

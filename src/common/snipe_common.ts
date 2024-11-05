@@ -26,7 +26,11 @@ export type BotConfig = {
 export type WorkerConfig = {
     secret: Uint8Array;
     id: number;
-    inputs: BotConfig;
+    buy_interval: number;
+    spend_limit: number;
+    start_buy: number;
+    mcap_threshold: number;
+    is_buy_once: boolean;
 };
 
 type WorkerJob = {
@@ -164,7 +168,11 @@ export abstract class SniperBase implements ISniper {
             const data: WorkerConfig = {
                 secret: wallet.keypair.secretKey,
                 id: wallet.id,
-                inputs: this.bot_config
+                buy_interval: this.bot_config.buy_interval,
+                spend_limit: this.bot_config.spend_limit,
+                start_buy: this.bot_config.start_buy,
+                mcap_threshold: this.bot_config.mcap_threshold,
+                is_buy_once: this.bot_config.is_buy_once
             };
 
             const worker = new Worker(this.get_worker_path(), {
@@ -324,7 +332,7 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 name: 'start_interval',
                 message: 'Enter the start interval in seconds:',
                 default: 0,
-                validate: (value) => (value && value >= 0 ? true : 'Please enter a valid number greater than or equal to 0.')
+                validate: (value) => (!value || (value && value >= 0) ? true : 'Please enter a valid number greater than or equal to 0.')
             },
             {
                 type: 'input',

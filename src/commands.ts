@@ -169,8 +169,10 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
             return;
         }
 
-        common.log(`${'Id'.padEnd(4, ' ')} | ${'Name'.padEnd(11, ' ')} | ${'Public Key'.padEnd(44, ' ')} | ${'Allocation'.padEnd(16, ' ')} | Token Balance`);
-        common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(18)}|${'-'.repeat(16)}`);
+        common.log(
+            `${'Id'.padEnd(4, ' ')} | ${'Name'.padEnd(11, ' ')} | ${'Public Key'.padEnd(44, ' ')} | ${'Allocation'.padEnd(10, ' ')} | ${`$${token_symbol} Balance`.padStart(18, ' ')}`
+        );
+        common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(12)}|${'-'.repeat(19)}`);
 
         let total = 0;
         for (const wallet of wallets) {
@@ -181,7 +183,7 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
             const key_alloc = (ui_balance / (supply_num / 10 ** decimals)) * 100;
             total += ui_balance;
             common.log(
-                `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${key_alloc.toFixed(2).padEnd(16, ' ')}% | ${ui_balance.toFixed(2)} ${token_symbol}`
+                `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${key_alloc.toFixed(2).padStart(9, ' ')}% | ${ui_balance.toFixed(2).padStart(18, ' ')}`
             );
         }
         const allocation = (total / (supply_num / 10 ** decimals)) * 100;
@@ -221,12 +223,12 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
     }
     let total = 0;
     common.log(`${'Id'.padEnd(4, ' ')} | ${'Name'.padEnd(11, ' ')} | ${'Public Key'.padEnd(44, ' ')} | SOL Balance`);
-    common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(16)}`);
+    common.log(`${'-'.repeat(5)}|${'-'.repeat(13)}|${'-'.repeat(46)}|${'-'.repeat(14)}`);
     for (const wallet of wallets) {
         const balance = (await trade.get_balance(wallet.keypair.publicKey)) / LAMPORTS_PER_SOL;
         total += balance;
         common.log(
-            `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${balance.toFixed(9)} SOL ${wallet.is_reserve ? '| (Reserve)' : ''}`
+            `${wallet.id.toString().padEnd(4, ' ')} | ${wallet.name.padEnd(11, ' ')} | ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} | ${balance.toFixed(9).padStart(13, ' ')} ${wallet.is_reserve ? '| (Reserve)' : ''}`
         );
     }
 
@@ -609,9 +611,9 @@ export async function sell_token(wallets: common.Wallet[], mint: PublicKey, prog
         } catch (error) {
             common.error(`[ERROR] ${error}`);
         }
-
-        await Promise.allSettled(transactions);
     }
+
+    await Promise.allSettled(transactions);
 }
 
 export async function topup(wallets: common.Wallet[], amount: number, sender: Keypair, is_spider: boolean): Promise<void> {
