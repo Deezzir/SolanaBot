@@ -23,5 +23,5 @@
     - Determine all buy txs(Pump, Ray, Moonshot?)
     - Using a mint from each buy tx, find every sell tx(may be multiple)
     - Determine gains in %
-    - Calculate average on all buy/sell gain pairs(or other metric?)
+    - Calculate average on all buy/sell gain pairs(or other aggregate?)
     - Maybe other metrics can be added(to discuss)
