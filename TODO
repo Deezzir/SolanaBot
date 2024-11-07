@@ -2,7 +2,6 @@
 
 - Test 3.0.0 changes
 
-- Remove WS token sniping (doesn't work as before)
 - Do random buy for the `buy-once` and `buy` commands
   - Use uniform random and min/max options for the commands
 - Add sell by percent to start/snipe command
