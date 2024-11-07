@@ -215,7 +215,7 @@ export async function wait_drop_sub(token_name: string, token_ticker: string): P
             if (err) return;
             if (logs && logs.includes('Program log: Instruction: Create')) {
                 try {
-                    const tx = await global.CONNECTION.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+                    const tx = await global.CONNECTION.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
                     if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
 
                     const inner_instructions = tx.meta.innerInstructions;
