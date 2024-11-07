@@ -16,4 +16,4 @@
     - Detect if the curve is complete(run onLogs in bg to check if `init` instruction occured)
     - Subscribe to Raydium AMM to detect migration(done by prev step)
     - Update metadata `raydium_pool` for the trade commands
-    - Switch price monitoring to another source(some RPC API?)
+    - Switch price monitoring to another source(some RPC API or direct blockchain monitoring using Ray AMM)
