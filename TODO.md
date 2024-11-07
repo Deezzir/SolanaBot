@@ -14,14 +14,14 @@
   - Logic?:
     - Update and monitor price coming from Pump
     - Detect if the curve is complete(run onLogs in bg to check if `init` instruction occured)
-    - Subscribe to Raydium AMM to detect migration(done by prev step)
+    - Subscribe to Raydium AMM to detect migration (done by prev step)
     - Update metadata `raydium_pool` for the trade commands
-    - Switch price monitoring to another source(some RPC API or direct blockchain monitoring using Ray AMM)
-- Wallet win rate(new command?)
+    - Switch price monitoring to another source (some RPC API or direct blockchain monitoring using Ray AMM)
+- Wallet win rate (new command?)
   - Logic?
-    - Get all txs from a wallet pub key(multiple reqs)
+    - Get all txs from a wallet pub key (multiple reqs)
     - Determine all buy txs(Pump, Ray, Moonshot?)
-    - Using a mint from each buy tx, find every sell tx(may be multiple)
+    - Using a mint from each buy tx, find every sell tx (may be multiple)
     - Determine gains in %
-    - Calculate average on all buy/sell gain pairs(or other aggregate?)
-    - Maybe other metrics can be added(to discuss)
+    - Calculate average on all buy/sell gain pairs (or other aggregate?)
+    - Maybe other metrics can be added (to discuss)
