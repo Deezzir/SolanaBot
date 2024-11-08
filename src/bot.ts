@@ -23,6 +23,10 @@ function reserve_wallet_preaction(wallets: common.Wallet[]) {
     }
 }
 
+function error_color(str: string) {
+    return `\x1b[31m${str}\x1b[0m`;
+}
+
 async function main() {
     const wallets = await common.get_wallets(common.WALLETS_FILE);
     const wallet_cnt = wallets.length;
@@ -43,9 +47,16 @@ async function main() {
 
     const program = new Command();
 
-    common.log(figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
+    program.version('3.1.0').description('Solana Bot CLI');
 
-    program.version('3.0.0').description('Solana Bot CLI');
+    program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
+    program.showHelpAfterError('Use --help for additional information');
+
+    program.configureOutput({
+        writeOut: (str) => process.stdout.write(str),
+        writeErr: (str) => process.stderr.write(str),
+        outputError: (str, write) => write(error_color(str))
+    });
 
     program
         .command('start')
@@ -100,7 +111,7 @@ async function main() {
             return parseInt(value, 10);
         })
         .option('-r, --reserve', 'Generate the reserve wallet', false)
-        .action((count, name, options) => {
+        .action(async (count, name, options) => {
             let { keys_path, index, reserve } = options;
             commands.generate(count, name, reserve, keys_path, index);
         });
@@ -109,7 +120,7 @@ async function main() {
         .command('balance')
         .alias('b')
         .description('Get the balance of the accounts')
-        .action(() => commands.balance(wallets));
+        .action(async () => await commands.balance(wallets));
 
     program
         .command('spl-balance')
@@ -119,7 +130,7 @@ async function main() {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .action((mint) => commands.spl_balance(wallets, mint));
+        .action(async (mint) => await commands.spl_balance(wallets, mint));
 
     program
         .command('warmup')
@@ -160,9 +171,9 @@ async function main() {
                 .default(common.Program.Pump, common.Program.Pump)
         )
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((options) => {
+        .action(async (options) => {
             const { from, to, list, min, max, program } = options;
-            commands.warmup(common.filter_wallets(wallets, from, to, list), program, min, max);
+            await commands.warmup(common.filter_wallets(wallets, from, to, list), program, min, max);
         });
 
     program
@@ -189,9 +200,9 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((receiver, options) => {
+        .action(async (receiver, options) => {
             const { from, to, list } = options;
-            commands.collect(common.filter_wallets(wallets, from, to, list), receiver);
+            await commands.collect(common.filter_wallets(wallets, from, to, list), receiver);
         });
 
     program
@@ -220,9 +231,9 @@ async function main() {
                 .default(common.Program.Pump, common.Program.Pump)
         )
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((amount, mint, buyer, options) => {
+        .action(async (amount, mint, buyer, options) => {
             const { program } = options;
-            commands.buy_token_once(amount, mint, buyer, program);
+            await commands.buy_token_once(amount, mint, buyer, program);
         });
 
     program
@@ -253,23 +264,37 @@ async function main() {
                 .default(common.Program.Pump, common.Program.Pump)
         )
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((mint, seller, options) => {
+        .action(async (mint, seller, options) => {
             const { percent, program } = options;
-            commands.sell_token_once(mint, seller, percent, program);
+            await commands.sell_token_once(mint, seller, percent, program);
         });
 
     program
         .command('spl-buy')
         .alias('bt')
         .description('Buy the token by the mint from the accounts')
-        .argument('<amount>', 'Amount to buy in SOL', (value) => {
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .option('-a --amount <amount>', 'Amount to buy in SOL', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             return parsed_value;
         })
-        .argument('<mint>', 'Public address of the mint', (value) => {
-            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
-            return new PublicKey(value);
+        .option('-m, --min <value>', 'Minimum amount for random buy in SOL', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value <= 0.0)
+                throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
+            return parsed_value;
+        })
+        .option('-M, --max <value>', 'Maximum amount for random buy in SOL', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value <= 0.0)
+                throw new InvalidOptionArgumentError('Invalid maximum amount. Must be greater than 0.0.');
+            return parsed_value;
         })
         .option('-f, --from <value>', 'Buy starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
@@ -292,9 +317,9 @@ async function main() {
                 .default(common.Program.Pump, common.Program.Pump)
         )
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((amount, mint, options) => {
-            const { from, to, list, program } = options;
-            commands.buy_token(common.filter_wallets(wallets, from, to, list), amount, mint, program);
+        .action(async (mint, options) => {
+            const { amount, min, max, from, to, list, program } = options;
+            await commands.buy_token(common.filter_wallets(wallets, from, to, list), mint, program, amount, min, max);
         });
 
     program
@@ -333,9 +358,9 @@ async function main() {
                 .default(common.Program.Pump, common.Program.Pump)
         )
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((mint, options) => {
+        .action(async (mint, options) => {
             const { from, to, list, percent, program } = options;
-            commands.sell_token(common.filter_wallets(wallets, from, to, list), mint, program, percent);
+            await commands.sell_token(common.filter_wallets(wallets, from, to, list), mint, program, percent);
         });
 
     program
@@ -360,8 +385,8 @@ async function main() {
             return sender_wallet.keypair;
         })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((amount, receiver, sender) => {
-            commands.transfer_sol(amount, receiver, sender);
+        .action(async (amount, receiver, sender) => {
+            await commands.transfer_sol(amount, receiver, sender);
         });
 
     program
@@ -392,9 +417,9 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((mint, receiver, options) => {
+        .action(async (mint, receiver, options) => {
             const { from, to, list } = options;
-            commands.collect_token(common.filter_wallets(wallets, from, to, list), mint, receiver);
+            await commands.collect_token(common.filter_wallets(wallets, from, to, list), mint, receiver);
         });
 
     program
@@ -431,9 +456,9 @@ async function main() {
         })
         .option('-s, --spider', 'Topup the account using the spider')
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action((amount, sender, options) => {
+        .action(async (amount, sender, options) => {
             const { from, to, list, spider } = options;
-            commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider);
+            await commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider);
         });
 
     program
@@ -478,9 +503,9 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .action((count, cid, creator, options) => {
+        .action(async (count, cid, creator, options) => {
             const { program } = options;
-            commands.promote(count, cid, creator, program);
+            await commands.promote(count, cid, creator, program);
         });
 
     program
@@ -510,15 +535,16 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .action((cid, creator, options) => {
+        .action(async (cid, creator, options) => {
             const { mint, buy, program } = options;
-            commands.create_token(cid, creator, program, buy, mint);
+            await commands.create_token(cid, creator, program, buy, mint);
         });
+
     program
         .command('clean')
         .alias('cl')
         .description('Clean the accounts')
-        .action(() => commands.clean(wallets));
+        .action(async () => await commands.clean(wallets));
 
     program
         .command('drop')
@@ -574,14 +600,22 @@ async function main() {
             if (parsed_value < 1) throw new InvalidOptionArgumentError('Invalid count. Must be greater than 0.');
             return parsed_value;
         })
-        .action((requests, options) => {
+        .action(async (requests, options) => {
             const { thread, interval } = options;
-            commands.benchmark(requests, '7536JKDpY6bGNq3qUcn87CAmwGPA4WcRctzsFDTr9i8N', thread, interval);
+            await commands.benchmark(requests, '7536JKDpY6bGNq3qUcn87CAmwGPA4WcRctzsFDTr9i8N', thread, interval);
         });
 
-    program.parse(process.argv);
-    if (!process.argv.slice(2).length) {
-        program.outputHelp();
+    try {
+        await program.parseAsync(process.argv);
+        if (!process.argv.slice(2).length) {
+            program.outputHelp();
+        }
+    } catch (error) {
+        if (error instanceof Error) {
+            program.error(error.message);
+        } else {
+            program.error(String(error));
+        }
     }
 }
 

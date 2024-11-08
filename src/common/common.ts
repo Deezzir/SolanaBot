@@ -175,6 +175,10 @@ export function normal_random(mean: number, std: number): number {
     return Math.abs(mean + box_muller() * Math.sqrt(std));
 }
 
+export function uniform_random(min: number, max: number): number {
+    return Math.random() * (max - min) + min;
+}
+
 export function read_json(file_path: string): any | undefined {
     try {
         const content = readFileSync(file_path, 'utf8');
@@ -192,7 +196,7 @@ export async function fetch_ipfs_json(cid: string): Promise<any> {
         const data = await response.json();
         return data;
     } catch (error) {
-        throw new Error(`Failed to fetch IPFS JSON: ${error}`);
+        throw new Error(`[ERROR] Failed to fetch IPFS JSON: ${error}`);
     }
 }
 
