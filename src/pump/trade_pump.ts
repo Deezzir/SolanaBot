@@ -217,27 +217,20 @@ export class Trader {
     }
 
     public static async init_mint_meta(mint: PublicKey, sol_price: number): Promise<PumpTokenMeta> {
-        let mint_meta = await this.get_mint_meta(mint.toString());
-        if (mint_meta && mint_meta.usd_market_cap !== undefined) {
-            return mint_meta;
-        } else {
-            common.log(`[Main Worker] No Token Meta data available, using the default values`);
-            const [bonding] = this.calc_token_bonding_curve(mint);
-            const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint, bonding);
-            mint_meta = {
-                mint: mint.toString(),
-                symbol: 'Unknown',
-                raydium_pool: null,
-                bonding_curve: bonding.toString(),
-                associated_bonding_curve: assoc_bonding.toString(),
-                market_cap: 27.958993535,
-                usd_market_cap: 27.958993535 * sol_price,
-                virtual_sol_reserves: BigInt(30000000030),
-                virtual_token_reserves: BigInt(1072999999000001),
-                total_supply: BigInt(1000000000000000)
-            } as Partial<PumpTokenMeta> as PumpTokenMeta;
-            return mint_meta;
-        }
+        const [bonding] = this.calc_token_bonding_curve(mint);
+        const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint, bonding);
+        return {
+            mint: mint.toString(),
+            symbol: 'Unknown',
+            raydium_pool: null,
+            bonding_curve: bonding.toString(),
+            associated_bonding_curve: assoc_bonding.toString(),
+            market_cap: 27.958993535,
+            usd_market_cap: 27.958993535 * sol_price,
+            virtual_sol_reserves: BigInt(30000000030),
+            virtual_token_reserves: BigInt(1072999999000001),
+            total_supply: BigInt(1000000000000000)
+        } as Partial<PumpTokenMeta> as PumpTokenMeta;
     }
 
     public static async update_mint_meta_reserves(

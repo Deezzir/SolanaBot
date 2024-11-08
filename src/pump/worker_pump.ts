@@ -52,9 +52,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         } catch (error) {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting balance change, continuing...`);
         }
-        MESSAGE_BUFFER.push(
-            `[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token '${MINT_METADATA.symbol}'. Signature: ${sig}`
-        );
+        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token. Signature: ${sig}`);
         return true;
     } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
@@ -72,7 +70,7 @@ const buy = async () => {
     MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
 
     const amount = parseFloat((CURRENT_BUY_AMOUNT > 0 ? CURRENT_BUY_AMOUNT : MIN_BUY).toFixed(5));
-    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Buying ${amount} SOL of the token '${MINT_METADATA.symbol}'`);
+    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Buying ${amount} SOL of the token`);
     let bought = false;
 
     while (!IS_DONE && !bought) {
@@ -84,7 +82,7 @@ const buy = async () => {
                 WORKER_KEYPAIR,
                 MINT_METADATA,
                 BUY_SLIPPAGE,
-                trade.PriorityLevel.DEFAULT
+                trade.PriorityLevel.VERY_HIGH
             );
             transactions.push(
                 process_buy_tx(buy_promise, amount).then((result) => {
@@ -139,6 +137,7 @@ const sell = async () => {
             let transactions = [];
             let count = TRADE_ITERATIONS;
 
+            parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Selling ${balance?.uiAmount} tokens`);
             while (count > 0 && balance !== undefined) {
                 const sell_promise = pump.Trader.sell_token(
                     balance,

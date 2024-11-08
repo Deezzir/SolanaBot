@@ -647,7 +647,9 @@ export async function topup(
     const balance = (await trade.get_balance(sender.publicKey)) / LAMPORTS_PER_SOL;
     common.log(`Payer address: ${sender.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
     if (balance < amount * wallets.length) {
-        throw new Error(`[ERROR] Payer balance is not enough to top up ${amount} SOL to every ${wallets.length} wallet`);
+        throw new Error(
+            `[ERROR] Payer balance is not enough to top up ${amount} SOL to every ${wallets.length} wallet`
+        );
     }
 
     if (!is_spider) {
@@ -808,11 +810,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         })

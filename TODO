@@ -2,7 +2,6 @@
 
 - Test 3.0.0 changes
 
-- Remove lag after the `wait_drop_sub`
 - Introduce classes for mint metas
 - Move switch for trader dispatch to a separate func
 - Add sell by percent to start/snipe command
@@ -27,3 +26,4 @@
     - Determine gains in %
     - Calculate average on all buy/sell gain pairs (or other aggregate?)
     - Maybe other metrics can be added (to discuss)
+- Wallet stats, like age, number of bonds and winrate.

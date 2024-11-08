@@ -34,13 +34,14 @@ export class Runner extends snipe.SniperBase {
                 let mint: PublicKey;
                 this._logs_stop_func = () => reject(new Error('User stopped the process'));
                 common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
-                this._subscription_id = global.HELIUS_CONNECTION.connection.onLogs(
+
+                this._subscription_id = global.CONNECTION.onLogs(
                     PUMP_TRADE_PROGRAM_ID,
                     async ({ err, logs, signature }) => {
                         if (err) return;
                         if (logs && logs.includes('Program log: Instruction: Create')) {
                             try {
-                                const tx = await global.HELIUS_CONNECTION.connection.getParsedTransaction(signature, {
+                                const tx = await global.CONNECTION.getParsedTransaction(signature, {
                                     maxSupportedTransactionVersion: 0,
                                     commitment: 'confirmed'
                                 });
