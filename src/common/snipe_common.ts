@@ -94,12 +94,12 @@ export abstract class SniperBase implements ISniper {
                 let mint_meta = await trader.init_mint_meta(this.bot_config.mint, sol_price);
                 this.workers_post_message('mint', mint_meta);
                 const interval = setInterval(async () => {
-                    let updated_mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
-                    if (updated_mint_meta) {
-                        const meta_printer = trader.get_meta_printer(updated_mint_meta);
-                        common.log(`[Main Worker] Current MCAP: $${meta_printer.usd_mc.toFixed(3)}`);
-                        mint_meta = updated_mint_meta;
-                        this.workers_post_message('mint', updated_mint_meta);
+                    try {
+                        mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
+                        common.log(`[Main Worker] Current MCAP: $${mint_meta.token_usd_mc.toFixed(3)}`);
+                        this.workers_post_message('mint', mint_meta);
+                    } catch (err) {
+                        common.error(`[ERROR] ${err}`);
                     }
                 }, META_UPDATE_INTERVAL);
 
@@ -130,11 +130,8 @@ export abstract class SniperBase implements ISniper {
         if (message === 'stop') await this.wait_drop_unsub();
         if (message === 'buy') {
             for (const worker of this.workers) {
-                common.log(`[Main Worker] Sending the buy command to worker ${worker.index}`);
-                worker.worker.postMessage({
-                    command: `buy${worker.index}`,
-                    data
-                });
+                common.log(`[Main Worker] Sending the buy command to worker ${worker.index} `);
+                worker.worker.postMessage({ command: `buy${worker.index}`, data });
                 const start_interval = this.bot_config.start_interval || 0;
                 if (start_interval > 0) {
                     const min_interval = start_interval * 1000;

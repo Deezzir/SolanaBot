@@ -2,12 +2,10 @@
 
 - Test 3.0.0 changes
 
-- Introduce classes for mint metas
-- Move switch for trader dispatch to a separate func
-- Add sell by percent to start/snipe command
 - Reduce log clutter to the start/snipe command
   - Remove waiting logs if `is-buy-once` is true
   - Make MC updates as a one liner
+- Add sell by percent to start/snipe command
 - Detect Raydium migration and change price update strategy
   - Ray Price Calc: [solask](https://solana.stackexchange.com/questions/11939/calculation-of-tocken-price-for-example-sol-usdc)
   - Detection: [codebase](https://github.com/warp-id/solana-trading-bot?tab=readme-ov-file#configuration)

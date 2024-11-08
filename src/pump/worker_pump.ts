@@ -20,7 +20,7 @@ const RPC = process.env.RPC || '';
 global.CONNECTION = new Connection(RPC, 'confirmed');
 global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
-var MINT_METADATA: pump.PumpTokenMeta;
+var MINT_METADATA: pump.PumpMintMeta;
 var IS_DONE = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
@@ -52,7 +52,7 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         } catch (error) {
             MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting balance change, continuing...`);
         }
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token. Signature: ${sig}`);
+        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token, signature: ${sig}`);
         return true;
     } catch (error: any) {
         // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
@@ -103,7 +103,7 @@ async function process_sell_tx(promise: Promise<String>, balance: TokenAmount) {
     try {
         const sig = await promise;
         const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sold ${ui_amount} tokens. Signature: ${sig}`);
+        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sold ${ui_amount} tokens, signature: ${sig}`);
         return true;
     } catch (e) {
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, ${e} retrying...`);

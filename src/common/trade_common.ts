@@ -58,29 +58,29 @@ const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5p
 
 const MAX_RETRIES = 2;
 
-export interface IMintMetaPrinter {
-    readonly name: string;
-    readonly symbol: string;
-    readonly mint: string;
-    readonly usd_mc: number;
+export interface IMintMeta {
+    readonly token_name: string;
+    readonly token_symbol: string;
+    readonly token_mint: string;
+    readonly token_usd_mc: number;
 }
 
 export interface IProgramTrader {
     buy_token(
         sol_amount: number,
         buyer: Signer,
-        mint_meta: object,
+        mint_meta: IMintMeta,
         slippage: number,
         priority?: PriorityLevel
     ): Promise<String>;
     sell_token(
         token_amount: TokenAmount,
         seller: Signer,
-        mint_meta: Partial<object>,
+        mint_meta: Partial<IMintMeta>,
         slippage: number,
         priority?: PriorityLevel
     ): Promise<String>;
-    get_mint_meta(mint: string): Promise<object | undefined>;
+    get_mint_meta(mint: string): Promise<IMintMeta | undefined>;
     create_token(
         creator: Signer,
         meta: common.IPFSMetadata,
@@ -88,10 +88,9 @@ export interface IProgramTrader {
         mint?: Keypair,
         sol_amount?: number
     ): Promise<[String, PublicKey]>;
-    get_random_mints(count: number): Promise<object[]>;
-    init_mint_meta(mint: PublicKey, sol_price: number): Promise<object>;
-    update_mint_meta_reserves(mint_meta: object, sol_price: number): Promise<object | undefined>;
-    get_meta_printer(mint_meta: object): IMintMetaPrinter;
+    get_random_mints(count: number): Promise<IMintMeta[]>;
+    init_mint_meta(mint: PublicKey, sol_price: number): Promise<IMintMeta>;
+    update_mint_meta_reserves(mint_meta: IMintMeta, sol_price: number): Promise<IMintMeta>;
 }
 
 export enum PriorityLevel {

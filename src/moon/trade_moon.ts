@@ -5,69 +5,58 @@ import * as common from '../common/common.js';
 
 const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 
-export type MoonshotTokenMeta = {
-    url: string;
-    chainId: string;
-    dexId: string;
-    pairAddress: string;
-    baseToken: {
+class MoonshotMintMeta implements trade.IMintMeta {
+    url!: string;
+    chainId!: string;
+    dexId!: string;
+    pairAddress!: string;
+    baseToken!: {
         address: string;
         name: string;
         symbol: string;
     };
-    priceNative: string;
-    priceUsd: string;
-    quoteToken: {
+    priceNative!: string;
+    priceUsd!: string;
+    quoteToken!: {
         address: string;
         name: string;
         symbol: string;
     };
-    profile: {
+    profile!: {
         icon: string;
         banner: string;
         links: string[];
         decription: string;
     };
-    fdv: number;
-    marketCap: number;
-    createdAt: number;
-    moonshot: {
+    fdv!: number;
+    marketCap!: number;
+    createdAt!: number;
+    moonshot!: {
         progress: number;
         creator: number;
         curveType: string;
         curvePosition: string;
         marketcapThreshold: string;
     };
-};
 
-class Printer implements trade.IMintMetaPrinter {
-    private mint_meta: MoonshotTokenMeta;
-
-    constructor(mintMeta: object) {
-        if (!isMoonMeta(mintMeta)) {
-            throw new Error('Invalid mint meta object');
-        }
-        this.mint_meta = mintMeta;
+    public get token_name(): string {
+        return this.baseToken.name;
     }
 
-    public get name(): string {
-        return this.mint_meta.baseToken.name;
+    public get token_mint(): string {
+        return this.baseToken.address;
     }
 
-    public get mint(): string {
-        return this.mint_meta.baseToken.address;
+    public get token_symbol(): string {
+        return this.baseToken.symbol;
     }
 
-    public get symbol(): string {
-        return this.mint_meta.baseToken.symbol;
-    }
-
-    public get usd_mc(): number {
-        return this.mint_meta.marketCap;
+    public get token_usd_mc(): number {
+        return this.marketCap;
     }
 }
 
-function isMoonMeta(obj: any): obj is MoonshotTokenMeta {
+function isMoonMeta(obj: any): obj is MoonshotMintMeta {
     return (
         typeof obj === 'object' &&
         obj !== null &&
@@ -82,14 +71,10 @@ function isMoonMeta(obj: any): obj is MoonshotTokenMeta {
 
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
-    public static get_meta_printer(mint_meta: MoonshotTokenMeta): Printer {
-        return new Printer(mint_meta);
-    }
-
     public static async buy_token(
         sol_amount: number,
         buyer: Signer,
-        mint_meta: MoonshotTokenMeta,
+        mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
         priority?: trade.PriorityLevel
     ): Promise<String> {
@@ -106,7 +91,7 @@ export class Trader {
     public static async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
-        mint_meta: MoonshotTokenMeta,
+        mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
         priority?: trade.PriorityLevel
     ): Promise<String> {
@@ -119,7 +104,7 @@ export class Trader {
         }
     }
 
-    public static async get_mint_meta(mint: string): Promise<MoonshotTokenMeta | undefined> {
+    public static async get_mint_meta(mint: string): Promise<MoonshotMintMeta | undefined> {
         return fetch(`https://api.moonshot.cc/token/v1/solana/${mint}`)
             .then((response) => response.json())
             .then((data) => {
@@ -127,12 +112,12 @@ export class Trader {
                 return data;
             })
             .catch((err) => {
-                console.error(`[ERROR] Failed fetching the mint: ${err}`);
+                common.error(`[ERROR] Failed fetching the mint: ${err}`);
                 return undefined;
             });
     }
 
-    public static async get_random_mints(_count: number): Promise<MoonshotTokenMeta[]> {
+    public static async get_random_mints(_count: number): Promise<MoonshotMintMeta[]> {
         throw new Error('Not Implemented');
     }
 
@@ -146,25 +131,25 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async init_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotTokenMeta> {
+    public static async init_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
     public static async update_mint_meta_reserves(
-        _mint_meta: MoonshotTokenMeta,
+        _mint_meta: MoonshotMintMeta,
         _sol_price: number
-    ): Promise<MoonshotTokenMeta | undefined> {
+    ): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
-    private static get_raydium_amm(mint_meta: MoonshotTokenMeta): PublicKey | undefined {
+    private static get_raydium_amm(mint_meta: MoonshotMintMeta): PublicKey | undefined {
         if (mint_meta.dexId === 'raydium') return new PublicKey(mint_meta.pairAddress);
     }
 
     private static async buy_token_moon(
         sol_amount: number,
         buyer: Signer,
-        mint_meta: MoonshotTokenMeta,
+        mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
         priority?: trade.PriorityLevel
     ): Promise<String> {
@@ -182,7 +167,7 @@ export class Trader {
     private static async sell_token_moon(
         token_amount: TokenAmount,
         seller: Signer,
-        mint_meta: Partial<MoonshotTokenMeta>,
+        mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05,
         priority?: trade.PriorityLevel
     ): Promise<String> {
@@ -200,11 +185,11 @@ export class Trader {
     private static async get_sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
-        mint_meta: Partial<MoonshotTokenMeta>,
+        mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
-            throw new Error(`[ERROR]: Failed to get the mint meta.`);
+            throw new Error(`Failed to get the mint meta.`);
         }
 
         const token = global.MOONSHOT.Token({
@@ -235,11 +220,11 @@ export class Trader {
     private static async get_buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
-        mint_meta: Partial<MoonshotTokenMeta>,
+        mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
-            throw new Error(`[ERROR]: Failed to get the mint meta.`);
+            throw new Error(`Failed to get the mint meta.`);
         }
 
         const token = global.MOONSHOT.Token({

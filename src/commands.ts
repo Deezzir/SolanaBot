@@ -1,6 +1,6 @@
 import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
-import { PumpTrader, PumpRunner, PumpTokenMeta } from './pump/pump.js';
-import { MoonTrader, MoonRunner, MoonshotTokenMeta } from './moon/moon.js';
+import { PumpTrader, PumpRunner } from './pump/pump.js';
+import { MoonTrader, MoonRunner } from './moon/moon.js';
 import dotenv from 'dotenv';
 import { Wallet } from '@project-serum/anchor';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
@@ -266,24 +266,8 @@ export async function sell_token_once(
         `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`
     );
 
-    let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.IProgramTrader;
-
-    switch (program) {
-        case common.Program.Pump: {
-            trader = PumpTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as PumpTokenMeta;
-            break;
-        }
-        case common.Program.Moonshot: {
-            trader = MoonTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as MoonshotTokenMeta;
-            break;
-        }
-        default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
-        }
-    }
+    let trader: trade.IProgramTrader = get_trader(program);
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -309,24 +293,8 @@ export async function buy_token_once(
         throw new Error(`[ERROR] Buyer balance is not enough to buy ${amount} SOL`);
     }
 
-    let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.IProgramTrader;
-
-    switch (program) {
-        case common.Program.Pump: {
-            trader = PumpTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as PumpTokenMeta;
-            break;
-        }
-        case common.Program.Moonshot: {
-            trader = MoonTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as MoonshotTokenMeta;
-            break;
-        }
-        default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
-        }
-    }
+    let trader: trade.IProgramTrader = get_trader(program);
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -377,11 +345,10 @@ export async function warmup(
         );
 
         for (const mint of mints) {
-            const mint_printer = trader.get_meta_printer(mint);
             let amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
             if (amount === 0) amount = 0.001;
 
-            common.log(`Buying ${amount} SOL of the token '${mint_printer.name}' with mint ${mint_printer.mint}...`);
+            common.log(`Buying ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`);
 
             let buy_attempts = 5;
             let bought = false;
@@ -406,15 +373,13 @@ export async function warmup(
             while (sell_attempts > 0) {
                 await common.sleep(3000);
                 try {
-                    const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint_printer.mint));
+                    const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint.token_mint));
                     if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                        common.log(
-                            `No tokens yet to sell for ${wallet.name} and mint ${mint_printer.mint}, waiting...`
-                        );
+                        common.log(`No tokens yet to sell for ${wallet.name} and mint ${mint.token_mint}, waiting...`);
                         sell_attempts--;
                         continue;
                     }
-                    common.log(`Selling ${balance.uiAmount} '${mint_printer.name}' tokens (${wallet.name})...`);
+                    common.log(`Selling ${balance.uiAmount} '${mint.token_name}' tokens (${wallet.name})...`);
                     const signature = await trader.sell_token(balance, buyer, mint, 0.05);
                     common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`);
                     break;
@@ -513,24 +478,8 @@ export async function buy_token(
 
     common.log(`Buying the tokens from the accounts by the mint ${mint.toString()}...`);
 
-    let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.IProgramTrader;
-
-    switch (program) {
-        case common.Program.Pump: {
-            trader = PumpTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as PumpTokenMeta;
-            break;
-        }
-        case common.Program.Moonshot: {
-            trader = MoonTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as MoonshotTokenMeta;
-            break;
-        }
-        default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
-        }
-    }
+    let trader: trade.IProgramTrader = get_trader(program);
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -580,24 +529,8 @@ export async function sell_token(
     common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
     common.log(`Selling ${percent}% of the tokens...\n`);
 
-    let mint_meta: PumpTokenMeta | MoonshotTokenMeta | undefined;
-    let trader: trade.IProgramTrader;
-
-    switch (program) {
-        case common.Program.Pump: {
-            trader = PumpTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as PumpTokenMeta;
-            break;
-        }
-        case common.Program.Moonshot: {
-            trader = MoonTrader;
-            mint_meta = (await trader.get_mint_meta(mint.toString())) as MoonshotTokenMeta;
-            break;
-        }
-        default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
-        }
-    }
+    let trader: trade.IProgramTrader = get_trader(program);
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
