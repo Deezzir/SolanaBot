@@ -9,7 +9,7 @@ import base58 from 'bs58';
 dotenv.config();
 
 export const WALLETS_FILE = process.env.KEYS_FILE || 'keys.csv';
-export const KEYS_FILE_HEADERS = ['name', 'key', 'is_reserve'];
+export const KEYS_FILE_HEADERS = ['name', 'private_key', 'is_reserve', 'public_key', 'created_at'];
 export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/';
 
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
@@ -62,6 +62,16 @@ export enum Program {
     Moonshot = 'moonshot'
 }
 
+export function bold(message: string): string {
+    const boldStart = '\x1b[1m';
+    const boldEnd = '\x1b[0m';
+    return `${boldStart}${message}${boldEnd}`;
+}
+
+export function error_color(str: string) {
+    return `\x1b[31m${str}\x1b[0m`;
+}
+
 export function log(message: string): void {
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
@@ -94,7 +104,7 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
         for await (const data of parser) {
             const is_reserve = data.is_reserve === 'true';
             const name = data.name;
-            const keypair = Keypair.fromSecretKey(base58.decode(data.key));
+            const keypair = Keypair.fromSecretKey(base58.decode(data.private_key));
             const id = is_reserve ? 0 : index++;
             const row: Wallet = {
                 name: name,
@@ -105,18 +115,12 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
             rows.push(row);
         }
         return rows;
-    } catch (err) {
-        error(`[ERROR] failed to process keys: ${err}`);
-        return [];
-    }
-}
-
-export function get_keypair_from_private_key(private_key: string): Keypair | undefined {
-    try {
-        return Keypair.fromSecretKey(base58.decode(private_key));
-    } catch (err) {
-        error(`[ERROR] failed to parse the private key: ${err}`);
-        return;
+    } catch (error) {
+        if (error instanceof Error) {
+            throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error.message}`);
+        } else {
+            throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error}`);
+        }
     }
 }
 
@@ -179,13 +183,12 @@ export function uniform_random(min: number, max: number): number {
     return Math.random() * (max - min) + min;
 }
 
-export function read_json(file_path: string): any | undefined {
+export function read_json(file_path: string): any {
     try {
         const content = readFileSync(file_path, 'utf8');
         return JSON.parse(content);
     } catch (err) {
-        error(`[ERROR] failed to read JSON file: ${err}`);
-        return undefined;
+        throw new Error(`[ERROR] failed to read JSON file: ${err}`);
     }
 }
 
@@ -200,7 +203,7 @@ export async function fetch_ipfs_json(cid: string): Promise<any> {
     }
 }
 
-async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse | undefined> {
+async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse> {
     var headers = new Headers();
     headers.append('x-api-key', IPSF_API_KEY);
 
@@ -219,8 +222,7 @@ async function upload_ipfs(data: any, content_type: string, file_name: string): 
         if (data instanceof File) {
             form_data.append('Body', data, file_name);
         } else {
-            console.error('The provided data is not a file.');
-            return;
+            throw new Error('The provided data is not a file.');
         }
         form_data.append('Key', file_name);
         form_data.append('ContentType', content_type);
@@ -239,26 +241,28 @@ async function upload_ipfs(data: any, content_type: string, file_name: string): 
         const data = await response.json();
         return data as IPFSResponse;
     } catch (error) {
-        console.error('Error:', error);
+        throw new Error(`Failed to upload to IPFS: ${error}`);
     }
 }
 
-export async function create_metadata(meta: IPFSMetadata, image_path: string): Promise<string | undefined> {
-    const image_file = new File([readFileSync(image_path)], basename(image_path));
-    const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
-    if (!resp || resp.status !== 'pinned') {
-        console.error('Failed to upload image to IPFS');
-        return;
-    }
-    const cid = resp.pin.cid;
-    meta.image = `${IPFS}${cid}`;
+export async function create_metadata(meta: IPFSMetadata, image_path: string): Promise<string> {
+    try {
+        const image_file = new File([readFileSync(image_path)], basename(image_path));
+        const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
+        if (resp.status !== 'pinned') throw new Error('Failed to upload image to IPFS');
+        const cid = resp.pin.cid;
+        meta.image = `${IPFS}${cid}`;
 
-    const meta_resp = await upload_ipfs(meta, 'application/json', 'metadata.json');
-    if (!meta_resp || meta_resp.status !== 'pinned') {
-        console.error('Failed to upload metadata to IPFS');
-        return;
+        const meta_resp = await upload_ipfs(meta, 'application/json', 'metadata.json');
+        if (meta_resp.status !== 'pinned') throw new Error('Failed to upload metadata to IPFS');
+        return meta_resp.pin.cid;
+    } catch (error) {
+        if (error instanceof Error) {
+            throw new Error(`[ERROR] Failed to create metadata: ${error.message}`);
+        } else {
+            throw new Error(`[ERROR] Failed to create metadata: ${error}`);
+        }
     }
-    return meta_resp.pin.cid;
 }
 
 export function setup_readline(): void {
@@ -280,7 +284,7 @@ export const fetch_sol_price = async (): Promise<number> => {
             return data.solPrice;
         })
         .catch((err) => {
-            console.error(`[ERROR] Failed fetching the SOL price: ${err}`);
+            error(`[ERROR] Failed fetching the SOL price: ${err}`);
             return 0.0;
         });
 };
@@ -319,7 +323,7 @@ export const COLUMN_WIDTHS = {
     publicKey: 44,
     solBalance: 14,
     allocation: 10,
-    tokenBalance: 18
+    tokenBalance: 20
 };
 
 const BORDER_CHARS = {

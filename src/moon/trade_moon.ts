@@ -6,38 +6,61 @@ import * as common from '../common/common.js';
 const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 
 class MoonshotMintMeta implements trade.IMintMeta {
-    url!: string;
-    chainId!: string;
-    dexId!: string;
-    pairAddress!: string;
-    baseToken!: {
+    url: string = '';
+    chainId: string = '';
+    dexId: string = '';
+    pairAddress: string = '';
+    baseToken: {
         address: string;
         name: string;
         symbol: string;
+    } = {
+        address: '',
+        name: '',
+        symbol: ''
     };
-    priceNative!: string;
-    priceUsd!: string;
-    quoteToken!: {
+    priceNative: string = '';
+    priceUsd: string = '';
+    quoteToken: {
         address: string;
         name: string;
         symbol: string;
+    } = {
+        address: '',
+        name: '',
+        symbol: ''
     };
-    profile!: {
+    profile: {
         icon: string;
         banner: string;
         links: string[];
-        decription: string;
+        description: string;
+    } = {
+        icon: '',
+        banner: '',
+        links: [],
+        description: ''
     };
-    fdv!: number;
-    marketCap!: number;
-    createdAt!: number;
-    moonshot!: {
+    fdv: number = 0;
+    marketCap: number = 0;
+    createdAt: number = Date.now();
+    moonshot: {
         progress: number;
         creator: number;
         curveType: string;
         curvePosition: string;
         marketcapThreshold: string;
+    } = {
+        progress: 0,
+        creator: 0,
+        curveType: '',
+        curvePosition: '',
+        marketcapThreshold: ''
     };
+
+    constructor(data: Partial<MoonshotMintMeta> = {}) {
+        Object.assign(this, data);
+    }
 
     public get token_name(): string {
         return this.baseToken.name;
@@ -109,7 +132,7 @@ export class Trader {
             .then((response) => response.json())
             .then((data) => {
                 if (!data || data.statusCode !== undefined || data.error || !isMoonMeta(data)) return;
-                return data;
+                return new MoonshotMintMeta(data);
             })
             .catch((err) => {
                 common.error(`[ERROR] Failed fetching the mint: ${err}`);

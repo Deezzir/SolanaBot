@@ -1,4 +1,4 @@
-import { PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
@@ -31,7 +31,6 @@ export class Runner extends snipe.SniperBase {
 
         search.push(
             new Promise<PublicKey | null>((resolve, reject) => {
-                let mint: PublicKey;
                 this._logs_stop_func = () => reject(new Error('User stopped the process'));
                 common.log('[Main Worker] Waiting for the new token drop using Solana logs...');
 
@@ -41,38 +40,33 @@ export class Runner extends snipe.SniperBase {
                         if (err) return;
                         if (logs && logs.includes('Program log: Instruction: Create')) {
                             try {
-                                const tx = await global.CONNECTION.getParsedTransaction(signature, {
-                                    maxSupportedTransactionVersion: 0,
-                                    commitment: 'confirmed'
-                                });
-                                if (!tx || !tx.meta || !tx.transaction.message || !tx.meta.postTokenBalances) return;
+                                const tx = await trade.get_tx_with_retries(signature);
+                                if (!tx || !tx.meta || !tx.transaction.message) return;
 
                                 const inner_instructions = tx.meta.innerInstructions;
+                                const address_lookup = tx.transaction.message.getAccountKeys();
                                 if (!inner_instructions) return;
 
                                 for (const inner of inner_instructions) {
                                     for (const instruction of inner.instructions) {
-                                        if (!instruction.programId.equals(METAPLEX_PROGRAM_ID)) continue;
+                                        const program_id = address_lookup.get(instruction.programIdIndex);
+                                        const mint = address_lookup.get(1);
 
-                                        const partial = instruction as PartiallyDecodedInstruction;
-                                        const [meta, bytes_read] = trade.decode_metaplex_instr(partial.data);
+                                        if (!program_id || !program_id.equals(METAPLEX_PROGRAM_ID)) continue;
+                                        const [meta, bytes_read] = trade.decode_metaplex_instr(instruction.data);
                                         if (bytes_read <= 0) continue;
+
                                         if (
                                             meta.data.name.toLowerCase() === name.toLowerCase() &&
-                                            meta.data.symbol.toLowerCase() === ticker.toLowerCase()
+                                            meta.data.symbol.toLowerCase() === ticker.toLowerCase() &&
+                                            mint
                                         ) {
-                                            if (tx.meta.postTokenBalances[0].mint)
-                                                mint = new PublicKey(tx.meta.postTokenBalances[0].mint);
-                                            else mint = partial.accounts[1];
+                                            this._logs_stop_func = null;
+                                            await this.wait_drop_unsub();
+                                            common.log(`[Main Worker] Found the mint using Solana logs`);
+                                            resolve(mint);
                                         }
                                     }
-                                }
-                                const signers = tx.transaction.message.accountKeys.filter((key) => key.signer);
-                                if (signers.some(({ pubkey }) => mint !== undefined && pubkey.equals(mint))) {
-                                    this._logs_stop_func = null;
-                                    await this.wait_drop_unsub();
-                                    common.log(`[Main Worker] Found the mint using Solana logs`);
-                                    resolve(mint);
                                 }
                             } catch (err) {
                                 common.error(`[ERROR] Failed fetching the parsed transaction: ${err}`);

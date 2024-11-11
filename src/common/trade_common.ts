@@ -10,7 +10,8 @@ import {
     TransactionMessage,
     RpcResponseAndContext,
     ComputeBudgetProgram,
-    Commitment
+    Commitment,
+    VersionedTransactionResponse
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -128,6 +129,24 @@ export function decode_metaplex_instr(data: string): [CreateMetadataAccountV3Ins
     return decoded;
 }
 
+export async function get_tx_with_retries(
+    signature: string,
+    max_retries: number = MAX_RETRIES
+): Promise<VersionedTransactionResponse | null> {
+    let retries = max_retries;
+
+    while (retries > 0) {
+        const transaction = await global.CONNECTION.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed'
+        });
+
+        if (transaction) return transaction;
+        retries--;
+    }
+    return null;
+}
+
 export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
         let account_info = await getAccount(global.CONNECTION, account);
@@ -136,7 +155,7 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
         if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
             return false;
         } else {
-            throw new Error(`[ERROR] Failed to check the account: ${error}`);
+            throw new Error(`Failed to check the account: ${error}`);
         }
     }
 }
@@ -258,7 +277,7 @@ export async function create_and_send_tx(
     signers: Signer[],
     priority?: PriorityOptions
 ): Promise<String> {
-    if (signers.length === 0) throw new Error(`[ERROR] No signers provided.`);
+    if (signers.length === 0) throw new Error(`No signers provided.`);
 
     if (priority) {
         const fee = await get_priority_fee(priority);
@@ -296,7 +315,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
             commitment: 'confirmed',
             maxSupportedTransactionVersion: 0
         });
-        if (!tx_details) throw new Error(`[ERROR] Transaction not found: ${signature}`);
+        if (!tx_details) throw new Error(`Transaction not found: ${signature}`);
         const balance_index = tx_details?.transaction.message
             .getAccountKeys()
             .staticAccountKeys.findIndex((i) => i.equals(address));
@@ -307,7 +326,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
         }
         return 0;
     } catch (err) {
-        throw new Error(`[ERROR] Failed to get the balance change: ${err}`);
+        throw new Error(`Failed to get the balance change: ${err}`);
     }
 }
 

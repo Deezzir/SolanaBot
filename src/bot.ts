@@ -7,9 +7,11 @@ import * as start_common from './common/snipe_common.js';
 import * as token_drop from './token_drop.js';
 import * as commands from './commands.js';
 import { exit } from 'process';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
+import { Wallet } from './common/common.js';
+import base58 from 'bs58';
 dotenv.config({ path: './.env' });
 
 //------------------------------------------------------------
@@ -23,15 +25,21 @@ function reserve_wallet_preaction(wallets: common.Wallet[]) {
     }
 }
 
-function error_color(str: string) {
-    return `\x1b[31m${str}\x1b[0m`;
-}
-
 async function main() {
-    const wallets = await common.get_wallets(common.WALLETS_FILE);
+    let wallets: Wallet[] = [];
+
+    try {
+        wallets = await common.get_wallets(common.WALLETS_FILE);
+    } catch (error) {
+        if (error instanceof Error) {
+            common.error(common.error_color(`[ERROR] ${error.message}`));
+            exit(1);
+        }
+    }
+
     const wallet_cnt = wallets.length;
     if (wallet_cnt === 0) {
-        common.error('[ERROR] No wallets files found.');
+        common.error(common.error_color('[ERROR] No wallets found.'));
         exit(1);
     }
 
@@ -47,7 +55,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('3.1.0').description('Solana Bot CLI');
+    program.version('3.2.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -55,7 +63,7 @@ async function main() {
     program.configureOutput({
         writeOut: (str) => process.stdout.write(str),
         writeErr: (str) => process.stderr.write(str),
-        outputError: (str, write) => write(error_color(str))
+        outputError: (str, write) => write(common.error_color(str))
     });
 
     program
@@ -64,10 +72,7 @@ async function main() {
         .description('Start the bot')
         .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
-            const json = common.read_json(value);
-            const config = start_common.validate_bot_config(json);
-            if (!config) throw new InvalidOptionArgumentError('Invalid Config JSON format.');
-            return config;
+            return common.read_json(value);
         })
         .addOption(
             new Option('-g, --program <type>', 'specify program')
@@ -77,13 +82,8 @@ async function main() {
         .hook('preAction', () => reserve_wallet_preaction(wallets))
         .action(async (options: any) => {
             let { config, program } = options;
-            const bot_config = await start_common.setup_config(config, wallet_cnt);
-            if (!bot_config) {
-                common.error('[ERROR] Invalid configuration.');
-                exit(1);
-            }
+            const bot_config = await start_common.setup_config(wallet_cnt, config);
             await commands.start(wallets, bot_config, program);
-            global.RL.close();
         });
 
     program
@@ -513,7 +513,7 @@ async function main() {
         .alias('ct')
         .description('Create a token')
         .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
-        .argument('<creator_index>', 'Index to the creator wallet', (value) => {
+        .argument('<creator_index>', 'Index of the creator wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
             const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
@@ -521,9 +521,11 @@ async function main() {
             return creator_wallet;
         })
         .option('-m, --mint <mint_private_key>', 'Private key of the mint to create', (value) => {
-            const mint_keypair = common.get_keypair_from_private_key(value);
-            if (!mint_keypair) throw new InvalidOptionArgumentError('Invalid private key provided.');
-            return mint_keypair;
+            try {
+                return Keypair.fromSecretKey(base58.decode(value));
+            } catch {
+                throw new InvalidOptionArgumentError(`Invalid private key provided`);
+            }
         })
         .option('-b, --buy <number>', 'Amount of SOL to buy the token', (value) => {
             const parsed_value = parseFloat(value);

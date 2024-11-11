@@ -685,9 +685,13 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     writeStream.write(common.KEYS_FILE_HEADERS.join(',') + '\n');
     wallets.forEach((wallet) => {
         if (wallet.name && wallet.is_reserve && wallet.keypair) {
-            const row = [wallet.name, JSON.stringify(Array.from(wallet.keypair.secretKey)), wallet.is_reserve].join(
-                ','
-            );
+            const row = [
+                wallet.name,
+                JSON.stringify(Array.from(wallet.keypair.secretKey)),
+                wallet.is_reserve,
+                wallet.keypair.publicKey.toString(),
+                new Date().toLocaleDateString()
+            ].join(',');
             writeStream.write(row + '\n');
         }
     });

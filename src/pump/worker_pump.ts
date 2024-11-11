@@ -16,24 +16,24 @@ const TRADE_ITERATIONS = 1;
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
-const RPC = process.env.RPC || '';
-global.CONNECTION = new Connection(RPC, 'confirmed');
+global.CONNECTION = new Connection(process.env.RPC || '', 'confirmed');
 global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
 
 var MINT_METADATA: pump.PumpMintMeta;
 var IS_DONE = false;
+var START_BUY = false;
+var START_SELL = false;
 var CURRENT_SPENDINGS = 0;
 var CURRENT_BUY_AMOUNT = 0;
-var START_SELL = false;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 
-function control_sleep(seconds: number): { promise: Promise<void>; cancel: () => void } {
+function control_sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
     let cancel: () => void = () => {};
 
     const promise = new Promise<void>((resolve) => {
-        timeout_id = setTimeout(resolve, seconds * 1000);
+        timeout_id = setTimeout(resolve, ms);
         cancel = () => {
             clearTimeout(timeout_id);
             resolve();
@@ -43,7 +43,12 @@ function control_sleep(seconds: number): { promise: Promise<void>; cancel: () =>
     return { promise, cancel };
 }
 
-async function process_buy_tx(promise: Promise<String>, amount: number) {
+function send_messages(): void {
+    if (MESSAGE_BUFFER.length > 0) parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+    MESSAGE_BUFFER = [];
+}
+
+async function process_buy(promise: Promise<String>, amount: number) {
     try {
         const sig = await promise;
         try {
@@ -54,21 +59,22 @@ async function process_buy_tx(promise: Promise<String>, amount: number) {
         }
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Bought ${amount} SOL of the token, signature: ${sig}`);
         return true;
-    } catch (error: any) {
-        // parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Error buying the token (${e}), retrying...`);
-        if (error instanceof Error && error.message.includes('Simulation failed')) {
-            await common.sleep(0.5 * 1000);
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Simulation failed, retrying...`);
-            return false;
+    } catch (error) {
+        if (error instanceof Error) {
+            if (error.message.includes('Simulation failed')) {
+                await common.sleep(0.5 * 1000);
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Buy simulation failed, retrying...`);
+            } else {
+                MESSAGE_BUFFER.push(
+                    `[Worker ${WORKER_CONF.id}] Failed to buy the token (${error.message}), retrying...`
+                );
+            }
         }
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Failed to buy the token (${error}), retrying...`);
         return false;
     }
 }
 
 const buy = async () => {
-    MESSAGE_BUFFER.push(`[Worker ${workerData.id}] Buying the token...`);
-
     const amount = parseFloat((CURRENT_BUY_AMOUNT > 0 ? CURRENT_BUY_AMOUNT : MIN_BUY).toFixed(5));
     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Buying ${amount} SOL of the token`);
     let bought = false;
@@ -85,13 +91,13 @@ const buy = async () => {
                 trade.PriorityLevel.VERY_HIGH
             );
             transactions.push(
-                process_buy_tx(buy_promise, amount).then((result) => {
+                process_buy(buy_promise, amount).then((result) => {
                     if (result) bought = true;
                 })
             );
 
             count--;
-            await common.sleep(1 * 1000);
+            await common.sleep(0.5 * 1000);
         }
         await Promise.allSettled(transactions);
 
@@ -99,30 +105,38 @@ const buy = async () => {
     }
 };
 
-async function process_sell_tx(promise: Promise<String>, balance: TokenAmount) {
+async function process_sell(promise: Promise<String>, balance: TokenAmount) {
     try {
         const sig = await promise;
         const ui_amount = balance.uiAmount ? balance.uiAmount.toFixed(2) : 0;
         MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sold ${ui_amount} tokens, signature: ${sig}`);
         return true;
-    } catch (e) {
-        MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, ${e} retrying...`);
+    } catch (error) {
+        if (error instanceof Error) {
+            if (error.message.includes('Simulation failed')) {
+                await common.sleep(0.5 * 1000);
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sell simulation failed, retrying...`);
+            } else {
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, ${error.message} retrying...`);
+            }
+        }
         return false;
     }
 }
 
 const sell = async () => {
-    MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Started selling the token`);
     let sold = false;
-    while (!sold) {
-        try {
-            let get_balance_retry = 0;
-            let balance: TokenAmount | undefined = undefined;
 
-            while (get_balance_retry < MAX_RETRIES) {
+    while (!sold) {
+        let get_balance_retry = 0;
+        let balance: TokenAmount | undefined = undefined;
+
+        while (get_balance_retry < MAX_RETRIES) {
+            try {
                 balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
+
                 if (get_balance_retry < MAX_RETRIES)
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
                 if (get_balance_retry === MAX_RETRIES) {
@@ -130,81 +144,83 @@ const sell = async () => {
                     sold = true;
                 }
                 await common.sleep(5 * 1000);
+            } catch (e) {
+                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting the balance, retrying...`);
+                get_balance_retry++;
             }
-
-            if (sold) break;
-
-            let transactions = [];
-            let count = TRADE_ITERATIONS;
-
-            parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Selling ${balance?.uiAmount} tokens`);
-            while (count > 0 && balance !== undefined) {
-                const sell_promise = pump.Trader.sell_token(
-                    balance,
-                    WORKER_KEYPAIR,
-                    MINT_METADATA,
-                    SELL_SLIPPAGE,
-                    trade.PriorityLevel.HIGH
-                );
-                transactions.push(
-                    process_sell_tx(sell_promise, balance).then((result) => {
-                        if (result) sold = true;
-                    })
-                );
-
-                count--;
-                await common.sleep(1 * 1000);
-            }
-            await Promise.allSettled(transactions);
-        } catch (e) {
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting the balance, retrying...`);
         }
+
+        if (sold) break;
+
+        let transactions = [];
+        let count = TRADE_ITERATIONS;
+
+        parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Selling ${balance?.uiAmount} tokens`);
+        while (count > 0 && balance !== undefined) {
+            const sell_promise = pump.Trader.sell_token(
+                balance,
+                WORKER_KEYPAIR,
+                MINT_METADATA,
+                SELL_SLIPPAGE,
+                trade.PriorityLevel.HIGH
+            );
+            transactions.push(
+                process_sell(sell_promise, balance).then((result) => {
+                    if (result) sold = true;
+                })
+            );
+
+            count--;
+            await common.sleep(0.5 * 1000);
+        }
+        await Promise.allSettled(transactions);
     }
 };
 
 const control_loop = async () =>
     new Promise<void>(async (resolve) => {
-        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.mcap_threshold;
-        const should_buy = () => CURRENT_SPENDINGS < WORKER_CONF.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD;
+        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.mcap_threshold || START_SELL;
+        const should_buy = () =>
+            CURRENT_SPENDINGS < WORKER_CONF.spend_limit && CURRENT_BUY_AMOUNT > MIN_BUY_THRESHOLD && START_BUY;
         const process = async () => {
+            if (!MINT_METADATA) {
+                return;
+            }
+
             if (should_sell()) {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Market cap threshold reached, starting to sell...`);
-                START_SELL = true;
-                return true;
+                await sell();
+                IS_DONE = true;
+                return;
             }
 
             if (should_buy()) {
                 await buy();
-                if (WORKER_CONF.is_buy_once) CURRENT_SPENDINGS = WORKER_CONF.spend_limit;
-            } else {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
+                if (WORKER_CONF.is_buy_once || !should_buy()) {
+                    CURRENT_SPENDINGS = WORKER_CONF.spend_limit;
+                    MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Spend limit reached...`);
+                }
+                return;
             }
-
-            return false;
         };
 
         while (!IS_DONE) {
-            if (MINT_METADATA && Object.keys(MINT_METADATA).length !== 0) {
-                if (await process()) break;
-            } else {
-                MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Mint metadata not available`);
-            }
-
-            const sleep_for = common.normal_random(WORKER_CONF.buy_interval, 0.5 * WORKER_CONF.buy_interval);
-            MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${sleep_for.toFixed(2)} seconds`);
-            parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
-
+            await process();
             if (!IS_DONE) {
-                const { promise, cancel } = control_sleep(sleep_for);
+                const ms = should_buy()
+                    ? common.normal_random(WORKER_CONF.buy_interval, 0.5 * WORKER_CONF.buy_interval) * 1000
+                    : 0.2 * 1000;
+
+                if (!WORKER_CONF.is_buy_once && should_buy())
+                    MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${(ms / 1000).toFixed(2)} seconds`);
+
+                const { promise, cancel } = control_sleep(ms);
                 CANCEL_SLEEP = cancel;
+                send_messages();
                 await promise;
             }
-            MESSAGE_BUFFER = [];
         }
 
-        if (START_SELL) await sell();
-
-        parentPort?.postMessage(MESSAGE_BUFFER.join('\n'));
+        send_messages();
         resolve();
     });
 
@@ -227,14 +243,14 @@ async function main() {
                 if (CURRENT_BUY_AMOUNT > WORKER_CONF.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.spend_limit;
                 if (CURRENT_BUY_AMOUNT < MIN_BUY) CURRENT_BUY_AMOUNT = MIN_BUY;
 
-                await control_loop();
-
-                parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
-                process.exit(0);
+                if (!START_BUY) {
+                    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received buy command from the main thread`);
+                    START_BUY = true;
+                }
+                break;
             case 'sell':
                 if (!START_SELL) {
                     parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Received sell command from the main thread`);
-                    IS_DONE = true;
                     START_SELL = true;
                     if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
                 }
@@ -256,6 +272,11 @@ async function main() {
                 break;
         }
     });
+
+    await control_loop();
+
+    parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Finished`);
+    process.exit(0);
 }
 
 main().catch((err) => {

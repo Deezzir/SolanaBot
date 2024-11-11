@@ -7,7 +7,7 @@ import * as trade from './trade_common.js';
 import { Trader as PumpTrader } from '../pump/trade_pump.js';
 import { Trader as MoonTrader } from '../moon/trade_moon.js';
 
-const META_UPDATE_INTERVAL = 200;
+const META_UPDATE_INTERVAL = 300;
 
 export type BotConfig = {
     thread_cnt: number;
@@ -74,9 +74,8 @@ export abstract class SniperBase implements ISniper {
         common.log('[Main Worker] Starting the bot...');
         const ok = await this.workers_start(wallets);
         if (!ok) {
-            common.error('[ERROR] Failed to start the workers. Exiting...');
             global.RL.close();
-            return;
+            throw new Error('[ERROR] Failed to start the workers. Exiting...');
         }
 
         common.log('[Main Worker] Bot started successfully, waiting for the token...');
@@ -87,32 +86,32 @@ export abstract class SniperBase implements ISniper {
                     ? await this.wait_drop_sub(this.bot_config.token_name, this.bot_config.token_ticker)
                     : this.bot_config.mint;
 
-            if (mint) {
-                this.bot_config.mint = mint;
-                common.log(`[Main Worker] Token detected: ${this.bot_config.mint.toString()}`);
+            if (!mint) throw new Error('Failed to find the token. Exiting...');
 
-                let mint_meta = await trader.init_mint_meta(this.bot_config.mint, sol_price);
-                this.workers_post_message('mint', mint_meta);
-                const interval = setInterval(async () => {
-                    try {
-                        mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
-                        common.log(`[Main Worker] Current MCAP: $${mint_meta.token_usd_mc.toFixed(3)}`);
-                        this.workers_post_message('mint', mint_meta);
-                    } catch (err) {
-                        common.error(`[ERROR] ${err}`);
-                    }
-                }, META_UPDATE_INTERVAL);
+            this.bot_config.mint = mint;
+            common.log(`[Main Worker] Token detected: ${this.bot_config.mint.toString()}`);
 
-                this.workers_post_message('buy', {});
-                await this.workers_wait();
-                clearInterval(interval);
-            } else {
-                common.error('[ERROR] Token not found. Exiting...');
-                global.RL.close();
-            }
+            let mint_meta = await trader.init_mint_meta(this.bot_config.mint, sol_price);
+            this.workers_post_message('mint', mint_meta);
+
+            const interval = setInterval(async () => {
+                try {
+                    mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
+                    if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
+                    this.workers_post_message('mint', mint_meta);
+                } catch (err) {
+                    common.error(`[ERROR] Failed to update token metadata`);
+                }
+            }, META_UPDATE_INTERVAL);
+
+            this.workers_post_message('buy');
+            await this.workers_wait();
+            clearInterval(interval);
         } catch (error) {
-            common.error(`[ERROR] ${error}`);
-            global.RL.close();
+            throw new Error(`[ERROR] ${error}`);
+        } finally {
+            global.RL.prompt(false);
+            global.RL.pause().removeAllListeners('line').removeAllListeners('close').close();
         }
     }
 
@@ -121,8 +120,8 @@ export abstract class SniperBase implements ISniper {
         try {
             await Promise.all(promises);
             common.log('[Main Worker] All workers have finished executing');
-        } catch (err) {
-            common.error(`[ERROR] One of the workers encountered an error`);
+        } catch (error) {
+            throw new Error(`One of the workers encountered an error: ${error}`);
         }
     }
 
@@ -136,7 +135,7 @@ export abstract class SniperBase implements ISniper {
                 if (start_interval > 0) {
                     const min_interval = start_interval * 1000;
                     const max_interval = start_interval * 1.5 * 1000;
-                    await common.sleep(Math.floor(Math.random() * (max_interval - min_interval)) + min_interval);
+                    await common.sleep(common.normal_random(min_interval, max_interval));
                 }
             }
             return;
@@ -147,16 +146,14 @@ export abstract class SniperBase implements ISniper {
     protected async workers_start(wallets: common.Wallet[]): Promise<boolean> {
         wallets = wallets.filter((wallet) => !wallet.is_reserve).slice(0, this.bot_config.thread_cnt);
 
-        if (wallets.length === 0 || wallets.length < this.bot_config.thread_cnt) {
+        if (wallets.length < this.bot_config.thread_cnt) {
             common.error(`[ERROR] The number of keys doesn't match the number of threads`);
-            global.RL.close();
             return false;
         }
 
         const all_has_balances = await trade.check_has_balances(wallets);
         if (!all_has_balances) {
-            common.error('[ERROR] First, topup the specified accounts.');
-            global.RL.close();
+            common.error('[ERROR] Topup the specified accounts, exiting...');
             return false;
         }
 
@@ -164,10 +161,10 @@ export abstract class SniperBase implements ISniper {
         const started_promises: Promise<void>[] = [];
 
         for (const wallet of wallets) {
-            const data: WorkerConfig = {
+            const worker_data: WorkerConfig = {
                 secret: wallet.keypair.secretKey,
                 id: wallet.id,
-                buy_interval: this.bot_config.buy_interval,
+                buy_interval: this.bot_config.buy_interval || 5,
                 spend_limit: this.bot_config.spend_limit,
                 start_buy: this.bot_config.start_buy,
                 mcap_threshold: this.bot_config.mcap_threshold,
@@ -175,14 +172,14 @@ export abstract class SniperBase implements ISniper {
             };
 
             const worker = new Worker(this.get_worker_path(), {
-                workerData: data
+                workerData: worker_data
             });
 
             let started: () => void;
             const started_promise = new Promise<void>((resolve) => (started = resolve));
 
             const job = new Promise<void>((resolve, reject) => {
-                worker.on('message', (msg) => {
+                worker.on('message', async (msg) => {
                     if (msg.command === 'started') {
                         started();
                         common.log(msg.data);
@@ -195,7 +192,7 @@ export abstract class SniperBase implements ISniper {
                     reject();
                 });
                 worker.on('exit', (code) => {
-                    if (code !== 0) reject(new Error(`[Worker ${wallet.id}]Stopped with exit code ${code} `));
+                    if (code !== 0) reject(new Error(`[Worker ${wallet.id}] Stopped with exit code ${code} `));
                     else resolve();
                 });
             });
@@ -211,19 +208,22 @@ export abstract class SniperBase implements ISniper {
     }
 
     protected setup_cmd_interface() {
-        if (global.RL === undefined) common.setup_readline();
+        if (!global.RL) common.setup_readline();
         global.RL.setPrompt('Command (stop/config/sell/set)> ');
         global.RL.prompt(true);
 
         let selling = false;
         let stopping = false;
 
-        global.RL.on('line', async (line) => {
+        global.RL.on('line', (line) => {
             moveCursor(process.stdout, 0, -1);
             clearLine(process.stdout, 0);
-            switch (line.trim().split(' ')[0]) {
+
+            const [command, key, value] = line.trim().split(' ');
+            switch (command) {
                 case 'stop':
                     if (!stopping) {
+                        common.log('[Main Worker] Stopping the bot...');
                         this.workers_post_message('stop');
                         stopping = true;
                     } else {
@@ -231,7 +231,7 @@ export abstract class SniperBase implements ISniper {
                     }
                     break;
                 case 'config':
-                    if (this.bot_config !== undefined) console.table(display_bot_config(this.bot_config));
+                    if (this.bot_config) console.table(display_bot_config(this.bot_config));
                     break;
                 case 'sell':
                     if (!selling) {
@@ -242,70 +242,113 @@ export abstract class SniperBase implements ISniper {
                     }
                     break;
                 case 'set':
-                    const args = line.trim().split(' ');
-                    if (args.length < 3) {
-                        common.log('Invalid command. Example: set action buy');
-                        break;
+                    if (key && value) {
+                        update_bot_config(this.bot_config, key, value);
+                        common.log(`[Main Worker] Configuration updated: ${key} = ${value}`);
+                    } else {
+                        common.log('Invalid command. Usage: set <key> <value>');
                     }
-                    const [, key, value] = args;
-                    update_bot_config(this.bot_config, key, value);
                     break;
                 default:
                     common.log(`Unknown command: ${line.trim()} `);
                     break;
             }
             global.RL.prompt(true);
-        }).on('close', () => {
-            common.log('[Main Worker] Stopping the bot...');
-            cursorTo(process.stdout, 0);
-            clearLine(process.stdout, 0);
-            process.exit(0);
-        });
+        })
+            .on('mcap', (mcap: number) => {
+                const threshold_reached = this.bot_config.mcap_threshold < mcap ? ' (Target reached)' : '';
+                const mcap_message = common.bold(`MCAP: $${mcap.toFixed(2)}${threshold_reached}`);
+                global.RL.setPrompt(`${mcap_message} | Command (stop/config/sell/set)> `);
+                global.RL.prompt(true);
+            })
+            .on('close', () => {
+                if (!stopping) {
+                    common.log('[Main Worker] Stopping the bot...');
+                    this.workers_post_message('stop');
+                    cursorTo(process.stdout, 0);
+                    clearLine(process.stdout, 0);
+                    global.RL.close();
+                }
+            });
     }
 }
 
-export function validate_bot_config(json: any): BotConfig | undefined {
-    const required_fields = ['thread_cnt', 'buy_interval', 'spend_limit', 'start_buy', 'mcap_threshold'];
+function validate_bot_config(json: any, keys_cnt: number): BotConfig {
+    const required_fields = ['thread_cnt', 'spend_limit', 'start_buy'];
 
     for (const field of required_fields) {
-        if (!(field in json)) {
-            return;
-        }
+        if (!(field in json)) throw new Error(`[ERROR] Missing required field: ${field}`);
     }
 
-    const { token_name, token_ticker, mint, trader } = json;
+    const {
+        token_name,
+        token_ticker,
+        mint,
+        trader,
+        thread_cnt,
+        buy_interval,
+        spend_limit,
+        start_buy,
+        mcap_threshold,
+        start_interval,
+        is_buy_once
+    } = json;
 
     if (mint === undefined && token_name === undefined && token_ticker === undefined) {
-        common.error('[ERROR] Missing mint or token name and token ticker.');
-        return;
+        throw new Error('[ERROR] Missing mint or token name and token ticker.');
     }
 
     if (mint !== undefined && (token_name !== undefined || token_ticker !== undefined)) {
-        common.error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
-        return;
+        throw new Error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
     }
 
     if (
         (token_name === undefined && token_ticker !== undefined) ||
         (token_name !== undefined && token_ticker === undefined)
     ) {
-        common.error('[ERROR] Both token name and token ticker are required.');
-        return;
+        throw new Error('[ERROR] Both token name and token ticker are required.');
+    }
+
+    if (typeof spend_limit !== 'number' || spend_limit <= 0) {
+        throw new Error('[ERROR] spend_limit must be a number greater than 0.');
+    }
+
+    if (typeof start_buy !== 'number' || start_buy <= 0 || start_buy >= spend_limit) {
+        throw new Error('[ERROR] start_buy must be a number greater than 0 and less than spend_limit.');
+    }
+
+    if (typeof thread_cnt !== 'number' || thread_cnt > keys_cnt) {
+        throw new Error('[ERROR] thread_cnt must be a number and less than or equal to keys_cnt.');
+    }
+
+    if ((buy_interval && typeof buy_interval !== 'number') || buy_interval <= 0) {
+        throw new Error('[ERROR] buy_interval must be a number greater than 0.');
+    }
+
+    if (mcap_threshold && (typeof mcap_threshold !== 'number' || mcap_threshold < 5000)) {
+        throw new Error('[ERROR] mcap_threshold must be a number greater than 5000.');
+    }
+
+    if (start_interval && (typeof start_interval !== 'number' || start_interval < 0)) {
+        throw new Error('[ERROR] start_interval must be a number greater than or equal to 0.');
+    }
+
+    if (is_buy_once && typeof is_buy_once !== 'boolean') {
+        throw new Error('[ERROR] is_buy_once must be a boolean');
     }
 
     if (trader) {
         if (trader === 'pump' || trader === 'moon') {
             json.trader = trader === 'pump' ? PumpTrader : MoonTrader;
         } else {
-            common.error('[ERROR] Invalid trader.');
-            return;
+            throw new Error('[ERROR] Invalid trader.');
         }
-    } else {
-        json.trader = PumpTrader;
     }
 
+    if (!('trader' in json)) json.trader = PumpTrader;
     if (!('is_buy_once' in json)) json.is_buy_once = false;
     if (!('start_interval' in json)) json.start_interval = undefined;
+    if (!('mcap_threshold' in json)) json.mcap_threshold = Infinity;
     if (json.mint) json.mint = new PublicKey(json.mint);
 
     return json as BotConfig;
@@ -314,6 +357,7 @@ export function validate_bot_config(json: any): BotConfig | undefined {
 async function get_config(keys_cnt: number): Promise<BotConfig> {
     let answers: BotConfig;
     do {
+        let spend_limit: number;
         answers = await inquirer.prompt<BotConfig>([
             {
                 type: 'input',
@@ -326,12 +370,6 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 filter: (value) => (common.validate_int(value, 1, keys_cnt) ? parseInt(value, 10) : value)
             },
             {
-                type: 'confirm',
-                name: 'is_buy_once',
-                message: 'Do you want to buy only once?',
-                default: false
-            },
-            {
                 type: 'number',
                 name: 'start_interval',
                 message: 'Enter the start interval in seconds:',
@@ -341,35 +379,44 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
             },
             {
                 type: 'input',
-                name: 'buy_interval',
-                message: 'Enter the interval between each buy in seconds:',
-                validate: (value) =>
-                    common.validate_int(value, 1) ? true : 'Please enter a valid number greater than 0.',
-                filter: (value) => (common.validate_int(value, 1) ? parseInt(value, 10) : value)
-            },
-            {
-                type: 'input',
                 name: 'spend_limit',
                 message: 'Enter the limit of Solana that each bot can spend:',
                 validate: (value) =>
                     common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.',
-                filter: (value) => (common.validate_float(value, 0.001) ? parseFloat(value) : value)
+                filter: (value) => {
+                    const parsedValue = parseFloat(value);
+                    if (common.validate_float(value, 0.001)) {
+                        spend_limit = parsedValue;
+                        return parsedValue;
+                    }
+                    return value;
+                }
             },
             {
                 type: 'input',
                 name: 'start_buy',
                 message: 'Enter the start Solana amount that the bot will buy the token for:',
-                validate: (value) =>
-                    common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.',
+                validate: (value) => {
+                    if (!common.validate_float(value, 0.001)) {
+                        return 'Please enter a valid number greater than 0.001.';
+                    }
+                    if (spend_limit !== undefined && parseFloat(value) >= spend_limit) {
+                        return 'The start buy amount should be less than the spend limit.';
+                    }
+                    return true;
+                },
                 filter: (value) => (common.validate_float(value, 0.001) ? parseFloat(value) : value)
             },
             {
                 type: 'input',
                 name: 'mcap_threshold',
-                message: 'Enter the threshold market cap:',
+                message: 'Enter the threshold market cap (leave blank for Infinity):',
+                default: '',
                 validate: (value) =>
-                    common.validate_int(value, 5000) ? true : 'Please enter a valid number greater than 5000',
-                filter: (value) => (common.validate_int(value, 5000) ? parseInt(value, 10) : value)
+                    value === '' || common.validate_int(value, 5000)
+                        ? true
+                        : 'Please enter a valid number greater than 5000',
+                filter: (value) => (value === '' ? Infinity : parseInt(value, 10))
             },
             {
                 type: 'list',
@@ -378,8 +425,28 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 choices: ['Pump', 'Moonshoot'],
                 default: 0,
                 filter: (input) => (input.toLowerCase() === 'pump' ? PumpTrader : MoonTrader)
+            },
+            {
+                type: 'confirm',
+                name: 'is_buy_once',
+                message: 'Do you want to buy only once?',
+                default: false
             }
         ]);
+
+        if (!answers.is_buy_once) {
+            const buy_interval = await inquirer.prompt([
+                {
+                    type: 'input',
+                    name: 'buy_interval',
+                    message: 'Enter the interval between each buy in seconds:',
+                    validate: (value) =>
+                        common.validate_int(value, 1) ? true : 'Please enter a valid number greater than 0.',
+                    filter: (value) => (common.validate_int(value, 1) ? parseInt(value, 10) : value)
+                }
+            ]);
+            answers = { ...answers, ...buy_interval };
+        }
 
         const method = await inquirer.prompt([
             {
@@ -444,34 +511,48 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
     return answers;
 }
 
-export async function setup_config(config: BotConfig, keys_cnt: number): Promise<BotConfig | undefined> {
-    if (config) {
-        if (config.mint) {
+export async function setup_config(keys_cnt: number, json_config: any | undefined): Promise<BotConfig> {
+    if (json_config) {
+        const bot_config = validate_bot_config(json_config, keys_cnt - 1);
+
+        if (bot_config.mint) {
             common.log('Sniping existing mint...');
-        } else if (config.token_name && config.token_ticker) {
+        } else if (bot_config.token_name && bot_config.token_ticker) {
             common.log('Sniping token by name and ticker...');
-        } else {
-            console.error('Invalid config file.');
-            process.exit(1);
         }
-        console.table(display_bot_config(config));
+
+        console.table(display_bot_config(bot_config));
         common.setup_readline();
         await new Promise<void>((resolve) => global.RL.question('Press ENTER to start the bot...', () => resolve()));
-    } else {
-        config = await get_config(keys_cnt - 1);
         common.clear_lines_up(1);
-        if (!config) return;
+        return bot_config;
+    } else {
+        try {
+            const bot_config = await get_config(keys_cnt - 1);
+            common.clear_lines_up(1);
+            return bot_config;
+        } catch (error) {
+            if (error instanceof Error) {
+                if (error.message.includes('prompt')) {
+                    throw new Error('[ERROR] You cancelled the bot setup.');
+                }
+                throw new Error(`${error.message}`);
+            } else {
+                throw new Error('[ERROR] Failed to setup the bot.');
+            }
+        }
     }
-    return config;
 }
 
 function display_bot_config(bot_config: BotConfig) {
     return {
         ...bot_config,
+        mcap_threshold: bot_config.mcap_threshold === Infinity ? 'N/A' : bot_config.mcap_threshold,
         trader: bot_config.trader === PumpTrader ? 'Pump' : 'Moon',
         token_name: bot_config.token_name ? bot_config.token_name : 'N/A',
         token_ticker: bot_config.token_ticker ? bot_config.token_ticker : 'N/A',
         start_interval: bot_config.start_interval ? bot_config.start_interval : 0,
+        buy_interval: bot_config.buy_interval ? bot_config.buy_interval : 'N/A',
         mint: bot_config.mint ? bot_config.mint.toString() : 'N/A'
     };
 }
