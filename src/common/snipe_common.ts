@@ -164,7 +164,7 @@ export abstract class SniperBase implements ISniper {
             const worker_data: WorkerConfig = {
                 secret: wallet.keypair.secretKey,
                 id: wallet.id,
-                buy_interval: this.bot_config.buy_interval || 5,
+                buy_interval: this.bot_config.buy_interval || 5.0,
                 spend_limit: this.bot_config.spend_limit,
                 start_buy: this.bot_config.start_buy,
                 mcap_threshold: this.bot_config.mcap_threshold,
@@ -257,7 +257,7 @@ export abstract class SniperBase implements ISniper {
         })
             .on('mcap', (mcap: number) => {
                 const threshold_reached = this.bot_config.mcap_threshold < mcap ? ' (Target reached)' : '';
-                const mcap_message = common.bold(`MCAP: $${mcap.toFixed(2)}${threshold_reached}`);
+                const mcap_message = common.bold(`MCAP: $${common.format_currency(mcap)}${threshold_reached}`);
                 global.RL.setPrompt(`${mcap_message} | Command (stop/config/sell/set)> `);
                 global.RL.prompt(true);
             })
@@ -357,66 +357,62 @@ function validate_bot_config(json: any, keys_cnt: number): BotConfig {
 async function get_config(keys_cnt: number): Promise<BotConfig> {
     let answers: BotConfig;
     do {
-        let spend_limit: number;
+        let start_buy: number;
         answers = await inquirer.prompt<BotConfig>([
             {
                 type: 'input',
                 name: 'thread_cnt',
                 message: `Enter the number of bots to run(${keys_cnt} accounts available):`,
-                validate: (value) =>
+                validate: (value: string) =>
                     common.validate_int(value, 1, keys_cnt)
                         ? true
                         : `Please enter a valid number greater than 0 and less or equal to ${keys_cnt}.`,
-                filter: (value) => (common.validate_int(value, 1, keys_cnt) ? parseInt(value, 10) : value)
-            },
-            {
-                type: 'number',
-                name: 'start_interval',
-                message: 'Enter the start interval in seconds:',
-                default: 0,
-                validate: (value) =>
-                    !value || (value && value >= 0) ? true : 'Please enter a valid number greater than or equal to 0.'
+                filter: (value: string) => (common.validate_int(value, 1, keys_cnt) ? parseInt(value, 10) : value)
             },
             {
                 type: 'input',
-                name: 'spend_limit',
-                message: 'Enter the limit of Solana that each bot can spend:',
-                validate: (value) =>
-                    common.validate_float(value, 0.001) ? true : 'Please enter a valid number greater than 0.001.',
-                filter: (value) => {
-                    const parsedValue = parseFloat(value);
-                    if (common.validate_float(value, 0.001)) {
-                        spend_limit = parsedValue;
-                        return parsedValue;
-                    }
-                    return value;
-                }
+                name: 'start_interval',
+                message: 'Enter the start interval in seconds:',
+                validate: (value: string) => {
+                    if (value === '') return true;
+                    if (!common.validate_int(value, 0))
+                        return 'Please enter a valid number greater than or equal to 0.';
+                    return true;
+                },
+                filter: (value: string) => (value === '' ? 0 : parseInt(value, 10))
             },
             {
                 type: 'input',
                 name: 'start_buy',
                 message: 'Enter the start Solana amount that the bot will buy the token for:',
-                validate: (value) => {
-                    if (!common.validate_float(value, 0.001)) {
-                        return 'Please enter a valid number greater than 0.001.';
-                    }
-                    if (spend_limit !== undefined && parseFloat(value) >= spend_limit) {
-                        return 'The start buy amount should be less than the spend limit.';
-                    }
+                validate: (value: string) => {
+                    if (!common.validate_float(value, 0.001)) return 'Please enter a valid number greater than 0.001.';
+                    start_buy = parseFloat(value);
                     return true;
                 },
-                filter: (value) => (common.validate_float(value, 0.001) ? parseFloat(value) : value)
+                filter: () => start_buy
+            },
+            {
+                type: 'input',
+                name: 'spend_limit',
+                message: 'Enter the limit of Solana that each bot can spend:',
+                validate: (value: string) => {
+                    if (!common.validate_float(value, 0.001)) return 'Please enter a valid number greater than 0.001.';
+                    if (parseFloat(value) <= start_buy) return 'Spend limit must be greater than start buy.';
+                    return true;
+                },
+                filter: (value: string) => parseFloat(value)
             },
             {
                 type: 'input',
                 name: 'mcap_threshold',
                 message: 'Enter the threshold market cap (leave blank for Infinity):',
                 default: '',
-                validate: (value) =>
+                validate: (value: string) =>
                     value === '' || common.validate_int(value, 5000)
                         ? true
                         : 'Please enter a valid number greater than 5000',
-                filter: (value) => (value === '' ? Infinity : parseInt(value, 10))
+                filter: (value: string) => (value === '' ? Infinity : parseInt(value, 10))
             },
             {
                 type: 'list',
@@ -424,7 +420,7 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 message: 'Choose the program:',
                 choices: ['Pump', 'Moonshoot'],
                 default: 0,
-                filter: (input) => (input.toLowerCase() === 'pump' ? PumpTrader : MoonTrader)
+                filter: (value: string) => (value.toLowerCase() === 'pump' ? PumpTrader : MoonTrader)
             },
             {
                 type: 'confirm',
@@ -437,12 +433,11 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
         if (!answers.is_buy_once) {
             const buy_interval = await inquirer.prompt([
                 {
-                    type: 'input',
+                    type: 'number',
                     name: 'buy_interval',
                     message: 'Enter the interval between each buy in seconds:',
-                    validate: (value) =>
-                        common.validate_int(value, 1) ? true : 'Please enter a valid number greater than 0.',
-                    filter: (value) => (common.validate_int(value, 1) ? parseInt(value, 10) : value)
+                    validate: (value: number | undefined) =>
+                        value && value > 0 ? true : 'Please enter a valid number greater than 0.'
                 }
             ]);
             answers = { ...answers, ...buy_interval };
@@ -455,7 +450,7 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                 message: 'Choose the type of the sniping:',
                 choices: ['Wait for the token to drop', 'Snipe an existing token'],
                 default: 0,
-                filter: (input) =>
+                filter: (input: string) =>
                     input.toLowerCase().includes(MethodStrings[Method.Wait].toLocaleLowerCase())
                         ? Method.Wait
                         : Method.Snipe
@@ -482,13 +477,13 @@ async function get_config(keys_cnt: number): Promise<BotConfig> {
                     type: 'input',
                     name: 'mint',
                     message: 'Enter the mint public key:',
-                    validate: async (input) => {
-                        if (!common.is_valid_pubkey(input)) return 'Please enter a valid public key.';
-                        const meta = await answers.trader.get_mint_meta(input);
+                    validate: async (value: string) => {
+                        if (!common.is_valid_pubkey(value)) return 'Please enter a valid public key.';
+                        const meta = await answers.trader.get_mint_meta(value);
                         if (!meta) return 'Failed fetching the mint data with the public key.';
                         return true;
                     },
-                    filter: (input) => new PublicKey(input)
+                    filter: (value: string) => new PublicKey(value)
                 }
             ]);
             answers = { ...answers, ...mint };

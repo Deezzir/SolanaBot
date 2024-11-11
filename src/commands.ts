@@ -8,6 +8,7 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 import pLimit from 'p-limit';
 import * as spider from './spider.js';
 import * as common from './common/common.js';
+import * as volume from './volume.js';
 import * as snipe from './common/snipe_common.js';
 import * as trade from './common/trade_common.js';
 dotenv.config({ path: './.env' });
@@ -33,7 +34,7 @@ function get_trader(program: common.Program): trade.IProgramTrader {
 export async function clean(wallets: common.Wallet[]): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    common.log('Cleaning all the accounts...\n');
+    common.log(common.yellow('Cleaning all the accounts...\n'));
 
     let unsold_set: string[] = [];
 
@@ -42,20 +43,24 @@ export async function clean(wallets: common.Wallet[]): Promise<void> {
 
         const balance = await trade.get_balance(closer.publicKey);
         if (balance === 0) {
-            common.error(`No balance for ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name}), skipping...`);
+            common.error(
+                common.red(
+                    `No balance for ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name}), skipping...`
+                )
+            );
             continue;
         }
 
         common.log(`Cleaning ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
         const unsold = await trade.close_accounts(closer);
         if (unsold) unsold_set = [...new Set([...unsold_set, ...unsold.map((i) => i.toString())])];
-        common.log(`Cleaned`);
+        common.log(common.green(`Cleaned`));
     }
 
     if (unsold_set.length > 0) {
-        common.log(`\nUnsold Tokens:`);
+        common.log(common.red(`\nUnsold Tokens:`));
         for (const item of unsold_set) {
-            common.log(`Mint: ${item}`);
+            common.log(common.bold(`Mint: ${item}`));
         }
     }
 }
@@ -73,7 +78,7 @@ export async function create_token(
     let trader: trade.IProgramTrader = get_trader(program);
     const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
 
-    common.log(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
+    common.log(common.yellow(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
 
     if (dev_buy && dev_buy > balance) {
         throw new Error(`[ERROR] Dev balance is not enough to buy for ${dev_buy} SOL`);
@@ -88,8 +93,8 @@ export async function create_token(
 
     try {
         const [sig, mint_addr] = await trader.create_token(dev, meta, cid, mint, dev_buy);
-        common.log(`Token created | Signature: ${sig}`);
-        common.log(`Mint address: ${mint_addr}`);
+        common.log(common.bold(`Token created | Signature: ${sig}`));
+        common.log(common.bold(`Mint address: ${mint_addr}`));
     } catch (error) {
         throw new Error(`[ERROR] Failed to create token: ${error}`);
     }
@@ -101,16 +106,16 @@ export async function promote(
     dev: Keypair,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    common.log(`Creating ${times} tokens with CID ${cid}...\n`);
+    common.log(common.yellow(`Creating ${times} tokens with CID ${cid}...\n`));
 
     let meta: common.IPFSMetadata;
     let trader: trade.IProgramTrader = get_trader(program);
 
     const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
-    common.log(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`);
+    common.log(common.bold(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
 
     meta = (await common.fetch_ipfs_json(cid)) as common.IPFSMetadata;
-    common.log(`Token name: ${meta.name} | Symbol: ${meta.symbol}\n`);
+    common.log(common.bold(`Token name: ${meta.name} | Symbol: ${meta.symbol}\n`));
 
     const transactions = [];
 
@@ -132,7 +137,7 @@ export async function promote(
 export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    common.log(`Getting the token balance of the wallets by the mint ${mint.toString()}...`);
+    common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
 
     let decimals, supply_num, supply;
     let token_name, token_symbol;
@@ -141,9 +146,9 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
         ({ token_name, token_symbol } = await trade.get_token_meta(mint));
         ({ supply, decimals } = await trade.get_token_supply(mint));
         supply_num = parseInt(supply.toString());
-        common.log(`Token: ${token_name} | Symbol: $${token_symbol}\n`);
+        common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}\n`));
     } catch (error) {
-        throw new Error(`[ERROR] Failed to get the balances: ${error}`);
+        throw new Error(`[ERROR] Failed to get the token information: ${error}`);
     }
 
     common.print_header([
@@ -185,13 +190,13 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
 
     const allocation = (total / (supply_num / 10 ** decimals)) * 100;
 
-    common.log(`\nWallet count: ${wallet_count}`);
-    common.log(`Total balance: ${total} ${token_symbol}`);
-    common.log(`Total allocation: ${allocation.toFixed(2)}%\n`);
+    common.log(common.green(`\nWallets with balance: ${wallet_count}`));
+    common.log(`Total balance: ${common.format_currency(total)} ${token_symbol}`);
+    common.log(common.bold(`Total allocation: ${allocation.toFixed(2)}%\n`));
 }
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
-    common.log(`Transferring ${amount} SOL from ${sender} to ${receiver.toString()}...`);
+    common.log(common.yellow(`Transferring ${amount} SOL from ${sender} to ${receiver.toString()}...`));
     const balance = await trade.get_balance(sender.publicKey);
 
     if (sender.publicKey.equals(receiver)) {
@@ -203,15 +208,16 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
     }
     trade
         .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, trade.PriorityLevel.VERY_HIGH)
-        .then((signature) => common.log(`Transaction completed, signature: ${signature}`))
-        .catch((error) => common.error(`Transaction failed: ${error.message}`));
+        .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
+        .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
 
 export async function balance(wallets: common.Wallet[]): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     let total = 0;
-    common.log('Getting the balance of the wallets...\n');
+    common.log(common.yellow('Getting the balance of the wallets...'));
+    common.log(common.yellow(`Wallet count: ${wallets.length}\n`));
 
     common.print_header([
         { title: 'Id', width: common.COLUMN_WIDTHS.id },
@@ -239,8 +245,7 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
         { width: common.COLUMN_WIDTHS.solBalance }
     ]);
 
-    common.log(`\nWallet count: ${wallets.length}`);
-    common.log(`Total balance: ${total} SOL\n`);
+    common.log(common.bold(`\nTotal balance: ${common.format_currency(total)} SOL\n`));
 }
 
 export async function sell_token_once(
@@ -250,11 +255,15 @@ export async function sell_token_once(
     program: common.Program = common.Program.Pump
 ): Promise<void> {
     const PERCENT = percent || 100.0;
-    common.log(`Selling the token by the mint ${mint.toString()}...`);
-    common.log(`Selling ${PERCENT}% of the tokens...`);
+    common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
+    common.log(common.yellow(`Selling ${PERCENT}% of the tokens...`));
 
     const token_amount = await trade.get_token_balance(seller.publicKey, mint);
-    common.log(`Seller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`);
+    common.log(
+        common.bold(
+            `\nSeller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
+        )
+    );
 
     if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) {
         throw new Error('[ERROR] No tokens to sell');
@@ -275,8 +284,8 @@ export async function sell_token_once(
 
     trader
         .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
-        .then((signature) => common.log(`Transaction completed, signature: ${signature}`))
-        .catch((error) => common.error(`Transaction failed: ${error.message}`));
+        .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
+        .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
 
 export async function buy_token_once(
@@ -285,10 +294,10 @@ export async function buy_token_once(
     buyer: Keypair,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    common.log(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`);
+    common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
     const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
-    common.log(`Buyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
+    common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < amount) {
         throw new Error(`[ERROR] Buyer balance is not enough to buy ${amount} SOL`);
     }
@@ -302,8 +311,8 @@ export async function buy_token_once(
 
     trader
         .buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
-        .then((signature) => common.log(`Transaction completed, signature: ${signature}`))
-        .catch((error) => common.error(`Transaction failed: ${error.message}`));
+        .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
+        .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
 
 export async function warmup(
@@ -318,7 +327,7 @@ export async function warmup(
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
     if (MAX < MIN) throw new Error('[ERROR] Invalid min and max values.');
 
-    common.log(`Warming up ${wallets.length} accounts...`);
+    common.log(common.yellow(`Warming up ${wallets.length} accounts...\n`));
 
     const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (MAX - MIN) + MIN));
     let trader: trade.IProgramTrader = get_trader(program);
@@ -329,7 +338,11 @@ export async function warmup(
 
         const balance = await trade.get_balance(buyer.publicKey);
         if (balance === 0) {
-            common.error(`No balance for ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name}), skipping...`);
+            common.error(
+                common.red(
+                    `No balance for ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name}), skipping...\n`
+                )
+            );
             continue;
         }
 
@@ -341,7 +354,9 @@ export async function warmup(
         }
 
         common.log(
-            `Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
+            common.yellow(
+                `Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
+            )
         );
 
         for (const mint of mints) {
@@ -355,17 +370,17 @@ export async function warmup(
             while (buy_attempts > 0 && !bought) {
                 try {
                     const signature = await trader.buy_token(amount, buyer, mint, 0.05);
-                    common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`);
+                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
                     bought = true;
                 } catch (e) {
-                    common.error(`Failed to buy the token, retrying... ${e}`);
+                    common.error(common.red(`Failed to buy the token, retrying... ${e}`));
                     buy_attempts--;
                     await common.sleep(1000);
                 }
             }
 
             if (!bought) {
-                common.error(`Failed to buy the token for ${wallet.name}, skipping...`);
+                common.error(common.red(`Failed to buy the token for ${wallet.name}, skipping...\n`));
                 continue;
             }
 
@@ -381,10 +396,10 @@ export async function warmup(
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint.token_name}' tokens (${wallet.name})...`);
                     const signature = await trader.sell_token(balance, buyer, mint, 0.05);
-                    common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`);
+                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
                     break;
                 } catch (e) {
-                    common.error(`Error selling the token, retrying... ${e}`);
+                    common.error(common.red(`Error selling the token, retrying... ${e}`));
                 }
             }
         }
@@ -394,8 +409,8 @@ export async function warmup(
 export async function collect(wallets: common.Wallet[], receiver: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    common.log(`Collecting all the SOL from the accounts to ${receiver}...`);
-    common.log(`Receiver address: ${receiver.toString()}\n`);
+    common.log(common.yellow(`Collecting all the SOL from the accounts to ${receiver}...`));
+    common.log(common.yellow(`Receiver address: ${receiver.toString()}\n`));
 
     const transactions = [];
 
@@ -410,8 +425,10 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
         transactions.push(
             trade
                 .send_lamports(amount, sender, receiver, trade.PriorityLevel.VERY_HIGH)
-                .then((signature) => common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`))
-                .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
+                .then((signature) =>
+                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                )
+                .catch((error) => common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`)))
         );
 
         await common.sleep(INTERVAL);
@@ -423,7 +440,7 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
 export async function collect_token(wallets: common.Wallet[], mint: PublicKey, receiver: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    common.log(`Collecting all the tokens from the accounts to ${receiver}...`);
+    common.log(common.yellow(`Collecting all the tokens from the accounts to ${receiver}...`));
 
     const receiver_assoc_addr = await trade.create_assoc_token_account(wallets[0].keypair, receiver, mint);
     const transactions = [];
@@ -450,12 +467,16 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
                 trade
                     .send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender)
                     .then((signature) =>
-                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
-                    .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
+                    .catch((error) =>
+                        common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`))
+                    )
             );
         } catch (error) {
-            common.error(`Failed to collect the token from ${wallet.name}: ${error}`);
+            if (error instanceof Error) {
+                common.error(common.red(`Failed to collect the token from ${wallet.name}: ${error.message}`));
+            }
         }
 
         await common.sleep(INTERVAL);
@@ -476,7 +497,7 @@ export async function buy_token(
     if (!amount && (!min || !max)) throw new Error('[ERROR] Either amount or min and max should be provided.');
     if (max && min && max < min) throw new Error('[ERROR] Invalid min and max values.');
 
-    common.log(`Buying the tokens from the accounts by the mint ${mint.toString()}...`);
+    common.log(common.yellow(`Buying the tokens from the accounts by the mint ${mint.toString()}...`));
 
     let trader: trade.IProgramTrader = get_trader(program);
     let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
@@ -504,12 +525,14 @@ export async function buy_token(
                 trader
                     .buy_token(buy_amount, buyer, mint_meta, BUY_SLIPPAGE)
                     .then((signature) =>
-                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
-                    .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
+                    .catch((error) =>
+                        common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`))
+                    )
             );
         } catch (error) {
-            common.error(`Failed to buy the token for ${wallet.name}: ${error}`);
+            common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
         }
         // await common.sleep(INTERVAL);
     }
@@ -526,8 +549,8 @@ export async function sell_token(
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     percent = percent || 100.0;
-    common.log(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`);
-    common.log(`Selling ${percent}% of the tokens...\n`);
+    common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
+    common.log(common.yellow(`Selling ${percent}% of the tokens...\n`));
 
     let trader: trade.IProgramTrader = get_trader(program);
     let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
@@ -552,15 +575,15 @@ export async function sell_token(
 
             transactions.push(
                 trader
-                    .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
+                    .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE, trade.PriorityLevel.HIGH)
                     .then((signature) =>
-                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
-                    .catch((error) => common.error(`Transaction failed for ${wallet.name}: ${error.message}`))
+                    .catch(() => common.error(common.red(`Transaction failed for ${wallet.name}`)))
             );
             // await common.sleep(INTERVAL);
         } catch (error) {
-            common.error(`Failed to sell the token for ${wallet.name}: ${error}`);
+            common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));
         }
     }
 
@@ -575,10 +598,10 @@ export async function topup(
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    common.log(`Topping up ${amount} SOL to every ${wallets.length} walets...`);
+    common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
 
     const balance = (await trade.get_balance(sender.publicKey)) / LAMPORTS_PER_SOL;
-    common.log(`Payer address: ${sender.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`);
+    common.log(common.yellow(`Payer address: ${sender.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < amount * wallets.length) {
         throw new Error(
             `[ERROR] Payer balance is not enough to top up ${amount} SOL to every ${wallets.length} wallet`
@@ -598,10 +621,10 @@ export async function topup(
                 trade
                     .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, trade.PriorityLevel.VERY_HIGH)
                     .then((signature) =>
-                        common.log(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
                     .catch((error) => {
-                        common.error(`Transaction failed for ${wallet.name}: ${error.message}`);
+                        common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`));
                         failed.push(wallet.name);
                     })
             );
@@ -611,10 +634,11 @@ export async function topup(
         await Promise.allSettled(transactions);
 
         if (failed.length > 0) {
-            common.error(`\nFailed transactions:`);
-            for (const item of failed) common.error(`Wallet: ${item}`);
+            common.error(common.red(`\nFailed transactions:`));
+            for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
         }
     } else {
+        common.log('Running spider:\n');
         const rescue_keys = await spider.run_spider_transfer(wallets, amount, sender);
         if (rescue_keys) {
             common.log(`\n[Main Worker] Performing cleanup of the temporary wallets...\n`);
@@ -651,7 +675,7 @@ export async function start(
 }
 
 export function generate(count: number, name: string, reserve: boolean, keys_path?: string, index?: number): void {
-    common.log(`Generating ${count} keypairs...\n`);
+    common.log(common.yellow(`Generating ${count} keypairs...\n`));
 
     const wallets: Partial<common.Wallet>[] = [];
     const starting_index = index || 1;
@@ -696,7 +720,42 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
         }
     });
 
-    common.log('Wallet generation completed');
+    common.log(common.green('Wallet generation completed\n'));
+}
+
+export async function start_volume() {
+    const volume_config = await volume.get_config();
+    if (volume_config.simulate) {
+        common.log(common.yellow('Simulating the volume bot...\n'));
+        const results = await volume.simulate(volume_config);
+
+        if (volume_config.type === volume.VolumeType.Natural)
+            common.log(common.red('Natural Volume simulation results may differ from the actual results\n'));
+
+        common.log(common.bold('Simulation Results:'));
+        common.log(`Current SOL price: $${common.format_currency(results.sol_price)}`);
+        common.log(`Total SOL used: ${common.format_currency(results.total_sol)}`);
+        common.log(`\nTotal SOL spent on fees: ${common.format_currency(results.total_tax_sol)}`);
+        common.log(`Total USD spent on fees: $${common.format_currency(results.total_tax_usd)}`);
+        common.log(`\nTotal volume in SOL: ${common.format_currency(results.total_volume_sol)}`);
+        common.log(`Total volume in USD: ${common.bold('$' + common.format_currency(results.total_volume_usd))}`);
+        return;
+    }
+
+    common.log(common.yellow('Starting the volume bot...'));
+
+    switch (volume_config.type) {
+        case volume.VolumeType.Fast: {
+            await volume.execute_fast(volume_config);
+            break;
+        }
+        case volume.VolumeType.Natural: {
+            await volume.execute_natural(volume_config);
+            break;
+        }
+        default:
+            throw new Error('[ERROR] Invalid Volume Bot type.');
+    }
 }
 
 export async function benchmark(
@@ -763,7 +822,7 @@ export async function benchmark(
     const avg_time = total_elapsed_time / (NUM_REQUESTS - errors);
     const tps = (NUM_REQUESTS - errors) / (total_elapsed_time / 1000);
 
-    common.log(`\n\nBenchmark Results:`);
+    common.log(common.green(`\n\nBenchmark Results:`));
     common.log(`Total Requests: ${NUM_REQUESTS}`);
     common.log(`Successful Requests: ${NUM_REQUESTS - errors}`);
     common.log(`Failed Requests: ${errors}`);

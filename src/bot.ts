@@ -32,14 +32,14 @@ async function main() {
         wallets = await common.get_wallets(common.WALLETS_FILE);
     } catch (error) {
         if (error instanceof Error) {
-            common.error(common.error_color(`[ERROR] ${error.message}`));
+            common.error(common.red(`[ERROR] ${error.message}`));
             exit(1);
         }
     }
 
     const wallet_cnt = wallets.length;
     if (wallet_cnt === 0) {
-        common.error(common.error_color('[ERROR] No wallets found.'));
+        common.error(common.red('[ERROR] No wallets found.'));
         exit(1);
     }
 
@@ -63,7 +63,7 @@ async function main() {
     program.configureOutput({
         writeOut: (str) => process.stdout.write(str),
         writeErr: (str) => process.stderr.write(str),
-        outputError: (str, write) => write(common.error_color(str))
+        outputError: (str, write) => write(common.red(str))
     });
 
     program
@@ -85,6 +85,13 @@ async function main() {
             const bot_config = await start_common.setup_config(wallet_cnt, config);
             await commands.start(wallets, bot_config, program);
         });
+
+    program
+        .command('volume')
+        .alias('v')
+        .description('Generate the volume for the Raydium pool')
+        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .action(async () => await commands.start_volume());
 
     program
         .command('generate')
@@ -552,7 +559,7 @@ async function main() {
         .command('drop')
         .alias('dr')
         .description('Do the drop')
-        .argument('<airdrop>', 'Percent of tokens to be airdroped', (value) => {
+        .argument('<airdrop_percent>', 'Percent of tokens to be airdroped', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             if (parsed_value < 0 || parsed_value > 100) throw new InvalidArgumentError('Invalid range (0-100).');
@@ -569,15 +576,15 @@ async function main() {
             if (!drop_wallet) throw new InvalidArgumentError('Invalid index.');
             return drop_wallet.keypair;
         })
-        .option('-p, --presale <number>', 'Turn on the presale', (value) => {
+        .option('-p, --presale <percent>', 'Turn on the presale', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0 || parsed_value > 100) throw new InvalidOptionArgumentError('Invalid range (0-100).');
             return parsed_value;
         })
-        .action(async (airdrop, mint, drop, options) => {
-            const { presale } = options;
-            await token_drop.drop(airdrop, mint, drop, presale);
+        .action(async (airdrop_percent, mint, drop, options) => {
+            const { presale_percent } = options;
+            await token_drop.drop(airdrop_percent, mint, drop, presale_percent);
         });
 
     program

@@ -763,45 +763,49 @@ async function create_raydium_swap_tx(
     }
 }
 
-async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys | undefined> {
+export async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys> {
     const ammAccount = await global.CONNECTION.getAccountInfo(amm);
     if (ammAccount) {
-        const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(ammAccount.data);
-        const marketAccount = await global.CONNECTION.getAccountInfo(poolState.marketId);
-        if (marketAccount) {
-            const marketState = MARKET_STATE_LAYOUT_V3.decode(marketAccount.data);
-            const marketAuthority = PublicKey.createProgramAddressSync(
-                [marketState.ownAddress.toBuffer(), marketState.vaultSignerNonce.toArrayLike(Buffer, 'le', 8)],
-                MAINNET_PROGRAM_ID.OPENBOOK_MARKET
-            );
-            return {
-                id: amm,
-                programId: MAINNET_PROGRAM_ID.AmmV4,
-                status: poolState.status,
-                baseDecimals: poolState.baseDecimal.toNumber(),
-                quoteDecimals: poolState.quoteDecimal.toNumber(),
-                lpDecimals: 9,
-                baseMint: poolState.baseMint,
-                quoteMint: poolState.quoteMint,
-                version: 4,
-                authority: RAYDIUM_AUTHORITY,
-                openOrders: poolState.openOrders,
-                baseVault: poolState.baseVault,
-                quoteVault: poolState.quoteVault,
-                marketProgramId: MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
-                marketId: marketState.ownAddress,
-                marketBids: marketState.bids,
-                marketAsks: marketState.asks,
-                marketEventQueue: marketState.eventQueue,
-                marketBaseVault: marketState.baseVault,
-                marketQuoteVault: marketState.quoteVault,
-                marketAuthority: marketAuthority,
-                targetOrders: poolState.targetOrders,
-                lpMint: poolState.lpMint
-            } as unknown as LiquidityPoolKeys;
+        try {
+            const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(ammAccount.data);
+            const marketAccount = await global.CONNECTION.getAccountInfo(poolState.marketId);
+            if (marketAccount) {
+                const marketState = MARKET_STATE_LAYOUT_V3.decode(marketAccount.data);
+                const marketAuthority = PublicKey.createProgramAddressSync(
+                    [marketState.ownAddress.toBuffer(), marketState.vaultSignerNonce.toArrayLike(Buffer, 'le', 8)],
+                    MAINNET_PROGRAM_ID.OPENBOOK_MARKET
+                );
+                return {
+                    id: amm,
+                    programId: MAINNET_PROGRAM_ID.AmmV4,
+                    status: poolState.status,
+                    baseDecimals: poolState.baseDecimal.toNumber(),
+                    quoteDecimals: poolState.quoteDecimal.toNumber(),
+                    lpDecimals: 9,
+                    baseMint: poolState.baseMint,
+                    quoteMint: poolState.quoteMint,
+                    version: 4,
+                    authority: RAYDIUM_AUTHORITY,
+                    openOrders: poolState.openOrders,
+                    baseVault: poolState.baseVault,
+                    quoteVault: poolState.quoteVault,
+                    marketProgramId: MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
+                    marketId: marketState.ownAddress,
+                    marketBids: marketState.bids,
+                    marketAsks: marketState.asks,
+                    marketEventQueue: marketState.eventQueue,
+                    marketBaseVault: marketState.baseVault,
+                    marketQuoteVault: marketState.quoteVault,
+                    marketAuthority: marketAuthority,
+                    targetOrders: poolState.targetOrders,
+                    lpMint: poolState.lpMint
+                } as unknown as LiquidityPoolKeys;
+            }
+        } catch {
+            throw new Error('Invalid Raydium AMM address');
         }
     }
-    return undefined;
+    throw new Error('Failed to retrieve account information');
 }
 
 async function swap_raydium(

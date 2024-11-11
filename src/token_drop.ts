@@ -14,6 +14,25 @@ const AIRDROP_COLLECTION = 'airdropusers';
 const PRESALE_COLLECTION = 'presaleusers';
 let DB: Db | undefined = undefined;
 
+// SCHEMA
+// airdropusers
+// {
+//     wallet: string;
+//     xUsername: string;
+//     xPostLink: string;
+//     tokensToSend: number;
+//     tx: string | null;
+// }
+
+// presaleusers
+// {
+//     wallet: string;
+//     solAmount: number;
+//     txEnroll: string[];
+//     tokensToSend: number;
+//     tx: string | null;
+// }
+
 const DB_CLIENT = new MongoClient(MONGO_URI, {
     serverApi: {
         version: ServerApiVersion.v1,

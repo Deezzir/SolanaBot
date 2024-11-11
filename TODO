@@ -23,4 +23,6 @@
       - Determine gains in %
       - Calculate average on all buy/sell gain pairs (or other aggregate?)
       - Maybe other metrics can be added (to discuss)
-- Remove mongo dep and make drop rely on provided CSV files
+- Pump Fun Shill, comments creation
+- Introduce bundled sells and buys
+- Pump/Moonshot Volume (and bump bot)

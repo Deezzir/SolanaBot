@@ -18,6 +18,7 @@ const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
 
 export function staticImplements<T>() {
     return <U extends T>(constructor: U) => {
+        red;
         constructor;
     };
 }
@@ -68,8 +69,24 @@ export function bold(message: string): string {
     return `${boldStart}${message}${boldEnd}`;
 }
 
-export function error_color(str: string) {
+export function red(str: string) {
     return `\x1b[31m${str}\x1b[0m`;
+}
+
+export function green(str: string) {
+    return `\x1b[32m${str}\x1b[0m`;
+}
+
+export function yellow(str: string) {
+    return `\x1b[33m${str}\x1b[0m`;
+}
+
+export function blue(str: string) {
+    return `\x1b[34m${str}\x1b[0m`;
+}
+
+export function format_currency(value: number): string {
+    return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 export function log(message: string): void {
