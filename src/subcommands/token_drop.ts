@@ -1,7 +1,7 @@
 import { MongoClient, Db, ServerApiVersion, WithId, Document, BulkWriteResult } from 'mongodb';
-import * as common from './common/common.js';
+import * as common from '../common/common.js';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import * as trade from './common/trade_common.js';
+import * as trade from '../common/trade_common.js';
 import dotenv from 'dotenv';
 dotenv.config();
 

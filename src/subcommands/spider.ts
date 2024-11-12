@@ -1,8 +1,8 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
-import * as common from './common/common.js';
-import * as trade from './common/trade_common.js';
+import * as common from '../common/common.js';
+import * as trade from '../common/trade_common.js';
 
 const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
 const MAX_RETRIES: number = 3;

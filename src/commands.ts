@@ -6,13 +6,13 @@ import { Wallet } from '@project-serum/anchor';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
 import pLimit from 'p-limit';
-import * as spider from './spider.js';
 import * as common from './common/common.js';
-import * as volume from './volume.js';
 import * as snipe from './common/snipe_common.js';
 import * as trade from './common/trade_common.js';
 import * as snipe_common from './common/snipe_common.js';
-import * as token_drop from './token_drop.js';
+import * as spider from './subcommands/spider.js';
+import * as volume from './subcommands/volume.js';
+import * as token_drop from './subcommands/token_drop.js';
 dotenv.config({ path: './.env' });
 
 const INTERVAL = 50;

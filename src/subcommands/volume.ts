@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
-import * as common from './common/common.js';
+import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
-import * as trade from './common/trade_common.js';
+import * as trade from '../common/trade_common.js';
 
 const RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
 
