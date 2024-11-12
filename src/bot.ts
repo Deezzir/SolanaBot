@@ -3,8 +3,6 @@ import dotenv from 'dotenv';
 import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
 import { existsSync } from 'fs';
 import * as common from './common/common.js';
-import * as start_common from './common/snipe_common.js';
-import * as token_drop from './token_drop.js';
 import * as commands from './commands.js';
 import { exit } from 'process';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
@@ -55,7 +53,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('3.2.0').description('Solana Bot CLI');
+    program.version('3.3.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -82,16 +80,22 @@ async function main() {
         .hook('preAction', () => reserve_wallet_preaction(wallets))
         .action(async (options: any) => {
             let { config, program } = options;
-            const bot_config = await start_common.setup_config(wallet_cnt, config);
-            await commands.start(wallets, bot_config, program);
+            await commands.start(wallets, program, config);
         });
 
     program
         .command('volume')
         .alias('v')
         .description('Generate the volume for the Raydium pool')
+        .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
+            if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
+            return common.read_json(value);
+        })
         .hook('preAction', () => reserve_wallet_preaction(wallets))
-        .action(async () => await commands.start_volume());
+        .action(async (options: any) => {
+            const { config } = options;
+            await commands.start_volume(config);
+        });
 
     program
         .command('generate')
@@ -584,7 +588,7 @@ async function main() {
         })
         .action(async (airdrop_percent, mint, drop, options) => {
             const { presale_percent } = options;
-            await token_drop.drop(airdrop_percent, mint, drop, presale_percent);
+            await commands.drop(airdrop_percent, mint, drop, presale_percent);
         });
 
     program

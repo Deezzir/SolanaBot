@@ -67,6 +67,7 @@ export interface IMintMeta {
 }
 
 export interface IProgramTrader {
+    get_name(): string;
     buy_token(
         sol_amount: number,
         buyer: Signer,
@@ -455,6 +456,24 @@ export async function send_tokens(
     instructions.push(createTransferInstruction(sender, receiver, owner.publicKey, token_amount));
 
     return await create_and_send_smart_tx(instructions, [owner]);
+}
+
+export async function send_tokens_with_account_create(
+    token_amount: number,
+    mint: PublicKey,
+    sender: PublicKey,
+    receiver: PublicKey,
+    payer: Signer
+): Promise<String> {
+    let instructions: TransactionInstruction[] = [];
+
+    const ata = await calc_assoc_token_addr(receiver, mint);
+    if (!(await check_account_exists(ata))) {
+        instructions.push(createAssociatedTokenAccountInstruction(payer.publicKey, ata, receiver, mint));
+    }
+
+    instructions.push(createTransferInstruction(sender, ata, payer.publicKey, token_amount));
+    return await create_and_send_smart_tx(instructions, [payer]);
 }
 
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {

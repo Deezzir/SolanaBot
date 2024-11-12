@@ -11,6 +11,8 @@ import * as common from './common/common.js';
 import * as volume from './volume.js';
 import * as snipe from './common/snipe_common.js';
 import * as trade from './common/trade_common.js';
+import * as snipe_common from './common/snipe_common.js';
+import * as token_drop from './token_drop.js';
 dotenv.config({ path: './.env' });
 
 const INTERVAL = 50;
@@ -281,7 +283,6 @@ export async function sell_token_once(
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
     }
-
     trader
         .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
@@ -649,21 +650,29 @@ export async function topup(
 
 export async function start(
     wallets: common.Wallet[],
-    bot_config: snipe.BotConfig,
-    program: common.Program = common.Program.Pump
+    program: common.Program = common.Program.Pump,
+    json_config?: object
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
+    let trader: trade.IProgramTrader = get_trader(program);
     const sol_price = await common.fetch_sol_price();
-    let sniper: snipe.ISniper;
+    const bot_config = await snipe_common.setup_config(wallets.length - 1, trader, json_config);
 
+    if (bot_config.mint) {
+        common.log(common.yellow('Sniping existing mint...'));
+    } else if (bot_config.token_name && bot_config.token_ticker) {
+        common.log(common.yellow('Sniping token by name and ticker...'));
+    }
+
+    let sniper: snipe.ISniper;
     switch (program) {
         case common.Program.Pump: {
-            sniper = new PumpRunner(bot_config);
+            sniper = new PumpRunner(bot_config, trader);
             break;
         }
         case common.Program.Moonshot: {
-            sniper = new MoonRunner(bot_config);
+            sniper = new MoonRunner(bot_config, trader);
             break;
         }
         default: {
@@ -723,10 +732,12 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     common.log(common.green('Wallet generation completed\n'));
 }
 
-export async function start_volume() {
-    const volume_config = await volume.get_config();
+export async function start_volume(json_config?: object): Promise<void> {
+    const volume_config = await volume.setup_config(json_config);
+    const volume_type_name = volume.VolumeTypeStrings[volume_config.type];
+
     if (volume_config.simulate) {
-        common.log(common.yellow('Simulating the volume bot...\n'));
+        common.log(common.yellow(`Simulating the ${volume_type_name} Volume Bot...\n`));
         const results = await volume.simulate(volume_config);
 
         if (volume_config.type === volume.VolumeType.Natural)
@@ -742,7 +753,7 @@ export async function start_volume() {
         return;
     }
 
-    common.log(common.yellow('Starting the volume bot...'));
+    common.log(common.yellow(`Starting the ${volume_type_name} Volume Bot...`));
 
     switch (volume_config.type) {
         case volume.VolumeType.Fast: {
@@ -806,11 +817,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         })
@@ -831,4 +842,32 @@ export async function benchmark(
     common.log(`Min Time: ${min_time.toFixed(2)} ms`);
     common.log(`Max Time: ${max_time.toFixed(2)} ms`);
     common.log(`Estimated TPS: ${tps.toFixed(2)}`);
+}
+
+export async function drop(
+    airdrop_percent: number,
+    mint: PublicKey,
+    drop: Keypair,
+    presale_percent: number = 0
+): Promise<void> {
+    common.log(common.yellow(`Dropping the mint ${mint.toString()}...`));
+    common.log(common.yellow(`Airdrop percent: ${airdrop_percent}% | Presale percent: ${presale_percent}%`));
+
+    const mint_meta = await trade.get_token_meta(mint);
+    common.log(`Token name: ${mint_meta.token_name} | Symbol: ${mint_meta.token_symbol}\n`);
+
+    let token_balance: number = 0;
+    try {
+        const balance = await trade.get_token_balance(drop.publicKey, mint_meta.mint);
+        token_balance = Math.floor(balance.uiAmount || 0);
+        common.log(
+            common.yellow(
+                `Drop address: ${drop.publicKey.toString()} | Balance: ${token_balance} ${mint_meta.token_symbol}\n`
+            )
+        );
+    } catch (err) {
+        throw new Error('[ERROR] Failed to process dropper file');
+    }
+
+    token_drop.execute(drop, token_balance, mint_meta, airdrop_percent, presale_percent);
 }

@@ -103,6 +103,10 @@ export function error(message: string): void {
     if (global.RL !== undefined) global.RL.prompt(true);
 }
 
+export function generate_keypairs(count: number): Keypair[] {
+    return [...new Array(count)].map(() => Keypair.generate());
+}
+
 export function check_reserve_exists(keys: Wallet[]): boolean {
     const reserveCount = keys.filter((wallet) => wallet.is_reserve).length;
     return reserveCount === 1;
@@ -110,6 +114,17 @@ export function check_reserve_exists(keys: Wallet[]): boolean {
 
 export function filter_wallets(wallet: Wallet[], from?: number, to?: number, list?: number[]): Wallet[] {
     return list ? wallet.filter((wallet) => list.includes(wallet.id)) : wallet.slice(from, to);
+}
+
+export async function to_confirm(message: string) {
+    const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    await new Promise<void>((resolve) => rl.question(green(message), () => resolve()));
+
+    rl.close();
 }
 
 export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
@@ -200,7 +215,7 @@ export function uniform_random(min: number, max: number): number {
     return Math.random() * (max - min) + min;
 }
 
-export function read_json(file_path: string): any {
+export function read_json(file_path: string): object {
     try {
         const content = readFileSync(file_path, 'utf8');
         return JSON.parse(content);
@@ -283,10 +298,19 @@ export async function create_metadata(meta: IPFSMetadata, image_path: string): P
 }
 
 export function setup_readline(): void {
+    if (global.RL) return;
     global.RL = createInterface({
         input: process.stdin,
         output: process.stdout
     });
+}
+
+export function close_readline(): void {
+    if (!global.RL) return;
+    global.RL.prompt(false);
+    global.RL.pause().removeAllListeners('line').removeAllListeners('close').close();
+    cursorTo(process.stdout, 0);
+    clearLine(process.stdout, 0);
 }
 
 export function round_two(num: number): number {
@@ -340,7 +364,8 @@ export const COLUMN_WIDTHS = {
     publicKey: 44,
     solBalance: 14,
     allocation: 10,
-    tokenBalance: 20
+    tokenBalance: 20,
+    parameter: 20,
 };
 
 const BORDER_CHARS = {
@@ -361,14 +386,18 @@ export function format_name(name: string): string {
     return name.length > COLUMN_WIDTHS.name ? name.slice(0, COLUMN_WIDTHS.name - 3) + '...' : name;
 }
 
-function format_column(content: string, width: number, align: 'left' | 'right' = 'left'): string {
+function format_column(content: string, width: number, align: 'left' | 'right' | 'center' = 'left'): string {
     if (align === 'left') {
         return content.padEnd(width, ' ');
     }
-    return content.padStart(width, ' ');
+    if (align === 'right') {
+        return content.padStart(width, ' ');
+    }
+    const padStart = Math.floor((width - content.length) / 2);
+    return content.padStart(padStart + content.length, ' ').padEnd(width, ' ');
 }
 
-export function print_header(columns: { title: string; width: number; align?: 'left' | 'right' }[]) {
+export function print_header(columns: { title: string; width: number; align?: 'left' | 'right' | 'center' }[]) {
     const top_border = columns.map((col) => BORDER_CHARS.horizontal.repeat(col.width + 2)).join(BORDER_CHARS.topMiddle);
 
     const header = columns
@@ -382,7 +411,7 @@ export function print_header(columns: { title: string; width: number; align?: 'l
     log(`${BORDER_CHARS.horizontalLeft}${separator}${BORDER_CHARS.horizontalRight}`);
 }
 
-export function print_row(columns: { content: string; width: number; align?: 'left' | 'right' }[]) {
+export function print_row(columns: { content: string; width: number; align?: 'left' | 'right' | 'center' }[]) {
     const row = columns
         .map((col) => format_column(col.content, col.width, col.align))
         .join(` ${BORDER_CHARS.vertical} `);

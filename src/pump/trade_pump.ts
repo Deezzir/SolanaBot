@@ -114,6 +114,10 @@ type CurveState = {
 
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
+    public static get_name(): string {
+        return 'Pump';
+    }
+
     public static async buy_token(
         sol_amount: number,
         buyer: Signer,
