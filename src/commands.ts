@@ -717,10 +717,10 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     const writeStream = createWriteStream(name, { encoding: 'utf8' });
     writeStream.write(common.KEYS_FILE_HEADERS.join(',') + '\n');
     wallets.forEach((wallet) => {
-        if (wallet.name && wallet.is_reserve && wallet.keypair) {
+        if (wallet.name && wallet.keypair) {
             const row = [
                 wallet.name,
-                JSON.stringify(Array.from(wallet.keypair.secretKey)),
+                bs58.encode(wallet.keypair.secretKey),
                 wallet.is_reserve,
                 wallet.keypair.publicKey.toString(),
                 new Date().toLocaleDateString()
