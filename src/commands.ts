@@ -401,6 +401,7 @@ export async function warmup(
                     break;
                 } catch (e) {
                     common.error(common.red(`Error selling the token, retrying... ${e}`));
+                    sell_attempts--;
                 }
             }
         }
