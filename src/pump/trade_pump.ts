@@ -174,7 +174,40 @@ export class Trader {
             .then((data: any) => {
                 if (!data || data.statusCode !== undefined) return [];
                 const shuffled = data.sort(() => 0.5 - Math.random());
-                return (shuffled.slice(0, count) as PumpMintMeta[]).filter((i) => !i.raydium_pool);
+                return shuffled.slice(0, count).map((item: any) => {
+                    return new PumpMintMeta({
+                        mint: item.mint,
+                        name: item.name,
+                        symbol: item.symbol,
+                        description: item.description,
+                        image_uri: item.image_uri,
+                        metadata_uri: item.metadata_uri,
+                        twitter: item.twitter,
+                        telegram: item.telegram,
+                        bonding_curve: item.bonding_curve,
+                        associated_bonding_curve: item.associated_bonding_curve,
+                        creator: item.creator,
+                        created_timestamp: item.created_timestamp,
+                        raydium_pool: item.raydium_pool,
+                        complete: item.complete,
+                        virtual_sol_reserves: item.virtual_sol_reserves,
+                        virtual_token_reserves: item.virtual_token_reserves,
+                        total_supply: item.total_supply,
+                        website: item.website,
+                        show_name: item.show_name,
+                        king_of_the_hill_timestamp: item.king_of_the_hill_timestamp,
+                        market_cap: item.market_cap,
+                        reply_count: item.reply_count,
+                        last_reply: item.last_reply,
+                        nsfw: item.nsfw,
+                        market_id: item.market_id,
+                        inverted: item.inverted,
+                        usd_market_cap: item.usd_market_cap,
+                        username: item.username,
+                        profile_image: item.profile_image,
+                        is_currently_live: item.is_currently_live,
+                    })
+                }).filter((i: PumpMintMeta) => !i.raydium_pool);
             })
             .catch((err) => {
                 common.error(`[ERROR] Failed fetching the mints: ${err}`);

@@ -335,7 +335,7 @@ export async function warmup(
 
     for (const [i, wallet] of wallets.entries()) {
         const buyer = wallet.keypair;
-        let mints = [];
+        let mints: trade.IMintMeta[] = [];
 
         const balance = await trade.get_balance(buyer.publicKey);
         if (balance === 0) {
