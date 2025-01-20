@@ -370,7 +370,7 @@ export async function warmup(
             let bought = false;
             while (buy_attempts > 0 && !bought) {
                 try {
-                    const signature = await trader.buy_token(amount, buyer, mint, 0.05);
+                    const signature = await trader.buy_token(amount, buyer, mint, 0.05, trade.PriorityLevel.MEDIUM);
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
                     bought = true;
                 } catch (e) {
@@ -396,7 +396,7 @@ export async function warmup(
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint.token_name}' tokens (${wallet.name})...`);
-                    const signature = await trader.sell_token(balance, buyer, mint, 0.1, trade.PriorityLevel.HIGH);
+                    const signature = await trader.sell_token(balance, buyer, mint, 0.1, trade.PriorityLevel.MEDIUM);
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
                     break;
                 } catch (e) {
@@ -817,11 +817,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         })
