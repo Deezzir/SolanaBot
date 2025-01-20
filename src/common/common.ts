@@ -365,7 +365,7 @@ export const COLUMN_WIDTHS = {
     solBalance: 14,
     allocation: 10,
     tokenBalance: 20,
-    parameter: 20,
+    parameter: 20
 };
 
 const BORDER_CHARS = {

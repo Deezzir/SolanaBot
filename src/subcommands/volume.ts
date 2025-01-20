@@ -66,16 +66,16 @@ async function get_config() {
         const { wallet_cnt } =
             type === VolumeType.Natural
                 ? await inquirer.prompt<{ wallet_cnt: number }>([
-                    {
-                        type: 'number',
-                        name: 'wallet_cnt',
-                        message: 'Enter the number of wallets to use, max 5 (eg. 2):',
-                        validate: (value: number | undefined) =>
-                            value && value > 0 && value <= 5
-                                ? true
-                                : 'Please enter a valid number greater than 0 and less than or equal to 5.'
-                    }
-                ])
+                      {
+                          type: 'number',
+                          name: 'wallet_cnt',
+                          message: 'Enter the number of wallets to use, max 5 (eg. 2):',
+                          validate: (value: number | undefined) =>
+                              value && value > 0 && value <= 5
+                                  ? true
+                                  : 'Please enter a valid number greater than 0 and less than or equal to 5.'
+                      }
+                  ])
                 : { wallet_cnt: 1 };
 
         answers = await inquirer.prompt<VolumeConfig>([
@@ -304,25 +304,22 @@ function log_volume_config(volume_config: VolumeConfig) {
         amm: volume_config.amm.toString(),
         simulate: volume_config.simulate ? 'Yes' : 'No',
         min_sol_amount: volume_config.min_sol_amount.toFixed(2),
-        max_sol_amount: volume_config.max_sol_amount.toFixed(2),
+        max_sol_amount: volume_config.max_sol_amount.toFixed(2)
     };
 
     const max_length = Math.max(...Object.values(to_print).map((value) => value.toString().length));
 
     common.print_header([
         { title: 'Parameter', width: common.COLUMN_WIDTHS.parameter, align: 'center' },
-        { title: 'Value', width: max_length, align: 'center' },
+        { title: 'Value', width: max_length, align: 'center' }
     ]);
 
     for (const [key, value] of Object.entries(to_print)) {
         common.print_row([
             { content: key, width: common.COLUMN_WIDTHS.parameter, align: 'center' },
-            { content: value.toString(), width: max_length, align: 'left' },
+            { content: value.toString(), width: max_length, align: 'left' }
         ]);
-    };
+    }
 
-    common.print_footer([
-        { width: common.COLUMN_WIDTHS.parameter },
-        { width: max_length },
-    ]);
+    common.print_footer([{ width: common.COLUMN_WIDTHS.parameter }, { width: max_length }]);
 }

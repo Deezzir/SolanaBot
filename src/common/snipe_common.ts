@@ -540,20 +540,17 @@ function log_bot_config(bot_config: BotConfig) {
 
     common.print_header([
         { title: 'Parameter', width: common.COLUMN_WIDTHS.parameter, align: 'center' },
-        { title: 'Value', width: max_length, align: 'center' },
+        { title: 'Value', width: max_length, align: 'center' }
     ]);
 
     for (const [key, value] of Object.entries(to_print)) {
         common.print_row([
             { content: key, width: common.COLUMN_WIDTHS.parameter, align: 'center' },
-            { content: value.toString(), width: max_length, align: 'left' },
+            { content: value.toString(), width: max_length, align: 'left' }
         ]);
     }
 
-    common.print_footer([
-        { width: common.COLUMN_WIDTHS.parameter },
-        { width: max_length },
-    ]);
+    common.print_footer([{ width: common.COLUMN_WIDTHS.parameter }, { width: max_length }]);
 }
 
 function update_bot_config(bot_config: BotConfig, key: string, value: string): void {

@@ -575,7 +575,10 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
             }
 
             try {
-                const signature = await create_and_send_smart_tx(intructions, [owner.payer]);
+                const signature = await create_and_send_tx(intructions, [owner.payer], {
+                    accounts: [TOKEN_PROGRAM_ID.toString()],
+                    priority_level: PriorityLevel.MEDIUM
+                });
                 common.log(`${chunk.length} accounts closed | Signature ${signature}`);
                 break;
             } catch (err) {
