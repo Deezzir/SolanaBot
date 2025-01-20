@@ -582,7 +582,10 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
                 common.log(`${chunk.length} accounts closed | Signature ${signature}`);
                 break;
             } catch (err) {
-                common.error(`Failed to close accounts: ${err}, retrying...`);
+                if (err instanceof Error) {
+                    common.error(`Failed to close accounts: ${err.message}, retrying...`);
+                }
+                common.error(`Failed to close accounts, retrying...`);
             }
         }
     }

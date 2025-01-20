@@ -396,12 +396,11 @@ export async function warmup(
                         continue;
                     }
                     common.log(`Selling ${balance.uiAmount} '${mint.token_name}' tokens (${wallet.name})...`);
-                    const signature = await trader.sell_token(balance, buyer, mint, 0.05);
+                    const signature = await trader.sell_token(balance, buyer, mint, 0.1, trade.PriorityLevel.HIGH);
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
                     break;
                 } catch (e) {
                     common.error(common.red(`Error selling the token, retrying... ${e}`));
-                    sell_attempts--;
                 }
             }
         }
