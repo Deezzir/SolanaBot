@@ -324,6 +324,8 @@ export async function warmup(
 ): Promise<void> {
     const MIN = min || 1;
     const MAX = max || 5;
+    const MAX_BUY_RETRIES = 5;
+    const MAX_SELL_RETRIES = 20;
 
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
     if (MAX < MIN) throw new Error('[ERROR] Invalid min and max values.');
@@ -335,7 +337,6 @@ export async function warmup(
 
     for (const [i, wallet] of wallets.entries()) {
         const buyer = wallet.keypair;
-        let mints: trade.IMintMeta[] = [];
 
         const balance = await trade.get_balance(buyer.publicKey);
         if (balance === 0) {
@@ -347,13 +348,7 @@ export async function warmup(
             continue;
         }
 
-        // TODO: do it in the func
-        while (true) {
-            mints = await trader.get_random_mints(token_cnts[i]);
-            if (mints.length === token_cnts[i]) break;
-            await common.sleep(2000);
-        }
-
+        const mints: trade.IMintMeta[] = await trade.get_random_mints(trader, token_cnts[i]);
         common.log(
             common.yellow(
                 `Warming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
@@ -361,48 +356,35 @@ export async function warmup(
         );
 
         for (const mint of mints) {
-            let amount = parseFloat(common.normal_random(0.001, 0.0001).toFixed(4));
-            if (amount === 0) amount = 0.001;
-
+            let amount = Math.max(0.01, parseFloat(common.normal_random(0.01, 0.001).toFixed(4)));
             common.log(`Buying ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`);
 
-            let buy_attempts = 5;
-            let bought = false;
-            while (buy_attempts > 0 && !bought) {
-                try {
-                    const signature = await trader.buy_token(amount, buyer, mint, 0.05, trade.PriorityLevel.MEDIUM);
-                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
-                    bought = true;
-                } catch (e) {
-                    common.error(common.red(`Failed to buy the token, retrying... ${e}`));
-                    buy_attempts--;
-                    await common.sleep(1000);
-                }
-            }
-
-            if (!bought) {
+            const buy_signature = trader.buy_token_with_retry(
+                amount,
+                buyer,
+                mint,
+                0.1,
+                MAX_BUY_RETRIES,
+                trade.PriorityLevel.MEDIUM
+            );
+            if (!buy_signature) {
                 common.error(common.red(`Failed to buy the token for ${wallet.name}, skipping...\n`));
                 continue;
             }
+            common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${buy_signature}`));
 
-            let sell_attempts = 20;
-            while (sell_attempts > 0) {
-                await common.sleep(3000);
-                try {
-                    const balance = await trade.get_token_balance(buyer.publicKey, new PublicKey(mint.token_mint));
-                    if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                        common.log(`No tokens yet to sell for ${wallet.name} and mint ${mint.token_mint}, waiting...`);
-                        sell_attempts--;
-                        continue;
-                    }
-                    common.log(`Selling ${balance.uiAmount} '${mint.token_name}' tokens (${wallet.name})...`);
-                    const signature = await trader.sell_token(balance, buyer, mint, 0.1, trade.PriorityLevel.MEDIUM);
-                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
-                    break;
-                } catch (e) {
-                    common.error(common.red(`Error selling the token, retrying... ${e}`));
-                    sell_attempts--;
-                }
+            common.log(`Selling '${mint.token_name}' tokens (${wallet.name})...`);
+            const sell_signature = trader.sell_token_with_retry(
+                buyer,
+                mint,
+                0.1,
+                MAX_SELL_RETRIES,
+                trade.PriorityLevel.MEDIUM
+            );
+            if (sell_signature) {
+                common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${sell_signature}`));
+            } else {
+                common.log(common.red(`Failed to sell the token for ${wallet.name}, continuing...\n`));
             }
         }
     }
@@ -818,11 +800,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         })

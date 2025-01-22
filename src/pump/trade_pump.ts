@@ -135,6 +135,28 @@ export class Trader {
         }
     }
 
+    public static async buy_token_with_retry(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: PumpMintMeta,
+        slippage: number = 0.05,
+        retries: number,
+        priority?: trade.PriorityLevel
+    ): Promise<String | undefined> {
+        let buy_attempts = retries;
+        let bought = false;
+        while (buy_attempts > 0 && !bought) {
+            try {
+                return await this.buy_token(sol_amount, buyer, mint_meta, slippage, priority);
+            } catch (e) {
+                common.error(common.red(`Failed to buy the token, retrying... ${e}`));
+                buy_attempts--;
+                await common.sleep(3000);
+            }
+            return;
+        }
+    }
+
     public static async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
@@ -151,17 +173,57 @@ export class Trader {
         }
     }
 
+    public static async sell_token_with_retry(
+        seller: Signer,
+        mint_meta: PumpMintMeta,
+        slippage: number = 0.05,
+        retries: number,
+        priority: trade.PriorityLevel
+    ): Promise<String | undefined> {
+        let sell_attempts = retries;
+        while (sell_attempts > 0) {
+            try {
+                const balance = await trade.get_token_balance(seller.publicKey, new PublicKey(mint_meta.token_mint));
+                if (balance.uiAmount === 0 || balance.uiAmount === null) {
+                    common.log(`No tokens yet to sell for mint ${mint_meta.token_mint}, waiting...`);
+                    sell_attempts--;
+                    await common.sleep(3000);
+                    continue;
+                }
+                return await this.sell_token(balance, seller, mint_meta, slippage, priority);
+            } catch (e) {
+                common.error(common.red(`Error selling the token, retrying... ${e}`));
+                sell_attempts--;
+                await common.sleep(1000);
+            }
+        }
+        return;
+    }
+
     public static async get_mint_meta(mint: string): Promise<PumpMintMeta | undefined> {
-        return fetch(`${FETCH_MINT_API_URL}/coins/${mint}`)
-            .then((response) => response.json())
-            .then((data) => {
-                if (!data || data.statusCode !== undefined || !isPumpMeta(data)) return;
-                return new PumpMintMeta(data);
-            })
-            .catch((err) => {
-                common.error(`[ERROR] Failed fetching the mint: ${err}`);
+        try {
+            const response = await fetch(`${FETCH_MINT_API_URL}/coins/${mint}`);
+
+            if (!response.ok) {
+                common.error(`[ERROR] Failed fetching the mint. HTTP Status: ${response.status}`);
                 return undefined;
-            });
+            }
+
+            const data = await response.json();
+            if (!data || data.statusCode !== undefined || !isPumpMeta(data)) {
+                common.error('[ERROR] Invalid data structure received from the API.');
+                return undefined;
+            }
+
+            const mintMeta = new PumpMintMeta(data);
+            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mintMeta.mint));
+            if (amm) mintMeta.raydium_pool = amm.toString();
+
+            return mintMeta;
+        } catch (error) {
+            common.error(`[ERROR] Failed fetching the mint: ${error}`);
+            return undefined;
+        }
     }
 
     public static async get_random_mints(count: number): Promise<PumpMintMeta[]> {
@@ -177,38 +239,7 @@ export class Trader {
                 return shuffled
                     .slice(0, count)
                     .map((item: any) => {
-                        return new PumpMintMeta({
-                            mint: item.mint,
-                            name: item.name,
-                            symbol: item.symbol,
-                            description: item.description,
-                            image_uri: item.image_uri,
-                            metadata_uri: item.metadata_uri,
-                            twitter: item.twitter,
-                            telegram: item.telegram,
-                            bonding_curve: item.bonding_curve,
-                            associated_bonding_curve: item.associated_bonding_curve,
-                            creator: item.creator,
-                            created_timestamp: item.created_timestamp,
-                            raydium_pool: item.raydium_pool,
-                            complete: item.complete,
-                            virtual_sol_reserves: item.virtual_sol_reserves,
-                            virtual_token_reserves: item.virtual_token_reserves,
-                            total_supply: item.total_supply,
-                            website: item.website,
-                            show_name: item.show_name,
-                            king_of_the_hill_timestamp: item.king_of_the_hill_timestamp,
-                            market_cap: item.market_cap,
-                            reply_count: item.reply_count,
-                            last_reply: item.last_reply,
-                            nsfw: item.nsfw,
-                            market_id: item.market_id,
-                            inverted: item.inverted,
-                            usd_market_cap: item.usd_market_cap,
-                            username: item.username,
-                            profile_image: item.profile_image,
-                            is_currently_live: item.is_currently_live
-                        });
+                        return new PumpMintMeta(item);
                     })
                     .filter((i: PumpMintMeta) => !i.raydium_pool);
             })

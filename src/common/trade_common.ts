@@ -56,6 +56,7 @@ export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111
 const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
+const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 
 const MAX_RETRIES = 2;
 
@@ -75,6 +76,14 @@ export interface IProgramTrader {
         slippage: number,
         priority?: PriorityLevel
     ): Promise<String>;
+    buy_token_with_retry(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: IMintMeta,
+        slippage: number,
+        retries: number,
+        priority?: PriorityLevel
+    ): Promise<String | undefined>;
     sell_token(
         token_amount: TokenAmount,
         seller: Signer,
@@ -82,6 +91,13 @@ export interface IProgramTrader {
         slippage: number,
         priority?: PriorityLevel
     ): Promise<String>;
+    sell_token_with_retry(
+        seller: Signer,
+        mint_meta: Partial<IMintMeta>,
+        slippage: number,
+        retries: number,
+        priority?: PriorityLevel
+    ): Promise<String | undefined>;
     get_mint_meta(mint: string): Promise<IMintMeta | undefined>;
     create_token(
         creator: Signer,
@@ -406,6 +422,16 @@ export async function send_lamports(
 export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
     let ata = await getAssociatedTokenAddress(mint, owner, true);
     return ata;
+}
+
+export async function get_random_mints(trader: IProgramTrader, count: number): Promise<IMintMeta[]> {
+    let mints: IMintMeta[] = [];
+    while (true) {
+        mints = await trader.get_random_mints(count);
+        if (mints.length === count) break;
+        await common.sleep(2000);
+    }
+    return mints;
 }
 
 export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
@@ -785,6 +811,54 @@ async function create_raydium_swap_tx(
         });
     } else {
         return await create_and_send_smart_tx(instructions, [seller]);
+    }
+}
+
+async function get_vault_balance(vault: PublicKey): Promise<number> {
+    const balance = await CONNECTION.getTokenAccountBalance(vault);
+    return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
+}
+
+export async function get_raydium_token_price(amm: PublicKey): Promise<{ price_sol: number; mcap_sol: number }> {
+    try {
+        const info = await global.CONNECTION.getAccountInfo(amm);
+        if (!info) return { price_sol: 0.0, mcap_sol: 0.0 };
+        const pool_state = LIQUIDITY_STATE_LAYOUT_V4.decode(info.data);
+
+        const base_token_balance = await get_vault_balance(pool_state.baseVault);
+        const quote_token_balance = await get_vault_balance(pool_state.quoteVault);
+
+        const price_sol = base_token_balance / quote_token_balance;
+        const token = await get_token_supply(pool_state.quoteMint);
+        const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
+        return { price_sol, mcap_sol };
+    } catch (err) {
+        return { price_sol: 0.0, mcap_sol: 0.0 };
+    }
+}
+
+export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | undefined> {
+    try {
+        const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM_PROGRAM_ID, {
+            filters: [
+                { dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
+                {
+                    memcmp: {
+                        offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('baseMint'),
+                        bytes: SOL_MINT.toBase58()
+                    }
+                },
+                {
+                    memcmp: {
+                        offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('quoteMint'),
+                        bytes: mint.toBase58()
+                    }
+                }
+            ]
+        });
+        return marketAccount.pubkey;
+    } catch {
+        return;
     }
 }
 

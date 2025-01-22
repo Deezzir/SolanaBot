@@ -53,7 +53,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('3.3.0').description('Solana Bot CLI');
+    program.version('3.4.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');

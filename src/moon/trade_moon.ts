@@ -115,6 +115,28 @@ export class Trader {
         }
     }
 
+    public static async buy_token_with_retry(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: MoonshotMintMeta,
+        slippage: number = 0.05,
+        retries: number,
+        priority?: trade.PriorityLevel
+    ): Promise<String | undefined> {
+        let buy_attempts = retries;
+        let bought = false;
+        while (buy_attempts > 0 && !bought) {
+            try {
+                return await this.buy_token(sol_amount, buyer, mint_meta, slippage, priority);
+            } catch (e) {
+                common.error(common.red(`Failed to buy the token, retrying... ${e}`));
+                buy_attempts--;
+                await common.sleep(3000);
+            }
+            return;
+        }
+    }
+
     public static async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
@@ -129,6 +151,33 @@ export class Trader {
             const mint = new PublicKey(mint_meta.baseToken.address);
             return trade.swap(token_amount, seller, trade.SOL_MINT, mint, amm, slippage);
         }
+    }
+
+    public static async sell_token_with_retry(
+        seller: Signer,
+        mint_meta: MoonshotMintMeta,
+        slippage: number = 0.05,
+        retries: number,
+        priority?: trade.PriorityLevel
+    ): Promise<String | undefined> {
+        let sell_attempts = retries;
+        while (sell_attempts > 0) {
+            try {
+                const balance = await trade.get_token_balance(seller.publicKey, new PublicKey(mint_meta.token_mint));
+                if (balance.uiAmount === 0 || balance.uiAmount === null) {
+                    common.log(`No tokens yet to sell for mint ${mint_meta.token_mint}, waiting...`);
+                    sell_attempts--;
+                    await common.sleep(3000);
+                    continue;
+                }
+                return await this.sell_token(balance, seller, mint_meta, slippage, priority);
+            } catch (e) {
+                common.error(common.red(`Error selling the token, retrying... ${e}`));
+                sell_attempts--;
+                await common.sleep(1000);
+            }
+        }
+        return;
     }
 
     public static async get_mint_meta(mint: string): Promise<MoonshotMintMeta | undefined> {
