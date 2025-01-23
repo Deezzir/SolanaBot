@@ -467,7 +467,7 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
                     message: 'Enter the mint public key:',
                     validate: async (value: string) => {
                         if (!common.is_valid_pubkey(value)) return 'Please enter a valid public key.';
-                        const meta = await trader.get_mint_meta(value);
+                        const meta = await trader.get_mint_meta(new PublicKey(value));
                         if (!meta) return 'Failed fetching the mint data with the public key.';
                         return true;
                     },

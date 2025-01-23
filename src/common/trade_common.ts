@@ -98,7 +98,7 @@ export interface IProgramTrader {
         retries: number,
         priority?: PriorityLevel
     ): Promise<String | undefined>;
-    get_mint_meta(mint: string): Promise<IMintMeta | undefined>;
+    get_mint_meta(mint: PublicKey): Promise<IMintMeta | undefined>;
     create_token(
         creator: Signer,
         meta: common.IPFSMetadata,
@@ -436,9 +436,7 @@ export async function get_random_mints(trader: IProgramTrader, count: number): P
 
 export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
     const metaplex = Metaplex.make(global.CONNECTION);
-
     const metaplex_acc = metaplex.nfts().pdas().metadata({ mint });
-
     const metaplex_acc_info = await global.CONNECTION.getAccountInfo(metaplex_acc);
 
     if (metaplex_acc_info) {
@@ -837,7 +835,7 @@ export async function get_raydium_token_price(amm: PublicKey): Promise<{ price_s
     }
 }
 
-export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | undefined> {
+export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
     try {
         const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM_PROGRAM_ID, {
             filters: [
@@ -858,7 +856,7 @@ export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<Public
         });
         return marketAccount.pubkey;
     } catch {
-        return;
+        return null;
     }
 }
 

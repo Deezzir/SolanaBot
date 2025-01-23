@@ -16,9 +16,9 @@ dotenv.config({ path: './.env' });
 // MAIN
 // -----------------------------------------------------------
 
-function reserve_wallet_preaction(wallets: common.Wallet[]) {
+function reserve_wallet_check(wallets: common.Wallet[]) {
     if (!common.check_reserve_exists(wallets)) {
-        common.error('[ERROR] Reserve keypair not found.');
+        common.error('[ERROR] Reserve wallet not found.');
         exit(1);
     }
 }
@@ -30,17 +30,11 @@ async function main() {
         wallets = await common.get_wallets(common.WALLETS_FILE);
     } catch (error) {
         if (error instanceof Error) {
-            common.error(common.red(`[ERROR] ${error.message}`));
-            exit(1);
+            common.error(common.yellow(`[WARNING] ${error.message}`));
         }
     }
 
     const wallet_cnt = wallets.length;
-    if (wallet_cnt === 0) {
-        common.error(common.red('[ERROR] No wallets found.'));
-        exit(1);
-    }
-
     global.CONNECTION = new Connection(process.env.RPC || '', 'confirmed');
     global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
     global.MOONSHOT = new Moonshot({
@@ -53,7 +47,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('3.4.0').description('Solana Bot CLI');
+    program.version('3.5.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -77,7 +71,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             let { config, program } = options;
             await commands.start(wallets, program, config);
@@ -91,7 +85,7 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
         })
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             const { config } = options;
             await commands.start_volume(config);
@@ -181,7 +175,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
             const { from, to, list, min, max, program } = options;
             await commands.warmup(common.filter_wallets(wallets, from, to, list), program, min, max);
@@ -210,7 +204,7 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (receiver, options) => {
             const { from, to, list } = options;
             await commands.collect(common.filter_wallets(wallets, from, to, list), receiver);
@@ -241,7 +235,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, mint, buyer, options) => {
             const { program } = options;
             await commands.buy_token_once(amount, mint, buyer, program);
@@ -274,7 +268,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, seller, options) => {
             const { percent, program } = options;
             await commands.sell_token_once(mint, seller, percent, program);
@@ -327,7 +321,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
             const { amount, min, max, from, to, list, program } = options;
             await commands.buy_token(common.filter_wallets(wallets, from, to, list), mint, program, amount, min, max);
@@ -368,7 +362,7 @@ async function main() {
                 .choices(Object.values(common.Program) as string[])
                 .default(common.Program.Pump, common.Program.Pump)
         )
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
             const { from, to, list, percent, program } = options;
             await commands.sell_token(common.filter_wallets(wallets, from, to, list), mint, program, percent);
@@ -395,7 +389,7 @@ async function main() {
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
         })
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, receiver, sender) => {
             await commands.transfer_sol(amount, receiver, sender);
         });
@@ -427,7 +421,7 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, receiver, options) => {
             const { from, to, list } = options;
             await commands.collect_token(common.filter_wallets(wallets, from, to, list), mint, receiver);
@@ -466,7 +460,7 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-s, --spider', 'Topup the account using the spider')
-        .hook('preAction', () => reserve_wallet_preaction(wallets))
+        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {
             const { from, to, list, spider } = options;
             await commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider);

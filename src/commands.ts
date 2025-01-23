@@ -141,13 +141,13 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
 
     common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
 
-    let decimals, supply_num, supply;
+    let decimals, supply, supply_raw;
     let token_name, token_symbol;
 
     try {
         ({ token_name, token_symbol } = await trade.get_token_meta(mint));
-        ({ supply, decimals } = await trade.get_token_supply(mint));
-        supply_num = parseInt(supply.toString());
+        ({ supply: supply_raw, decimals } = await trade.get_token_supply(mint));
+        supply = Number(supply_raw);
         common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}\n`));
     } catch (error) {
         throw new Error(`[ERROR] Failed to get the token information: ${error}`);
@@ -170,7 +170,7 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
         if (ui_balance === 0) continue;
 
         wallet_count++;
-        const alloc = (ui_balance / (supply_num / 10 ** decimals)) * 100;
+        const alloc = (ui_balance / (supply / 10 ** decimals)) * 100;
         total += ui_balance;
 
         common.print_row([
@@ -190,7 +190,7 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
         { width: common.COLUMN_WIDTHS.tokenBalance }
     ]);
 
-    const allocation = (total / (supply_num / 10 ** decimals)) * 100;
+    const allocation = (total / (supply / 10 ** decimals)) * 100;
 
     common.log(common.green(`\nWallets with balance: ${wallet_count}`));
     common.log(`Total balance: ${common.format_currency(total)} ${token_symbol}`);
@@ -278,7 +278,7 @@ export async function sell_token_once(
     );
 
     let trader: trade.IProgramTrader = get_trader(program);
-    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -304,7 +304,7 @@ export async function buy_token_once(
     }
 
     let trader: trade.IProgramTrader = get_trader(program);
-    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -484,7 +484,7 @@ export async function buy_token(
     common.log(common.yellow(`Buying the tokens from the accounts by the mint ${mint.toString()}...`));
 
     let trader: trade.IProgramTrader = get_trader(program);
-    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -537,7 +537,8 @@ export async function sell_token(
     common.log(common.yellow(`Selling ${percent}% of the tokens...\n`));
 
     let trader: trade.IProgramTrader = get_trader(program);
-    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint.toString());
+    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
+    console.log(mint_meta);
 
     if (!mint_meta) {
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
@@ -672,6 +673,8 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     const wallets: Partial<common.Wallet>[] = [];
     const starting_index = index || 1;
 
+    if (reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
+
     if (keys_path && existsSync(keys_path)) {
         const private_keys = readFileSync(keys_path, 'utf8')
             .split('\n')
@@ -694,8 +697,6 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
         for (let i = 0; i < count; i++)
             wallets.push({ keypair: Keypair.generate(), name: `wallet[${i + starting_index}]`, is_reserve: false });
     }
-
-    if (reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
 
     const writeStream = createWriteStream(name, { encoding: 'utf8' });
     writeStream.write(common.KEYS_FILE_HEADERS.join(',') + '\n');

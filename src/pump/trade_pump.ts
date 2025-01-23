@@ -28,36 +28,17 @@ const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '111111
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
 export class PumpMintMeta implements trade.IMintMeta {
-    mint: string = '';
-    name: string = '';
-    symbol: string = '';
-    description: string = '';
-    image_uri: string = '';
-    metadata_uri: string = '';
-    twitter: string | null = null;
-    telegram: string | null = null;
-    bonding_curve: string = '';
-    associated_bonding_curve: string = '';
-    creator: string = '';
-    created_timestamp: number = Date.now();
-    raydium_pool: string | null = null;
-    complete: boolean = false;
+    mint!: PublicKey;
+    name: string = 'Unknown';
+    symbol: string = 'Unknown';
+    bonding_curve!: PublicKey;
+    associated_bonding_curve!: PublicKey;
+    raydium_pool: PublicKey | null = null;
     virtual_sol_reserves: bigint = BigInt(0);
     virtual_token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
-    website: string | null = null;
-    show_name: boolean = false;
-    king_of_the_hill_timestamp: number | null = null;
-    market_cap: number = 0;
-    reply_count: number = 0;
-    last_reply: number | null = null;
-    nsfw: boolean = false;
-    market_id: string | null = null;
-    inverted: boolean | null = null;
     usd_market_cap: number = 0;
-    username: string = '';
-    profile_image: string | null = null;
-    is_currently_live: boolean = false;
+    market_cap: number = 0;
 
     constructor(data: Partial<PumpMintMeta> = {}) {
         Object.assign(this, data);
@@ -68,7 +49,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 
     public get token_mint(): string {
-        return this.mint;
+        return this.mint.toString();
     }
 
     public get token_symbol(): string {
@@ -78,19 +59,6 @@ export class PumpMintMeta implements trade.IMintMeta {
     public get token_usd_mc(): number {
         return this.usd_market_cap;
     }
-}
-
-function isPumpMeta(obj: any): obj is PumpMintMeta {
-    return (
-        typeof obj === 'object' &&
-        obj !== null &&
-        typeof obj.mint === 'string' &&
-        typeof obj.symbol === 'string' &&
-        typeof obj.market_cap === 'number' &&
-        typeof obj.usd_market_cap === 'number' &&
-        typeof obj.bonding_curve === 'string' &&
-        typeof obj.associated_bonding_curve === 'string'
-    );
 }
 
 const CURVE_STATE_SIZE = 0x29;
@@ -200,28 +168,17 @@ export class Trader {
         return;
     }
 
-    public static async get_mint_meta(mint: string): Promise<PumpMintMeta | undefined> {
+    public static async get_mint_meta(mint: PublicKey): Promise<PumpMintMeta | undefined> {
         try {
-            const response = await fetch(`${FETCH_MINT_API_URL}/coins/${mint}`);
+            const sol_price = await common.fetch_sol_price();
+            let mint_meta = await this.init_mint_meta(mint, sol_price);
 
-            if (!response.ok) {
-                common.error(`[ERROR] Failed fetching the mint. HTTP Status: ${response.status}`);
-                return undefined;
-            }
+            mint_meta.raydium_pool = await trade.get_raydium_amm_from_mint(mint);
+            if (!mint_meta.raydium_pool) mint_meta = await this.update_mint_meta_reserves(mint_meta, sol_price);
 
-            const data = await response.json();
-            if (!data || data.statusCode !== undefined || !isPumpMeta(data)) {
-                common.error('[ERROR] Invalid data structure received from the API.');
-                return undefined;
-            }
-
-            const mintMeta = new PumpMintMeta(data);
-            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mintMeta.mint));
-            if (amm) mintMeta.raydium_pool = amm.toString();
-
-            return mintMeta;
+            return mint_meta;
         } catch (error) {
-            common.error(`[ERROR] Failed fetching the mint: ${error}`);
+            common.error(`[ERROR] Failed to fetch the mint metadata: ${error}`);
             return undefined;
         }
     }
@@ -262,9 +219,9 @@ export class Trader {
 
         if (sol_amount && sol_amount > 0) {
             const token_meta = new PumpMintMeta({
-                mint: mint.publicKey.toString(),
-                bonding_curve: instructions[0].keys[2].pubkey.toString(),
-                associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
+                mint: mint.publicKey,
+                bonding_curve: instructions[0].keys[2].pubkey,
+                associated_bonding_curve: instructions[0].keys[3].pubkey,
                 market_cap: 27.95,
                 total_supply: BigInt(1_000_000_000_000_000) // 1 * 10**9 * 10**6
             });
@@ -279,14 +236,15 @@ export class Trader {
     public static async init_mint_meta(mint: PublicKey, sol_price: number): Promise<PumpMintMeta> {
         const [bonding] = this.calc_token_bonding_curve(mint);
         const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint, bonding);
+        const meta = await trade.get_token_meta(mint);
 
         return new PumpMintMeta({
-            mint: mint.toString(),
-            symbol: 'Unknown',
-            name: 'Unknown',
+            mint: mint,
+            symbol: meta.token_symbol,
+            name: meta.token_name,
             raydium_pool: null,
-            bonding_curve: bonding.toString(),
-            associated_bonding_curve: assoc_bonding.toString(),
+            bonding_curve: bonding,
+            associated_bonding_curve: assoc_bonding,
             market_cap: 27.958993535,
             usd_market_cap: 27.958993535 * sol_price,
             virtual_sol_reserves: BigInt(30000000030),
@@ -297,7 +255,7 @@ export class Trader {
 
     public static async update_mint_meta_reserves(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
-            const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));
+            const curve_state = await this.get_curve_state(mint_meta.bonding_curve);
             if (!curve_state) throw new Error('Curve state not found.');
 
             const token_price_sol = this.calculate_curve_price(

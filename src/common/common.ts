@@ -1,4 +1,4 @@
-import { createReadStream, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import dotenv from 'dotenv';
 import { basename } from 'path';
 import { clearLine, cursorTo } from 'readline';
@@ -131,20 +131,20 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
     const rows: Wallet[] = [];
     let index = 1;
     try {
-        const parser = createReadStream(keys_csv_path).pipe(parse({ columns: true, trim: true }));
+        const content = readFileSync(keys_csv_path);
+        const records = parse(content, { columns: true, trim: true });
 
-        for await (const data of parser) {
-            const is_reserve = data.is_reserve === 'true';
-            const name = data.name;
-            const keypair = Keypair.fromSecretKey(base58.decode(data.private_key));
+        for await (const record of records) {
+            const is_reserve = record.is_reserve === 'true';
+            const name = record.name;
+            const keypair = Keypair.fromSecretKey(base58.decode(record.private_key));
             const id = is_reserve ? 0 : index++;
-            const row: Wallet = {
+            rows.push({
                 name: name,
                 id: id,
                 keypair: keypair,
                 is_reserve: is_reserve
-            };
-            rows.push(row);
+            });
         }
         return rows;
     } catch (error) {

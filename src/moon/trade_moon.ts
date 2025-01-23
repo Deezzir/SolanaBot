@@ -180,8 +180,8 @@ export class Trader {
         return;
     }
 
-    public static async get_mint_meta(mint: string): Promise<MoonshotMintMeta | undefined> {
-        return fetch(`https://api.moonshot.cc/token/v1/solana/${mint}`)
+    public static async get_mint_meta(mint: PublicKey): Promise<MoonshotMintMeta | undefined> {
+        return fetch(`https://api.moonshot.cc/token/v1/solana/${mint.toString()}`)
             .then((response) => response.json())
             .then((data) => {
                 if (!data || data.statusCode !== undefined || data.error || !isMoonMeta(data)) return;
