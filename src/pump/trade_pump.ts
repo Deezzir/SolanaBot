@@ -253,6 +253,14 @@ export class Trader {
         });
     }
 
+    public static async buy_sell_bundle(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: PumpMintMeta,
+        slippage: number = 0.05,
+        priority?: trade.PriorityLevel
+    ): Promise<String> {}
+
     public static async update_mint_meta_reserves(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
             const curve_state = await this.get_curve_state(mint_meta.bonding_curve);

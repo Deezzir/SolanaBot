@@ -58,6 +58,25 @@ const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag
 const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 
+const JITO_TIP_ACCOUNTS = [
+    '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
+    'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
+    'Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY',
+    'ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49',
+    'DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh',
+    'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt',
+    'DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL',
+    '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT'
+];
+
+const JITO_ENDPOINTS = [
+    'https://mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles'
+];
+
 const MAX_RETRIES = 2;
 
 export interface IMintMeta {
@@ -194,50 +213,66 @@ export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.CONNECTION.getBalance(pubkey);
 }
 
-// function is_bundle_error<T>(value: T | Error): value is Error {
-//     return value instanceof Error;
-// }
+function get_random_jito_tip_account(): PublicKey {
+    const randomValidator = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+    return new PublicKey(randomValidator);
+}
 
-// export async function create_and_send_tipped_tx(instructions: TransactionInstruction[], payer: Signer, signers: Signer[], tip: number): Promise<String> {
-//     try {
-//         const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
-//         const c = jito.searcher.searcherClient(JITOTIP_BLOCK_URL, JITOTIP_AUTH_KEY);
+export async function create_and_send_tipped_tx(
+    instructions: TransactionInstruction[],
+    signers: Signer[],
+    tip: number
+): Promise<String> {
+    if (signers.length === 0) throw new Error(`No signers provided.`);
+    const payer = signers.at(0)!
 
-//         instructions.unshift(
-//             SystemProgram.transfer({
-//                 fromPubkey: payer.publicKey,
-//                 toPubkey: JITOTIP,
-//                 lamports: tip * LAMPORTS_PER_SOL
-//             })
-//         );
+    try {
+        const jito_tip_account = get_random_jito_tip_account();
+        const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
 
-//         const versioned_tx = new VersionedTransaction(
-//             new TransactionMessage({
-//                 payerKey: payer.publicKey,
-//                 recentBlockhash: ctx.value.blockhash,
-//                 instructions: instructions.filter(Boolean)
-//             }).compileToV0Message()
-//         );
-//         versioned_tx.sign(signers);
+        const jito_tip_tx_message = new TransactionMessage({
+            payerKey: payer.publicKey,
+            recentBlockhash: ctx.value.blockhash,
+            instructions: [
+                SystemProgram.transfer({
+                    fromPubkey: payer.publicKey,
+                    toPubkey: jito_tip_account,
+                    lamports: tip * LAMPORTS_PER_SOL,
+                }),
+            ],
+        }).compileToV0Message();
 
-//         let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
-//         let bundle = new jito.bundle.Bundle([versioned_tx], 1);
+        const jito_tip_tx = new VersionedTransaction(jito_tip_tx_message);
+        jito_tip_tx.sign([payer]);
+        const jito_tx_signature = bs58.encode(jito_tip_tx.signatures[0]);
 
-//         if (!is_bundle_error(bundle)) {
-//             try {
-//                 await c.sendBundle(bundle);
-//                 await check_transaction_status(signature, ctx);
-//                 return signature;
-//             } catch (e) {
-//                 throw new Error(`Failed to send a bundle: ${e}`);
-//             }
-//         } else {
-//             throw new Error(`Failed to create a bundle: ${bundle}`);
-//         }
-//     } catch (err) {
-//         throw new Error(`Failed to send tipped transaction: ${err}`);
-//     }
-// }
+        const versioned_tx = new VersionedTransaction(
+            new TransactionMessage({
+                payerKey: payer.publicKey,
+                recentBlockhash: ctx.value.blockhash,
+                instructions: instructions.filter(Boolean)
+            }).compileToV0Message()
+        );
+        versioned_tx.sign(signers);
+
+        let signature = bs58.encode(Buffer.from(versioned_tx.signatures[0]));
+        let bundle = new jito.bundle.Bundle([versioned_tx], 1);
+
+        if (!is_bundle_error(bundle)) {
+            try {
+                await c.sendBundle(bundle);
+                await check_transaction_status(signature, ctx);
+                return signature;
+            } catch (e) {
+                throw new Error(`Failed to send a bundle: ${e}`);
+            }
+        } else {
+            throw new Error(`Failed to create a bundle: ${bundle}`);
+        }
+    } catch (err) {
+        throw new Error(`Failed to send tipped transaction: ${err}`);
+    }
+}
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
     let current_block_height = await global.CONNECTION.getBlockHeight('confirmed');
