@@ -91,7 +91,7 @@ export abstract class SniperBase implements ISniper {
 
             const interval = setInterval(async () => {
                 try {
-                    mint_meta = await trader.update_mint_meta_reserves(mint_meta, sol_price);
+                    mint_meta = await trader.update_mint_meta(mint_meta, sol_price);
                     if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
                     this.workers_post_message('mint', mint_meta);
                 } catch (err) {

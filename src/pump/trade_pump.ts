@@ -1,4 +1,12 @@
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstruction } from '@solana/web3.js';
+import {
+    ComputeBudgetProgram,
+    Keypair,
+    LAMPORTS_PER_SOL,
+    PublicKey,
+    Signer,
+    TokenAmount,
+    TransactionInstruction
+} from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import { createAssociatedTokenAccountInstruction } from '@solana/spl-token';
@@ -39,6 +47,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     total_supply: bigint = BigInt(0);
     usd_market_cap: number = 0;
     market_cap: number = 0;
+    complete: boolean = false;
 
     constructor(data: Partial<PumpMintMeta> = {}) {
         Object.assign(this, data);
@@ -174,7 +183,7 @@ export class Trader {
             let mint_meta = await this.init_mint_meta(mint, sol_price);
 
             mint_meta.raydium_pool = await trade.get_raydium_amm_from_mint(mint);
-            if (!mint_meta.raydium_pool) mint_meta = await this.update_mint_meta_reserves(mint_meta, sol_price);
+            mint_meta = await this.update_mint_meta(mint_meta, sol_price);
 
             return mint_meta;
         } catch (error) {
@@ -255,32 +264,75 @@ export class Trader {
 
     public static async buy_sell_bundle(
         sol_amount: number,
-        buyer: Signer,
+        trader: Signer,
         mint_meta: PumpMintMeta,
+        tip: number,
         slippage: number = 0.05,
         priority?: trade.PriorityLevel
-    ): Promise<String> {}
+    ): Promise<String> {
+        let buy_instructions = await this.get_buy_token_instructions(sol_amount, trader, mint_meta, slippage);
+        const token_amount = this.get_token_amount_raw(sol_amount, mint_meta);
+        let sell_instructions = await this.get_sell_token_instructions(
+            {
+                uiAmount: token_amount / 10 ** CURVE_TOKEN_DECIMALS,
+                amount: token_amount.toString(),
+                decimals: 9
+            },
+            trader,
+            mint_meta,
+            slippage
+        );
 
-    public static async update_mint_meta_reserves(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
-        try {
-            const curve_state = await this.get_curve_state(mint_meta.bonding_curve);
-            if (!curve_state) throw new Error('Curve state not found.');
-
-            const token_price_sol = this.calculate_curve_price(
-                curve_state.virtual_sol_reserves,
-                curve_state.virtual_token_reserves
-            );
-
-            const token_mc = this.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
-
-            return new PumpMintMeta({
-                ...mint_meta,
-                usd_market_cap: token_mc.usd_mc,
-                market_cap: token_mc.sol_mc,
-                total_supply: curve_state.token_total_supply,
-                virtual_token_reserves: curve_state.virtual_token_reserves,
-                virtual_sol_reserves: curve_state.virtual_sol_reserves
+        if (priority) {
+            const fee = await trade.get_priority_fee({
+                priority_level: priority,
+                accounts: [PUMP_TRADE_PROGRAM_ID.toString()]
             });
+            buy_instructions.unshift(
+                ComputeBudgetProgram.setComputeUnitPrice({
+                    microLamports: fee
+                })
+            );
+            sell_instructions.unshift(
+                ComputeBudgetProgram.setComputeUnitPrice({
+                    microLamports: fee
+                })
+            );
+        }
+
+        return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [trader], tip);
+    }
+
+    public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
+        try {
+            if (!mint_meta.raydium_pool) {
+                const curve_state = await this.get_curve_state(mint_meta.bonding_curve);
+                if (!curve_state) throw new Error('Curve state not found.');
+
+                const token_price_sol = this.calculate_curve_price(
+                    curve_state.virtual_sol_reserves,
+                    curve_state.virtual_token_reserves
+                );
+
+                const token_mc = this.calculate_token_mc(sol_price, token_price_sol, curve_state.token_total_supply);
+
+                return new PumpMintMeta({
+                    ...mint_meta,
+                    usd_market_cap: token_mc.usd_mc,
+                    market_cap: token_mc.sol_mc,
+                    total_supply: curve_state.token_total_supply,
+                    virtual_token_reserves: curve_state.virtual_token_reserves,
+                    virtual_sol_reserves: curve_state.virtual_sol_reserves,
+                    complete: curve_state.complete
+                });
+            } else {
+                const metrics = await trade.get_raydium_token_metrics(mint_meta.raydium_pool);
+                return new PumpMintMeta({
+                    ...mint_meta,
+                    usd_market_cap: metrics.mcap_sol * sol_price,
+                    market_cap: metrics.mcap_sol
+                });
+            }
         } catch (error) {
             if (error instanceof Error) {
                 throw new Error(`Failed to update mint meta reserves: ${error.message}`);

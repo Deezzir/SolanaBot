@@ -153,6 +153,17 @@ export class Trader {
         }
     }
 
+    public static async buy_sell_bundle(
+        _sol_amount: number,
+        _trader: Signer,
+        _mint_meta: MoonshotMintMeta,
+        _tip: number,
+        _slippage: number = 0.05,
+        _priority?: trade.PriorityLevel
+    ): Promise<String> {
+        throw new Error('Not implemented');
+    }
+
     public static async sell_token_with_retry(
         seller: Signer,
         mint_meta: MoonshotMintMeta,
@@ -211,10 +222,7 @@ export class Trader {
         throw new Error('Not Implemented');
     }
 
-    public static async update_mint_meta_reserves(
-        _mint_meta: MoonshotMintMeta,
-        _sol_price: number
-    ): Promise<MoonshotMintMeta> {
+    public static async update_mint_meta(_mint_meta: MoonshotMintMeta, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
