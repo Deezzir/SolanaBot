@@ -189,8 +189,6 @@ export class Trader {
         try {
             const sol_price = await common.fetch_sol_price();
             let mint_meta = await this.init_mint_meta(mint, sol_price);
-
-            mint_meta.raydium_pool = await trade.get_raydium_amm_from_mint(mint);
             mint_meta = await this.update_mint_meta(mint_meta, sol_price);
 
             return mint_meta;
@@ -313,6 +311,7 @@ export class Trader {
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
+            mint_meta.raydium_pool = await trade.get_raydium_amm_from_mint(mint_meta.mint);
             if (!mint_meta.raydium_pool) {
                 const curve_state = await this.get_curve_state(mint_meta.bonding_curve);
                 if (!curve_state) throw new Error('Curve state not found.');
