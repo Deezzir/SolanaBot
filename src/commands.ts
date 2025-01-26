@@ -590,7 +590,12 @@ export async function topup(
             common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
             transactions.push(
                 trade
-                    .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, trade.PriorityLevel.VERY_HIGH)
+                    .send_lamports(
+                        Math.floor(amount * LAMPORTS_PER_SOL),
+                        sender,
+                        receiver.publicKey,
+                        trade.PriorityLevel.VERY_HIGH
+                    )
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )

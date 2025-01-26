@@ -89,9 +89,19 @@ export abstract class SniperBase implements ISniper {
             let mint_meta = await trader.init_mint_meta(this.bot_config.mint, sol_price);
             this.workers_post_message('mint', mint_meta);
 
+            let migration_started: boolean = false;
+            let migrated: boolean = false;
             const interval = setInterval(async () => {
                 try {
                     mint_meta = await trader.update_mint_meta(mint_meta, sol_price);
+                    if (mint_meta.bond_complete && !migration_started) {
+                        migration_started = true;
+                        common.log('[Main Worker] Migration started...');
+                    }
+                    if (mint_meta.amm && !migrated) {
+                        migrated = true;
+                        common.log('[Main Worker] Migration complete...');
+                    }
                     if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
                     this.workers_post_message('mint', mint_meta);
                 } catch (err) {

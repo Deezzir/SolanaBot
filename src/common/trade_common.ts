@@ -84,6 +84,8 @@ export interface IMintMeta {
     readonly token_symbol: string;
     readonly token_mint: string;
     readonly token_usd_mc: number;
+    readonly bond_complete: boolean;
+    readonly amm: PublicKey | null;
 }
 
 export interface IProgramTrader {
@@ -249,7 +251,7 @@ async function send_bundle(serialized_txs: string[]): Promise<string[]> {
                 .catch((err) => err)
         )
     );
-    return responses.filter((resp) => !(resp instanceof Error));
+    return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
 export async function create_and_send_bundle(

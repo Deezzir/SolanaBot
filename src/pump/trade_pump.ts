@@ -68,6 +68,14 @@ export class PumpMintMeta implements trade.IMintMeta {
     public get token_usd_mc(): number {
         return this.usd_market_cap;
     }
+
+    public get bond_complete(): boolean {
+        return this.complete;
+    }
+
+    public get amm(): PublicKey | null {
+        return this.raydium_pool;
+    }
 }
 
 const CURVE_STATE_SIZE = 0x29;

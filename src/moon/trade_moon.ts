@@ -77,6 +77,14 @@ class MoonshotMintMeta implements trade.IMintMeta {
     public get token_usd_mc(): number {
         return this.marketCap;
     }
+
+    public get bond_complete(): boolean {
+        return this.moonshot.progress === 100;
+    }
+
+    public get amm(): PublicKey | null {
+        return this.dexId && this.dexId !== '' ? new PublicKey(this.dexId) : null;
+    }
 }
 
 function isMoonMeta(obj: any): obj is MoonshotMintMeta {
