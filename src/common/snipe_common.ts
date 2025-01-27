@@ -302,7 +302,7 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
     if (mint !== undefined) {
         if (token_name !== undefined || token_ticker !== undefined)
             throw new Error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
-        if (!common.is_valid_pubkey(mint) || !(await trader.get_mint_meta(mint))) {
+        if (!common.is_valid_pubkey(mint)) {
             throw new Error('[ERROR] Invalid mint public key.');
         }
         json.mint = new PublicKey(json.mint);
