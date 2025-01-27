@@ -311,7 +311,7 @@ export class Trader {
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
-            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mint_meta.mint))
+            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mint_meta.mint));
             mint_meta.raydium_pool = amm ? amm.toString() : null;
             if (!mint_meta.raydium_pool) {
                 const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));

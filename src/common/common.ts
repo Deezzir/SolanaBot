@@ -199,6 +199,23 @@ export function validate_float(input: string, min: number = -Infinity, max: numb
     return true;
 }
 
+export function random_amounts(total_amount: number, count: number): number[] {
+    const mean = total_amount / count;
+    const std = mean * 0.51;
+    let amounts = Array.from({ length: count }, () => normal_random(mean, std));
+    const sum = amounts.reduce((acc, curr) => acc + curr, 0);
+    amounts = amounts.map((amount) => (amount / sum) * total_amount);
+
+    amounts = amounts.map((amount) => Math.max(0, amount));
+
+    const adjusted_sum = amounts.reduce((acc, curr) => acc + curr, 0);
+    const correction = total_amount - adjusted_sum;
+    amounts[0] += correction;
+    amounts = amounts.map((amount) => parseFloat(amount.toFixed(3)));
+
+    return amounts;
+}
+
 function box_muller(): number {
     let u = 0,
         v = 0;
@@ -208,7 +225,7 @@ function box_muller(): number {
 }
 
 export function normal_random(mean: number, std: number): number {
-    return Math.abs(mean + box_muller() * Math.sqrt(std));
+    return Math.abs(mean + box_muller() * std);
 }
 
 export function uniform_random(min: number, max: number): number {

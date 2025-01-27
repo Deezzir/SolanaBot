@@ -30,7 +30,7 @@ var MESSAGE_BUFFER: string[] = [];
 
 function control_sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
-    let cancel: () => void = () => {};
+    let cancel: () => void = () => { };
 
     const promise = new Promise<void>((resolve) => {
         timeout_id = setTimeout(resolve, ms);
@@ -237,7 +237,7 @@ async function main() {
     parentPort?.on('message', async (msg) => {
         switch (msg.command) {
             case `buy${WORKER_CONF.id}`:
-                const std = WORKER_CONF.start_buy * 0.05;
+                const std = WORKER_CONF.start_buy * 0.5;
                 CURRENT_BUY_AMOUNT = common.normal_random(WORKER_CONF.start_buy, std);
 
                 if (CURRENT_BUY_AMOUNT > WORKER_CONF.spend_limit) CURRENT_BUY_AMOUNT = WORKER_CONF.spend_limit;

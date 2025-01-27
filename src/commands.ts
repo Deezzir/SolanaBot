@@ -354,7 +354,7 @@ export async function warmup(
         );
 
         for (const mint of mints) {
-            let amount = Math.max(0.005, parseFloat(common.normal_random(0.01, 0.001).toFixed(4)));
+            let amount = Math.max(0.005, parseFloat(common.normal_random(0.01, 0.01).toFixed(4)));
             common.log(
                 `Warming up with ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`
             );
@@ -565,17 +565,26 @@ export async function topup(
     wallets: common.Wallet[],
     amount: number,
     sender: Keypair,
-    is_spider: boolean
+    is_spider: boolean,
+    is_random: boolean
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    const total_amount = wallets.length * amount;
+    let amounts: number[] = [];
 
-    common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
+    if (is_random) {
+        common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
+        amounts = Array.from({ length: wallets.length }, () => amount);
+    } else {
+        common.log(common.yellow(`Topping up random amount of SOL to every ${wallets.length} walets...`));
+        amounts = common.random_amounts(total_amount, wallets.length);
+    }
 
     const balance = (await trade.get_balance(sender.publicKey)) / LAMPORTS_PER_SOL;
     common.log(common.yellow(`Payer address: ${sender.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
-    if (balance < amount * wallets.length) {
+    if (balance < total_amount) {
         throw new Error(
-            `[ERROR] Payer balance is not enough to top up ${amount} SOL to every ${wallets.length} wallet`
+            `[ERROR] Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`
         );
     }
 
@@ -583,15 +592,18 @@ export async function topup(
         const transactions = [];
         const failed: string[] = [];
 
-        for (const wallet of wallets) {
+        for (const [i, wallet] of wallets.entries()) {
             const receiver = wallet.keypair;
+            const topup_amount = amounts[i];
             if (receiver.publicKey.equals(sender.publicKey)) continue;
 
-            common.log(`Sending ${amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+            common.log(
+                `Sending ${topup_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            );
             transactions.push(
                 trade
                     .send_lamports(
-                        Math.floor(amount * LAMPORTS_PER_SOL),
+                        Math.floor(topup_amount * LAMPORTS_PER_SOL),
                         sender,
                         receiver.publicKey,
                         trade.PriorityLevel.VERY_HIGH

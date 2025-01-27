@@ -460,10 +460,11 @@ async function main() {
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
         .option('-s, --spider', 'Topup the account using the spider')
+        .option('-r, --random', 'Topup with random values using <amount> argument as a mean value')
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {
-            const { from, to, list, spider } = options;
-            await commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider);
+            const { from, to, list, spider, random } = options;
+            await commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider, random);
         });
 
     program
