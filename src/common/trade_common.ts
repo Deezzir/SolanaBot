@@ -903,6 +903,7 @@ export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price
 export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
     try {
         const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM_PROGRAM_ID, {
+            commitment: 'confirmed',
             filters: [
                 { dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
                 {
