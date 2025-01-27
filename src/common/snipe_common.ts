@@ -275,7 +275,7 @@ export abstract class SniperBase implements ISniper {
     }
 }
 
-async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IProgramTrader): Promise<BotConfig> {
+async function validate_bot_config(json: any, keys_cnt: number, _trader: trade.IProgramTrader): Promise<BotConfig> {
     const required_fields = ['thread_cnt', 'spend_limit', 'start_buy'];
 
     for (const field of required_fields) {
