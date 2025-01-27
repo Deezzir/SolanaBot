@@ -36,12 +36,12 @@ const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '111111
 const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
 
 export class PumpMintMeta implements trade.IMintMeta {
-    mint!: PublicKey;
+    mint!: string;
     name: string = 'Unknown';
     symbol: string = 'Unknown';
-    bonding_curve!: PublicKey;
-    associated_bonding_curve!: PublicKey;
-    raydium_pool: PublicKey | null = null;
+    bonding_curve!: string;
+    associated_bonding_curve!: string;
+    raydium_pool: string | null = null;
     virtual_sol_reserves: bigint = BigInt(0);
     virtual_token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
@@ -74,7 +74,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 
     public get amm(): PublicKey | null {
-        return this.raydium_pool;
+        return this.raydium_pool !== null ? new PublicKey(this.raydium_pool) : null;
     }
 }
 
@@ -234,9 +234,9 @@ export class Trader {
 
         if (sol_amount && sol_amount > 0) {
             const token_meta = new PumpMintMeta({
-                mint: mint.publicKey,
-                bonding_curve: instructions[0].keys[2].pubkey,
-                associated_bonding_curve: instructions[0].keys[3].pubkey,
+                mint: mint.publicKey.toString(),
+                bonding_curve: instructions[0].keys[2].pubkey.toString(),
+                associated_bonding_curve: instructions[0].keys[3].pubkey.toString(),
                 market_cap: 27.95,
                 total_supply: BigInt(1_000_000_000_000_000) // 1 * 10**9 * 10**6
             });
@@ -254,12 +254,12 @@ export class Trader {
         const meta = await trade.get_token_meta(mint);
 
         return new PumpMintMeta({
-            mint: mint,
+            mint: mint.toString(),
             symbol: meta.token_symbol,
             name: meta.token_name,
             raydium_pool: null,
-            bonding_curve: bonding,
-            associated_bonding_curve: assoc_bonding,
+            bonding_curve: bonding.toString(),
+            associated_bonding_curve: assoc_bonding.toString(),
             market_cap: 27.958993535,
             usd_market_cap: 27.958993535 * sol_price,
             virtual_sol_reserves: BigInt(30000000030),
@@ -311,9 +311,10 @@ export class Trader {
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
-            mint_meta.raydium_pool = await trade.get_raydium_amm_from_mint(mint_meta.mint);
+            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mint_meta.mint))
+            mint_meta.raydium_pool = amm ? amm.toString() : null;
             if (!mint_meta.raydium_pool) {
-                const curve_state = await this.get_curve_state(mint_meta.bonding_curve);
+                const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));
                 if (!curve_state) throw new Error('Curve state not found.');
 
                 const token_price_sol = this.calculate_curve_price(
@@ -333,7 +334,7 @@ export class Trader {
                     complete: curve_state.complete
                 });
             } else {
-                const metrics = await trade.get_raydium_token_metrics(mint_meta.raydium_pool);
+                const metrics = await trade.get_raydium_token_metrics(new PublicKey(mint_meta.raydium_pool));
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
