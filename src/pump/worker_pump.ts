@@ -30,7 +30,7 @@ var MESSAGE_BUFFER: string[] = [];
 
 function control_sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
-    let cancel: () => void = () => { };
+    let cancel: () => void = () => {};
 
     const promise = new Promise<void>((resolve) => {
         timeout_id = setTimeout(resolve, ms);

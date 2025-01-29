@@ -17,7 +17,7 @@ dotenv.config({ path: './.env' });
 
 const INTERVAL = 50;
 const SELL_SLIPPAGE = 0.5;
-const BUY_SLIPPAGE = 0.1;
+const BUY_SLIPPAGE = 0.05;
 
 function get_trader(program: common.Program): trade.IProgramTrader {
     switch (program) {
@@ -573,11 +573,11 @@ export async function topup(
     let amounts: number[] = [];
 
     if (is_random) {
-        common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
-        amounts = Array.from({ length: wallets.length }, () => amount);
-    } else {
         common.log(common.yellow(`Topping up random amount of SOL to every ${wallets.length} walets...`));
         amounts = common.random_amounts(total_amount, wallets.length);
+    } else {
+        common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
+        amounts = Array.from({ length: wallets.length }, () => amount);
     }
 
     const balance = (await trade.get_balance(sender.publicKey)) / LAMPORTS_PER_SOL;

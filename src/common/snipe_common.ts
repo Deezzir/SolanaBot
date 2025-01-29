@@ -275,7 +275,7 @@ export abstract class SniperBase implements ISniper {
     }
 }
 
-async function validate_bot_config(json: any, keys_cnt: number, _trader: trade.IProgramTrader): Promise<BotConfig> {
+async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IProgramTrader): Promise<BotConfig> {
     const required_fields = ['thread_cnt', 'spend_limit', 'start_buy'];
 
     for (const field of required_fields) {
@@ -302,7 +302,7 @@ async function validate_bot_config(json: any, keys_cnt: number, _trader: trade.I
     if (mint !== undefined) {
         if (token_name !== undefined || token_ticker !== undefined)
             throw new Error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
-        if (!common.is_valid_pubkey(mint)) {
+        if (!common.is_valid_pubkey(mint) || !(await trader.get_mint_meta(new PublicKey(mint)))) {
             throw new Error('[ERROR] Invalid mint public key.');
         }
         json.mint = new PublicKey(json.mint);
