@@ -14,7 +14,7 @@ export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/';
 
 const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
 const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
-const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
+const FETCH_MINT_API_URL = 'https://frontend-api-v3.pump.fun';
 
 export function staticImplements<T>() {
     return <U extends T>(constructor: U) => {
