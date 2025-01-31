@@ -16,8 +16,8 @@ import * as token_drop from './subcommands/token_drop.js';
 dotenv.config({ path: './.env' });
 
 const INTERVAL = 50;
-const SELL_SLIPPAGE = 0.5;
-const BUY_SLIPPAGE = 0.05;
+const SELL_SLIPPAGE = 0.8;
+const BUY_SLIPPAGE = 0.1;
 
 function get_trader(program: common.Program): trade.IProgramTrader {
     switch (program) {

@@ -6,7 +6,7 @@ import * as trade from '../common/trade_common.js';
 import * as pump from './trade_pump.js';
 import { Helius } from 'helius-sdk';
 
-const BUY_SLIPPAGE = 0.25;
+const BUY_SLIPPAGE = 0.85;
 const SELL_SLIPPAGE = 0.5;
 const MIN_BUY_THRESHOLD = 0.00001;
 const MIN_BALANCE_THRESHOLD = 0.01;
@@ -30,7 +30,7 @@ var MESSAGE_BUFFER: string[] = [];
 
 function control_sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
-    let cancel: () => void = () => {};
+    let cancel: () => void = () => { };
 
     const promise = new Promise<void>((resolve) => {
         timeout_id = setTimeout(resolve, ms);
