@@ -2,14 +2,15 @@ import { MongoClient, Db, ServerApiVersion, WithId, Document, BulkWriteResult } 
 import * as common from '../common/common.js';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import * as trade from '../common/trade_common.js';
-import dotenv from 'dotenv';
-dotenv.config();
+import {
+    COMMITMENT,
+    DROP_AIRDROP_COLLECTION,
+    DROP_MONGO_DB_NAME,
+    DROP_MONGO_URI,
+    DROP_PRESALE_COLLECTION,
+    DROP_RECORDS_PER_ITERATION
+} from '../constants.js';
 
-const RECORDS_PER_ITERATION = 10;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017';
-const DB_NAME = process.env.MONGO_DB_NAME || 'test';
-const AIRDROP_COLLECTION = 'airdropusers';
-const PRESALE_COLLECTION = 'presaleusers';
 let DB: Db | undefined = undefined;
 
 // SCHEMA
@@ -31,7 +32,7 @@ let DB: Db | undefined = undefined;
 //     tx: string | null;
 // }
 
-const DB_CLIENT = new MongoClient(MONGO_URI, {
+const DB_CLIENT = new MongoClient(DROP_MONGO_URI, {
     serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -42,7 +43,7 @@ const DB_CLIENT = new MongoClient(MONGO_URI, {
 async function connect_db(): Promise<void> {
     try {
         await DB_CLIENT.connect();
-        DB = DB_CLIENT.db(DB_NAME);
+        DB = DB_CLIENT.db(DROP_MONGO_DB_NAME);
     } catch (error) {
         throw new Error(`Could not connect to the database: ${error}`);
     }
@@ -83,7 +84,7 @@ async function calc_presale_amounts(
     }
     try {
         const presale_tokens = Math.floor((presale_percent / 100) * total_tokens);
-        const collection = DB?.collection(PRESALE_COLLECTION);
+        const collection = DB?.collection(DROP_PRESALE_COLLECTION);
         const result = await collection
             ?.aggregate([
                 {
@@ -120,7 +121,7 @@ async function bulk_write(col_name: string, operations: any[]): Promise<BulkWrit
 
 async function update_airdrop_balance(token_amount: number): Promise<void> {
     common.log(`Updating airdrop balances...`);
-    await bulk_write(AIRDROP_COLLECTION, [
+    await bulk_write(DROP_AIRDROP_COLLECTION, [
         {
             updateMany: {
                 filter: {},
@@ -134,7 +135,7 @@ async function update_presale_balance(token_amount: number, total_sol: number): 
     common.log(`Updating airdrop balances...`);
     let bulk_writes: any[] = [];
 
-    const records = await fetch_records(PRESALE_COLLECTION);
+    const records = await fetch_records(DROP_PRESALE_COLLECTION);
     if (!records) throw new Error('Failed to fetch records');
 
     for (let record of records) {
@@ -149,7 +150,7 @@ async function update_presale_balance(token_amount: number, total_sol: number): 
         });
     }
 
-    await bulk_write(PRESALE_COLLECTION, bulk_writes);
+    await bulk_write(DROP_PRESALE_COLLECTION, bulk_writes);
 }
 
 async function count_records(col_name: string): Promise<number> {
@@ -171,7 +172,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.Min
     }
 
     const collection = DB?.collection(col_name);
-    let records = await collection?.find({ tx: null }).limit(RECORDS_PER_ITERATION).toArray();
+    let records = await collection?.find({ tx: null }).limit(DROP_RECORDS_PER_ITERATION).toArray();
     if (!records || records.length === 0) {
         common.error(common.red('No records to process'));
         return;
@@ -193,7 +194,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.Min
             const token_amount = record.tokensToSend;
             const token_amount_raw = token_amount * 10 ** mint_meta.token_decimals;
             try {
-                const context = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
+                const context = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
                 const last = context.value.lastValidBlockHeight;
 
                 if (lastValidHeight !== last) {
@@ -250,13 +251,13 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.Min
         await bulk_write(col_name, db_updates);
         await common.sleep(500);
 
-        records = await collection?.find({ tx: null }).limit(RECORDS_PER_ITERATION).toArray();
+        records = await collection?.find({ tx: null }).limit(DROP_RECORDS_PER_ITERATION).toArray();
         if (!records) throw new Error('Failed to fetch records');
     }
 }
 
 async function airdrop(percent: number, ui_balance: number, mint_meta: trade.MintMeta, drop: Keypair): Promise<void> {
-    const airdrop_count = await count_records(AIRDROP_COLLECTION);
+    const airdrop_count = await count_records(DROP_AIRDROP_COLLECTION);
     if (airdrop_count === 0) {
         common.error(common.red('\nNo airdrop records found, skipping...'));
         return;
@@ -271,12 +272,12 @@ async function airdrop(percent: number, ui_balance: number, mint_meta: trade.Min
 
     common.log(common.yellow(`\nStarting Airdrop...`));
     await update_airdrop_balance(airdrop_amount);
-    await drop_tokens(AIRDROP_COLLECTION, drop, mint_meta);
+    await drop_tokens(DROP_AIRDROP_COLLECTION, drop, mint_meta);
     common.log(common.green(`Airdrop completed`));
 }
 
 async function presale(percent: number, ui_balance: number, mint_meta: trade.MintMeta, drop: Keypair): Promise<void> {
-    const presale_count = await count_records(PRESALE_COLLECTION);
+    const presale_count = await count_records(DROP_PRESALE_COLLECTION);
     if (presale_count === 0) {
         common.error(common.red('\nNo presale records found, skipping...'));
         return;
@@ -291,7 +292,7 @@ async function presale(percent: number, ui_balance: number, mint_meta: trade.Min
 
     common.log(common.yellow(`\nStarting Presale drop...`));
     await update_presale_balance(presale_tokens, presale_sol);
-    await drop_tokens(PRESALE_COLLECTION, drop, mint_meta);
+    await drop_tokens(DROP_PRESALE_COLLECTION, drop, mint_meta);
     common.log(common.green(`Presale drop completed`));
 }
 

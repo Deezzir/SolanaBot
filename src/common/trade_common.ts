@@ -15,6 +15,7 @@ import {
 } from '@solana/web3.js';
 import {
     AccountLayout,
+    TOKEN_PROGRAM_ID,
     TokenAccountNotFoundError,
     TokenInvalidAccountOwnerError,
     createAssociatedTokenAccountInstruction,
@@ -44,40 +45,21 @@ import {
 } from '@raydium-io/raydium-sdk';
 import fetch from 'cross-fetch';
 import { Wallet } from '@project-serum/anchor';
+import {
+    COMMITMENT,
+    JITO_ENDPOINTS,
+    JUPITER_API_URL,
+    RAYDIUM_AMM_PROGRAM_ID,
+    RAYDIUM_AUTHORITY,
+    SOL_MINT,
+    TRADE_DEFAULT_CURVE_DECIMALS,
+    TRADE_MAX_RETRIES,
+    TRADE_SWAP_SEED
+} from '../constants.js';
 import BN from 'bn.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
-
-const SWAP_SEED = 'swap';
-const DEFAULT_CURVE_TOKEN_DECIMALS = 6;
-
-export const SOL_MINT = new PublicKey(process.env.SOLANA_TOKEN || 'So11111111111111111111111111111111111111112');
-
-const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6/';
-const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
-const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-
-const JITO_TIP_ACCOUNTS = [
-    '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
-    'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
-    'Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY',
-    'ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49',
-    'DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh',
-    'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt',
-    'DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL',
-    '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT'
-];
-
-const JITO_ENDPOINTS = [
-    'https://mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles'
-];
-
-const MAX_RETRIES = 2;
+import { JITO_TIP_ACCOUNTS } from 'helius-sdk';
 
 export interface IMintMeta {
     readonly token_name: string;
@@ -177,14 +159,14 @@ export function decode_metaplex_instr(data: string): [CreateMetadataAccountV3Ins
 
 export async function get_tx_with_retries(
     signature: string,
-    max_retries: number = MAX_RETRIES
+    max_retries: number = TRADE_MAX_RETRIES
 ): Promise<VersionedTransactionResponse | null> {
     let retries = max_retries;
 
     while (retries > 0) {
         const transaction = await global.CONNECTION.getTransaction(signature, {
             maxSupportedTransactionVersion: 0,
-            commitment: 'confirmed'
+            commitment: COMMITMENT
         });
 
         if (transaction) return transaction;
@@ -208,13 +190,13 @@ export async function check_account_exists(account: PublicKey): Promise<boolean 
 
 export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint; decimals: number }> {
     try {
-        const mint_data = await getMint(global.CONNECTION, mint, 'confirmed');
+        const mint_data = await getMint(global.CONNECTION, mint, COMMITMENT);
         return { supply: mint_data.supply, decimals: mint_data.decimals };
     } catch (err) {
         common.error(`[ERROR] Failed to get the token supply: ${err}`);
         return {
-            supply: BigInt(1_000_000_000 * 10 ** DEFAULT_CURVE_TOKEN_DECIMALS),
-            decimals: DEFAULT_CURVE_TOKEN_DECIMALS
+            supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_CURVE_DECIMALS),
+            decimals: TRADE_DEFAULT_CURVE_DECIMALS
         };
     }
 }
@@ -263,7 +245,7 @@ export async function create_and_send_bundle(
     const payer = signers.at(0)!;
 
     const jito_tip_account = get_random_jito_tip_account();
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
     const jito_tip_tx_message = new TransactionMessage({
         payerKey: payer.publicKey,
@@ -305,7 +287,7 @@ export async function create_and_send_bundle(
 }
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
-    let current_block_height = await global.CONNECTION.getBlockHeight('confirmed');
+    let current_block_height = await global.CONNECTION.getBlockHeight(COMMITMENT);
     return last_valid_block_height - current_block_height < 0;
 }
 
@@ -321,7 +303,7 @@ async function check_transaction_status(
 
         if (status) {
             if (
-                (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') &&
+                (status.confirmationStatus === COMMITMENT || status.confirmationStatus === 'finalized') &&
                 status.err === null
             ) {
                 return;
@@ -349,8 +331,8 @@ export async function get_priority_fee(priority: PriorityOptions): Promise<numbe
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
-        maxRetries: MAX_RETRIES
+        preflightCommitment: COMMITMENT,
+        maxRetries: TRADE_MAX_RETRIES
     });
 }
 
@@ -369,7 +351,7 @@ export async function create_and_send_tx(
             })
         );
     }
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext('confirmed');
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
     const versioned_tx = new VersionedTransaction(
         new TransactionMessage({
@@ -383,8 +365,8 @@ export async function create_and_send_tx(
 
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
-        maxRetries: MAX_RETRIES
+        preflightCommitment: COMMITMENT,
+        maxRetries: TRADE_MAX_RETRIES
     });
 
     await check_transaction_status(signature, ctx);
@@ -394,7 +376,7 @@ export async function create_and_send_tx(
 export async function get_balance_change(signature: string, address: PublicKey): Promise<number> {
     try {
         const tx_details = await global.CONNECTION.getTransaction(signature, {
-            commitment: 'confirmed',
+            commitment: COMMITMENT,
             maxSupportedTransactionVersion: 0
         });
         if (!tx_details) throw new Error(`Transaction not found: ${signature}`);
@@ -724,7 +706,7 @@ async function get_swap_acc_intsruction(
     let instructions: TransactionInstruction[] = [];
     instructions.push(
         SystemProgram.createAccountWithSeed({
-            seed: SWAP_SEED,
+            seed: TRADE_SWAP_SEED,
             basePubkey: seller.publicKey,
             fromPubkey: seller.publicKey,
             newAccountPubkey: token_acc,
@@ -766,10 +748,10 @@ async function create_raydium_swap_tx(
                 createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
             );
         }
-        token_in_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
+        token_in_acc = await PublicKey.createWithSeed(seller.publicKey, TRADE_SWAP_SEED, TOKEN_PROGRAM_ID);
         instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
     } else {
-        token_out_acc = await PublicKey.createWithSeed(seller.publicKey, SWAP_SEED, TOKEN_PROGRAM_ID);
+        token_out_acc = await PublicKey.createWithSeed(seller.publicKey, TRADE_SWAP_SEED, TOKEN_PROGRAM_ID);
         instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_out_acc));
         token_in_acc = await calc_assoc_token_addr(seller.publicKey, token_in);
     }
@@ -903,7 +885,7 @@ export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price
 export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
     try {
         const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM_PROGRAM_ID, {
-            commitment: 'confirmed',
+            commitment: COMMITMENT,
             filters: [
                 { dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
                 {

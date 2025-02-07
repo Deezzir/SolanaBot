@@ -1,5 +1,4 @@
 import figlet from 'figlet';
-import dotenv from 'dotenv';
 import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
 import { existsSync } from 'fs';
 import * as common from './common/common.js';
@@ -9,8 +8,8 @@ import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 import { Wallet } from './common/common.js';
+import { COMMITMENT, HELIUS_API_KEY, RPC, WALLETS_FILE } from './constants.js';
 import base58 from 'bs58';
-dotenv.config({ path: './.env' });
 
 //------------------------------------------------------------
 // MAIN
@@ -27,7 +26,7 @@ async function main() {
     let wallets: Wallet[] = [];
 
     try {
-        wallets = await common.get_wallets(common.WALLETS_FILE);
+        wallets = await common.get_wallets(WALLETS_FILE);
     } catch (error) {
         if (error instanceof Error) {
             common.error(common.yellow(`[WARNING] ${error.message}`));
@@ -35,13 +34,13 @@ async function main() {
     }
 
     const wallet_cnt = wallets.length;
-    global.CONNECTION = new Connection(process.env.RPC || '', 'confirmed');
-    global.HELIUS_CONNECTION = new Helius(process.env.HELIUS_API_KEY || '');
+    global.CONNECTION = new Connection(RPC, COMMITMENT);
+    global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
     global.MOONSHOT = new Moonshot({
         rpcUrl: global.CONNECTION.rpcEndpoint,
         environment: Environment.MAINNET,
         chainOptions: {
-            solana: { confirmOptions: { commitment: 'confirmed' } }
+            solana: { confirmOptions: { commitment: COMMITMENT } }
         }
     });
 

@@ -1,13 +1,15 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import {
+    SPIDER_EXTRA_SOL,
+    SPIDER_INTERVAL,
+    SPIDER_RESCUE_DIR_PATH,
+    TRADE_MAX_RETRIES,
+    WALLETS_FILE_HEADERS
+} from '../constants.js';
 import path from 'path';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-
-const RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
-const MAX_RETRIES: number = 3;
-const EXTRA_SOL: number = 0.005;
-const INTERVAL: number = 1000;
 
 type SpiderTreeNode = {
     amount: number;
@@ -50,8 +52,8 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
         node.left = _build_tree(node.left, layer_cnt - 1);
 
         if (node.right || node.left) node.amount = (node.left?.amount || 0) + (node.right?.amount || 0);
-        if (node.right) node.amount += EXTRA_SOL;
-        if (node.left) node.amount += EXTRA_SOL;
+        if (node.right) node.amount += SPIDER_EXTRA_SOL;
+        if (node.left) node.amount += SPIDER_EXTRA_SOL;
 
         return node;
     };
@@ -97,20 +99,20 @@ function display_spider_tree(tree: SpiderTree) {
 
 function setup_rescue_file(): string | undefined {
     const target_file = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
-    const target_file_path = path.join(RESCUE_DIR_PATH, target_file);
+    const target_file_path = path.join(SPIDER_RESCUE_DIR_PATH, target_file);
 
     try {
-        if (!existsSync(RESCUE_DIR_PATH)) mkdirSync(RESCUE_DIR_PATH);
+        if (!existsSync(SPIDER_RESCUE_DIR_PATH)) mkdirSync(SPIDER_RESCUE_DIR_PATH);
         try {
             if (existsSync(target_file_path)) throw 'Target already exists';
-            writeFileSync(target_file_path, common.KEYS_FILE_HEADERS.join(',') + '\n', 'utf-8');
+            writeFileSync(target_file_path, WALLETS_FILE_HEADERS.join(',') + '\n', 'utf-8');
             return target_file_path;
         } catch (error) {
             common.error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${error}`);
             return;
         }
     } catch (error) {
-        common.error(`[ERROR] Failed to process '${RESCUE_DIR_PATH}': ${error}`);
+        common.error(`[ERROR] Failed to process '${SPIDER_RESCUE_DIR_PATH}': ${error}`);
         return;
     }
 }
@@ -203,7 +205,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             );
             if (!ok) return false;
 
-            await common.sleep(INTERVAL);
+            await common.sleep(SPIDER_INTERVAL);
 
             ok = await _process_inner_transfers(node.left, layer_cnt + 1);
             if (!ok) return false;
@@ -229,7 +231,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             );
             if (!ok) return false;
 
-            await common.sleep(INTERVAL);
+            await common.sleep(SPIDER_INTERVAL);
 
             ok = await _process_inner_transfers(node.right, layer_cnt + 1);
             if (!ok) return false;
@@ -253,7 +255,7 @@ async function send_lamports_with_retries(
     receiver: Keypair,
     priority: trade.PriorityLevel,
     name: string,
-    max_retries: number = MAX_RETRIES
+    max_retries: number = TRADE_MAX_RETRIES
 ): Promise<boolean> {
     for (let attempt = 1; attempt <= max_retries; attempt++) {
         try {
@@ -263,7 +265,7 @@ async function send_lamports_with_retries(
         } catch (error) {
             if (attempt < max_retries) {
                 common.error(`Transaction failed for ${name}, attempt ${attempt}. Retrying...`);
-                await common.sleep(INTERVAL * 3);
+                await common.sleep(SPIDER_INTERVAL * 3);
                 amount = await trade.get_balance(sender.publicKey);
             } else {
                 common.error(`Transaction failed for ${name} after ${max_retries} attempts: ${error}`);
@@ -327,12 +329,12 @@ export async function run_spider_transfer(
 
     common.log(`[Main Worker] Processing inner transfers...\n`);
     const final_entries = await process_inner_transfers(tree);
-    await common.sleep(INTERVAL * 2);
+    await common.sleep(SPIDER_INTERVAL * 2);
 
     if (final_entries) {
         common.log(`\n[Main Worker] Processing final transfers...\n`);
         await process_final_transfers(keys, final_entries);
-        await common.sleep(INTERVAL * 2);
+        await common.sleep(SPIDER_INTERVAL * 2);
     }
 
     return rescue_keys;

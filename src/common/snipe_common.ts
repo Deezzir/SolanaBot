@@ -2,10 +2,9 @@ import { Worker } from 'worker_threads';
 import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
 import { PublicKey } from '@solana/web3.js';
+import { SNIPE_META_UPDATE_INTERVAL } from '../constants.js';
 import * as common from './common.js';
 import * as trade from './trade_common.js';
-
-const META_UPDATE_INTERVAL = 300;
 
 type BotConfig = {
     thread_cnt: number;
@@ -107,7 +106,7 @@ export abstract class SniperBase implements ISniper {
                 } catch (err) {
                     common.error(`[ERROR] Failed to update token metadata`);
                 }
-            }, META_UPDATE_INTERVAL);
+            }, SNIPE_META_UPDATE_INTERVAL);
 
             this.workers_post_message('buy');
             await this.workers_wait();

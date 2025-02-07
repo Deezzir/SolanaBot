@@ -1,8 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
+import { COMMITMENT, METAPLEX_PROGRAM_ID, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
-import { PUMP_TRADE_PROGRAM_ID, METAPLEX_PROGRAM_ID } from './trade_pump.js';
 
 const WORKER_PATH = './dist/pump/worker_pump.js';
 
@@ -73,7 +73,7 @@ export class Runner extends snipe.SniperBase {
                             }
                         }
                     },
-                    'confirmed'
+                    COMMITMENT
                 );
                 if (this._subscription_id === undefined) reject(new Error('Failed to subscribe to logs'));
             })

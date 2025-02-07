@@ -1,11 +1,19 @@
 import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
-import dotenv from 'dotenv';
 import { Wallet } from '@project-serum/anchor';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
-import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes/index.js';
+import bs58 from 'bs58';
 import pLimit from 'p-limit';
+import {
+    COMMANDS_BUY_SLIPPAGE,
+    COMMANDS_INTERVAL,
+    COMMANDS_RPC_TOKEN,
+    COMMANDS_SELL_SLIPPAGE,
+    COMMITMENT,
+    RPC,
+    WALLETS_FILE_HEADERS
+} from './constants.js';
 import * as common from './common/common.js';
 import * as snipe from './common/snipe_common.js';
 import * as trade from './common/trade_common.js';
@@ -13,11 +21,6 @@ import * as snipe_common from './common/snipe_common.js';
 import * as spider from './subcommands/spider.js';
 import * as volume from './subcommands/volume.js';
 import * as token_drop from './subcommands/token_drop.js';
-dotenv.config({ path: './.env' });
-
-const INTERVAL = 50;
-const SELL_SLIPPAGE = 0.8;
-const BUY_SLIPPAGE = 0.1;
 
 function get_trader(program: common.Program): trade.IProgramTrader {
     switch (program) {
@@ -130,7 +133,7 @@ export async function promote(
         );
 
         times--;
-        await common.sleep(INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL);
     }
 
     await Promise.allSettled(transactions);
@@ -165,7 +168,7 @@ export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Pr
     let wallet_count = 0;
 
     for (const wallet of wallets) {
-        const balance = await trade.get_token_balance(wallet.keypair.publicKey, mint, 'confirmed');
+        const balance = await trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT);
         const ui_balance = balance.uiAmount || 0;
         if (ui_balance === 0) continue;
 
@@ -284,7 +287,7 @@ export async function sell_token_once(
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
     }
     trader
-        .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE)
+        .sell_token(token_amount_to_sell, seller, mint_meta, COMMANDS_SELL_SLIPPAGE)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -311,7 +314,7 @@ export async function buy_token_once(
     }
 
     trader
-        .buy_token(amount, buyer, mint_meta, BUY_SLIPPAGE)
+        .buy_token(amount, buyer, mint_meta, COMMANDS_BUY_SLIPPAGE)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -402,7 +405,7 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
                 .catch((error) => common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`)))
         );
 
-        await common.sleep(INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL);
     }
 
     await Promise.allSettled(transactions);
@@ -450,7 +453,7 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
             }
         }
 
-        await common.sleep(INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL);
     }
 
     await Promise.allSettled(transactions);
@@ -494,7 +497,7 @@ export async function buy_token(
 
             transactions.push(
                 trader
-                    .buy_token(buy_amount, buyer, mint_meta, BUY_SLIPPAGE)
+                    .buy_token(buy_amount, buyer, mint_meta, COMMANDS_BUY_SLIPPAGE)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -535,7 +538,7 @@ export async function sell_token(
     for (const wallet of wallets) {
         const seller = wallet.keypair;
         try {
-            const token_amount = await trade.get_token_balance(seller.publicKey, mint, 'confirmed');
+            const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
             const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
@@ -546,7 +549,13 @@ export async function sell_token(
 
             transactions.push(
                 trader
-                    .sell_token(token_amount_to_sell, seller, mint_meta, SELL_SLIPPAGE, trade.PriorityLevel.HIGH)
+                    .sell_token(
+                        token_amount_to_sell,
+                        seller,
+                        mint_meta,
+                        COMMANDS_SELL_SLIPPAGE,
+                        trade.PriorityLevel.HIGH
+                    )
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -617,7 +626,7 @@ export async function topup(
                     })
             );
 
-            await common.sleep(INTERVAL);
+            await common.sleep(COMMANDS_INTERVAL);
         }
         await Promise.allSettled(transactions);
 
@@ -702,7 +711,7 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     }
 
     const writeStream = createWriteStream(name, { encoding: 'utf8' });
-    writeStream.write(common.KEYS_FILE_HEADERS.join(',') + '\n');
+    writeStream.write(WALLETS_FILE_HEADERS.join(',') + '\n');
     wallets.forEach((wallet) => {
         if (wallet.name && wallet.keypair) {
             const row = [
@@ -770,10 +779,10 @@ export async function benchmark(
     let max_time = 0;
     let errors = 0;
     let calls = 0;
-    const connection = new Connection(<any>process.env.RPC, {
+    const connection = new Connection(RPC, {
         disableRetryOnRateLimit: true,
         httpHeaders: {
-            Authorization: `Bearer ${process.env.RPC_TOKEN}`
+            Authorization: `Bearer ${COMMANDS_RPC_TOKEN}`
         }
     });
 
@@ -804,11 +813,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         })

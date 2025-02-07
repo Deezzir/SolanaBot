@@ -9,31 +9,29 @@ import {
 } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import { createAssociatedTokenAccountInstruction } from '@solana/spl-token';
-
-const CURVE_TOKEN_DECIMALS = 6;
-const BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
-const META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
-
-export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-export const METAPLEX_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
-
-const FETCH_MINT_API_URL = 'https://frontend-api-v3.pump.fun';
-const CURVE_STATE_SIGNATURE = Uint8Array.from([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
-const GLOBAL_ACCOUNT = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
-const FEE_RECIPIENT_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
-const EVENT_AUTHORITUY_ACCOUNT = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
-const MINT_AUTHORITY_ACCOUNT = new PublicKey('TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
-
-const METAPLEX_TOKEN_META = new PublicKey(
-    process.env.METAPLEX_TOKEN_META || 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s'
-);
-const TOKEN_PROGRAM_ID = new PublicKey(process.env.TOKEN_PROGRAM_ID || 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
-    process.env.ASSOCIATED_TOKEN_PROGRAM_ID || 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
-);
-const SYSTEM_PROGRAM_ID = new PublicKey(process.env.SYSTEM_PROGRAM_ID || '11111111111111111111111111111111');
-const RENT_PROGRAM_ID = new PublicKey(process.env.RENT_PROGRAM_ID || 'SysvarRent111111111111111111111111111111111');
+import {
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    createAssociatedTokenAccountInstruction,
+    TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
+import {
+    COMMITMENT,
+    IPFS,
+    METAPLEX_PROGRAM_ID,
+    PUMP_BONDING_ADDR,
+    PUMP_CURVE_STATE_SIGNATURE,
+    PUMP_CURVE_TOKEN_DECIMALS,
+    PUMP_EVENT_AUTHORITUY_ACCOUNT,
+    PUMP_FEE_RECIPIENT_ACCOUNT,
+    PUMP_FETCH_API_URL,
+    PUMP_GLOBAL_ACCOUNT,
+    PUMP_META_ADDR,
+    PUMP_MINT_AUTHORITY_ACCOUNT,
+    PUMP_TRADE_PROGRAM_ID,
+    RENT_PROGRAM_ID,
+    SOL_MINT,
+    SYSTEM_PROGRAM_ID
+} from '../constants.js';
 
 export class PumpMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -116,7 +114,7 @@ export class Trader {
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.mint);
-            return trade.swap(sol_token_amount, buyer, mint, trade.SOL_MINT, amm, slippage);
+            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, amm, slippage);
         }
     }
 
@@ -154,7 +152,7 @@ export class Trader {
             return this.sell_token_pump(token_amount, seller, mint_meta, slippage, priority);
         } else {
             const mint = new PublicKey(mint_meta.mint);
-            return trade.swap(token_amount, seller, trade.SOL_MINT, mint, amm, slippage);
+            return trade.swap(token_amount, seller, SOL_MINT, mint, amm, slippage);
         }
     }
 
@@ -202,7 +200,7 @@ export class Trader {
         const limit = 50;
         const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
         return fetch(
-            `${FETCH_MINT_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
+            `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
         )
             .then((response) => response.json())
             .then((data: any) => {
@@ -280,7 +278,7 @@ export class Trader {
         const token_amount = this.get_token_amount_raw(sol_amount, mint_meta);
         let sell_instructions = await this.get_sell_token_instructions(
             {
-                uiAmount: token_amount / 10 ** CURVE_TOKEN_DECIMALS,
+                uiAmount: token_amount / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
                 amount: token_amount.toString(),
                 decimals: 9
             },
@@ -393,7 +391,7 @@ export class Trader {
     private static get_token_amount_raw(sol_amount: number, token: Partial<PumpMintMeta>): number {
         if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
         const token_price = this.calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-        return Math.round((sol_amount / token_price) * 10 ** CURVE_TOKEN_DECIMALS);
+        return Math.round((sol_amount / token_price) * 10 ** PUMP_CURVE_TOKEN_DECIMALS);
     }
 
     private static get_solana_amount_raw(token_amount: number, token: Partial<PumpMintMeta>): number {
@@ -461,8 +459,8 @@ export class Trader {
         instructions.push(
             new TransactionInstruction({
                 keys: [
-                    { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-                    { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
+                    { pubkey: PUMP_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
                     { pubkey: mint, isSigner: false, isWritable: false },
                     { pubkey: bonding_curve, isSigner: false, isWritable: true },
                     { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
@@ -471,7 +469,7 @@ export class Trader {
                     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_TRADE_PROGRAM_ID,
@@ -508,8 +506,8 @@ export class Trader {
         instructions.push(
             new TransactionInstruction({
                 keys: [
-                    { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-                    { pubkey: FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
+                    { pubkey: PUMP_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_RECIPIENT_ACCOUNT, isSigner: false, isWritable: true },
                     { pubkey: mint, isSigner: false, isWritable: false },
                     { pubkey: bonding_curve, isSigner: false, isWritable: true },
                     { pubkey: assoc_bonding_curve, isSigner: false, isWritable: true },
@@ -518,7 +516,7 @@ export class Trader {
                     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_TRADE_PROGRAM_ID,
@@ -553,13 +551,13 @@ export class Trader {
         cid: string,
         mint: Keypair
     ): Promise<TransactionInstruction[]> {
-        const meta_link = `${common.IPFS}${cid}`;
+        const meta_link = `${IPFS}${cid}`;
         const instruction_data = this.create_data(meta.name, meta.symbol, meta_link);
         const [bonding] = this.calc_token_bonding_curve(mint.publicKey);
         const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint.publicKey, bonding);
         const [metaplex] = PublicKey.findProgramAddressSync(
-            [META_ADDR, METAPLEX_TOKEN_META.toBuffer(), mint.publicKey.toBuffer()],
-            METAPLEX_TOKEN_META
+            [PUMP_META_ADDR, METAPLEX_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()],
+            METAPLEX_PROGRAM_ID
         );
 
         let instructions: TransactionInstruction[] = [];
@@ -567,18 +565,18 @@ export class Trader {
             new TransactionInstruction({
                 keys: [
                     { pubkey: mint.publicKey, isSigner: true, isWritable: true },
-                    { pubkey: MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_MINT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: bonding, isSigner: false, isWritable: true },
                     { pubkey: assoc_bonding, isSigner: false, isWritable: true },
-                    { pubkey: GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
-                    { pubkey: METAPLEX_TOKEN_META, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: METAPLEX_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: metaplex, isSigner: false, isWritable: true },
                     { pubkey: creator.publicKey, isSigner: true, isWritable: true },
                     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_TRADE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_TRADE_PROGRAM_ID,
@@ -590,7 +588,7 @@ export class Trader {
     }
 
     private static calc_token_bonding_curve(mint: PublicKey): [PublicKey, number] {
-        return PublicKey.findProgramAddressSync([BONDING_ADDR, mint.toBuffer()], PUMP_TRADE_PROGRAM_ID);
+        return PublicKey.findProgramAddressSync([PUMP_BONDING_ADDR, mint.toBuffer()], PUMP_TRADE_PROGRAM_ID);
     }
 
     private static calc_token_assoc_bonding_curve(mint: PublicKey, bonding: PublicKey): [PublicKey, number] {
@@ -606,7 +604,7 @@ export class Trader {
         return (
             Number(virtual_sol_reserves) /
             LAMPORTS_PER_SOL /
-            (Number(virtual_token_reserves) / 10 ** CURVE_TOKEN_DECIMALS)
+            (Number(virtual_token_reserves) / 10 ** PUMP_CURVE_TOKEN_DECIMALS)
         );
     }
 
@@ -615,23 +613,23 @@ export class Trader {
         token_price_sol: number,
         token_total_supply: bigint
     ): { sol_mc: number; usd_mc: number } {
-        const sol_mc = (token_price_sol * Number(token_total_supply)) / 10 ** CURVE_TOKEN_DECIMALS;
+        const sol_mc = (token_price_sol * Number(token_total_supply)) / 10 ** PUMP_CURVE_TOKEN_DECIMALS;
         const usd_mc = sol_mc * sol_price;
         return { sol_mc, usd_mc };
     }
 
     private static async get_curve_state(bond_curve_addr: PublicKey): Promise<CurveState> {
-        const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, 'confirmed');
+        const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
         if (
             !acc_info ||
             !acc_info.data ||
-            acc_info.data.byteLength < CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE
+            acc_info.data.byteLength < PUMP_CURVE_STATE_SIGNATURE.byteLength + CURVE_STATE_SIZE
         ) {
             throw new Error('unexpected curve state');
         }
 
-        const idl_signature = common.read_bytes(acc_info.data, 0, CURVE_STATE_SIGNATURE.byteLength);
-        if (idl_signature.compare(CURVE_STATE_SIGNATURE) !== 0) {
+        const idl_signature = common.read_bytes(acc_info.data, 0, PUMP_CURVE_STATE_SIGNATURE.byteLength);
+        if (idl_signature.compare(PUMP_CURVE_STATE_SIGNATURE) !== 0) {
             throw new Error('unexpected curve state IDL signature');
         }
 
