@@ -653,7 +653,7 @@ export async function start(
 
     let trader: trade.IProgramTrader = get_trader(program);
     const sol_price = await common.fetch_sol_price();
-    const bot_config = await snipe_common.setup_config(wallets.length - 1, trader, json_config);
+    const bot_config = await snipe_common.setup_config(wallets.length, trader, json_config);
 
     if (bot_config.mint) {
         common.log(common.yellow('Sniping existing mint...'));

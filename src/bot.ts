@@ -65,6 +65,11 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
         })
+        .option('-f, --from <value>', 'Warmup starting from the provided index', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+            return parseInt(value, 10);
+        })
         .addOption(
             new Option('-g, --program <type>', 'specify program')
                 .choices(Object.values(common.Program) as string[])
@@ -72,8 +77,8 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            let { config, program } = options;
-            await commands.start(wallets, program, config);
+            let { config, from, program } = options;
+            await commands.start(common.filter_wallets(wallets, from), program, config);
         });
 
     program

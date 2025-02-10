@@ -10,6 +10,7 @@ import {
 import path from 'path';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
+import bs58 from 'bs58';
 
 type SpiderTreeNode = {
     amount: number;
@@ -119,11 +120,13 @@ function setup_rescue_file(): string | undefined {
 
 function save_rescue_key(node: SpiderTreeNode, target_file: string, layer_cnt: number, index: number): boolean {
     const key_name = `wallet${layer_cnt}_${index}`;
-    const private_key = JSON.stringify(Array.from(node.keypair.secretKey));
+    const private_key = bs58.encode(node.keypair.secretKey);
+    const public_key = node.keypair.publicKey.toString();
+    const date = new Date().toLocaleDateString();
 
     if (!existsSync(target_file)) {
         try {
-            const row = [key_name, private_key, false].join(',');
+            const row = [key_name, private_key, false, public_key, date].join(',');
             appendFileSync(target_file, row + '\n', 'utf8');
             return true;
         } catch (error) {
