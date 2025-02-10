@@ -9,11 +9,9 @@ import {
     COMMITMENT,
     HELIUS_API_KEY,
     RPC,
-    SNIPE_BUY_SLIPPAGE,
     SNIPE_ITERATIONS,
     SNIPE_MIN_BUY,
-    SNIPE_MIN_BUY_THRESHOLD,
-    SNIPE_SELL_SLIPPAGE
+    SNIPE_MIN_BUY_THRESHOLD
 } from '../constants.js';
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
@@ -89,7 +87,7 @@ const buy = async () => {
                 amount,
                 WORKER_KEYPAIR,
                 MINT_METADATA,
-                SNIPE_BUY_SLIPPAGE,
+                WORKER_CONF.buy_slippage,
                 trade.PriorityLevel.VERY_HIGH
             );
             transactions.push(
@@ -163,7 +161,7 @@ const sell = async () => {
                 balance,
                 WORKER_KEYPAIR,
                 MINT_METADATA,
-                SNIPE_SELL_SLIPPAGE,
+                WORKER_CONF.sell_slippage,
                 trade.PriorityLevel.HIGH
             );
             transactions.push(

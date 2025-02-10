@@ -982,12 +982,12 @@ export function get_sol_token_amount(amount: number): TokenAmount {
 }
 
 export function get_token_amount_by_percent(token_amount: TokenAmount, percent: number): TokenAmount {
-    if (percent < 0 || percent > 100) throw new Error(`Invalid percent: ${percent}`);
+    if (percent < 0.0 || percent > 1.0) throw new Error(`Invalid percent: ${percent}`);
     if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
-    if (percent === 100) return token_amount;
+    if (percent === 1.0) return token_amount;
     return {
-        uiAmount: Math.floor((token_amount.uiAmount * percent) / 100),
-        amount: ((BigInt(token_amount.amount) * BigInt(percent)) / BigInt(100)).toString(),
+        uiAmount: Math.floor(token_amount.uiAmount * percent),
+        amount: (BigInt(token_amount.amount) * BigInt(percent)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
 }

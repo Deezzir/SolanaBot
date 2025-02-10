@@ -2,7 +2,12 @@ import { Worker } from 'worker_threads';
 import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
 import { PublicKey } from '@solana/web3.js';
-import { SNIPE_META_UPDATE_INTERVAL } from '../constants.js';
+import {
+    SNIPE_BUY_SLIPPAGE,
+    SNIPE_META_UPDATE_INTERVAL,
+    SNIPE_SELL_SLIPPAGE,
+    TRADE_MAX_SLIPPAGE
+} from '../constants.js';
 import * as common from './common.js';
 import * as trade from './trade_common.js';
 
@@ -14,6 +19,8 @@ type BotConfig = {
     is_buy_once: boolean;
     start_interval: number;
     buy_interval: number;
+    sell_slippage: number;
+    buy_slippage: number;
     token_name: string | undefined;
     token_ticker: string | undefined;
     mint: PublicKey | undefined;
@@ -27,6 +34,8 @@ export type WorkerConfig = {
     start_buy: number;
     mcap_threshold: number;
     is_buy_once: boolean;
+    sell_slippage: number;
+    buy_slippage: number;
 };
 
 type WorkerJob = {
@@ -171,7 +180,9 @@ export abstract class SniperBase implements ISniper {
                 spend_limit: this.bot_config.spend_limit,
                 start_buy: this.bot_config.start_buy,
                 mcap_threshold: this.bot_config.mcap_threshold,
-                is_buy_once: this.bot_config.is_buy_once
+                is_buy_once: this.bot_config.is_buy_once,
+                sell_slippage: this.bot_config.sell_slippage,
+                buy_slippage: this.bot_config.buy_slippage
             };
 
             const worker = new Worker(this.get_worker_path(), {
@@ -291,7 +302,9 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
         start_buy,
         mcap_threshold,
         start_interval,
-        is_buy_once
+        is_buy_once,
+        sell_slippage,
+        buy_slippage
     } = json;
 
     if (mint === undefined && token_name === undefined && token_ticker === undefined) {
@@ -350,10 +363,26 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
         throw new Error('[ERROR] buy_interval is not required when is_buy_once is true.');
     }
 
+    if (sell_slippage !== undefined) {
+        if (typeof sell_slippage !== 'number' || sell_slippage < 0.0 || sell_slippage > TRADE_MAX_SLIPPAGE) {
+            throw new Error(`[ERROR] sell_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
+        }
+        json.sell_slippage = sell_slippage / 100;
+    }
+
+    if (buy_slippage !== undefined) {
+        if (typeof buy_slippage !== 'number' || buy_slippage < 0.0 || buy_slippage > TRADE_MAX_SLIPPAGE) {
+            throw new Error(`[ERROR] buy_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
+        }
+        json.buy_slippage = buy_slippage / 100;
+    }
+
     if (!('is_buy_once' in json)) json.is_buy_once = false;
     if (!('buy_interval' in json)) json.buy_interval = 0;
     if (!('start_interval' in json)) json.start_interval = 0;
     if (!('mcap_threshold' in json)) json.mcap_threshold = Infinity;
+    if (!('sell_slippage' in json)) json.sell_slippage = SNIPE_SELL_SLIPPAGE;
+    if (!('buy_slippage' in json)) json.buy_slippage = SNIPE_BUY_SLIPPAGE;
 
     return json as BotConfig;
 }
@@ -417,6 +446,28 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
                         ? true
                         : 'Please enter a valid number greater than 5000',
                 filter: (value: string) => (value === '' ? Infinity : parseInt(value, 10))
+            },
+            {
+                type: 'input',
+                name: 'sell_slippage',
+                message: 'Enter the sell slippage in percentage:',
+                default: (SNIPE_SELL_SLIPPAGE * 100).toString(),
+                validate: (value: string) =>
+                    value === '' || common.validate_float(value, 0.0, TRADE_MAX_SLIPPAGE)
+                        ? true
+                        : `Please enter a valid number between 0.0 and ${TRADE_MAX_SLIPPAGE}`,
+                filter: (value: string) => (value === '' ? SNIPE_SELL_SLIPPAGE : parseFloat(value) / 100)
+            },
+            {
+                type: 'input',
+                name: 'buy_slippage',
+                message: 'Enter the buy slippage in percentage:',
+                default: (SNIPE_BUY_SLIPPAGE * 100).toString(),
+                validate: (value: string) =>
+                    value === '' || common.validate_float(value, 0.0, TRADE_MAX_SLIPPAGE)
+                        ? true
+                        : `Please enter a valid number between 0.0 and ${TRADE_MAX_SLIPPAGE}`,
+                filter: (value: string) => (value === '' ? SNIPE_BUY_SLIPPAGE : parseFloat(value) / 100)
             },
             {
                 type: 'confirm',

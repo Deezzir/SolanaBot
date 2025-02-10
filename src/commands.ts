@@ -257,11 +257,14 @@ export async function sell_token_once(
     mint: PublicKey,
     seller: Keypair,
     percent?: number,
+    slippage?: number,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    const PERCENT = percent || 100.0;
+    const SLIPPAGE = slippage || COMMANDS_SELL_SLIPPAGE;
+    const PERCENT = percent || 1.0;
+
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
-    common.log(common.yellow(`Selling ${PERCENT}% of the tokens...`));
+    common.log(common.yellow(`Selling ${PERCENT * 100}% of the tokens...`));
 
     const token_amount = await trade.get_token_balance(seller.publicKey, mint);
     common.log(
@@ -287,7 +290,7 @@ export async function sell_token_once(
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
     }
     trader
-        .sell_token(token_amount_to_sell, seller, mint_meta, COMMANDS_SELL_SLIPPAGE)
+        .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -296,8 +299,11 @@ export async function buy_token_once(
     amount: number,
     mint: PublicKey,
     buyer: Keypair,
+    slippage?: number,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
+    const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
+
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
     const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
@@ -314,7 +320,7 @@ export async function buy_token_once(
     }
 
     trader
-        .buy_token(amount, buyer, mint_meta, COMMANDS_BUY_SLIPPAGE)
+        .buy_token(amount, buyer, mint_meta, SLIPPAGE)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -465,8 +471,11 @@ export async function buy_token(
     program: common.Program = common.Program.Pump,
     amount?: number,
     min?: number,
-    max?: number
+    max?: number,
+    slippage?: number
 ): Promise<void> {
+    const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
+
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
     if (!amount && (!min || !max)) throw new Error('[ERROR] Either amount or min and max should be provided.');
     if (max && min && max < min) throw new Error('[ERROR] Invalid min and max values.');
@@ -497,7 +506,7 @@ export async function buy_token(
 
             transactions.push(
                 trader
-                    .buy_token(buy_amount, buyer, mint_meta, COMMANDS_BUY_SLIPPAGE)
+                    .buy_token(buy_amount, buyer, mint_meta, SLIPPAGE)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -518,13 +527,16 @@ export async function sell_token(
     wallets: common.Wallet[],
     mint: PublicKey,
     program: common.Program = common.Program.Pump,
-    percent?: number
+    percent?: number,
+    slippage?: number
 ): Promise<void> {
+    const SLIPPAGE = slippage || COMMANDS_SELL_SLIPPAGE;
+    const PERCENT = percent || 1.0;
+
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
-    percent = percent || 100.0;
     common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
-    common.log(common.yellow(`Selling ${percent}% of the tokens...\n`));
+    common.log(common.yellow(`Selling ${PERCENT * 100}% of the tokens...\n`));
 
     let trader: trade.IProgramTrader = get_trader(program);
     let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
@@ -541,7 +553,7 @@ export async function sell_token(
             const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
 
-            const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
+            const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
 
             common.log(
                 `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
@@ -549,13 +561,7 @@ export async function sell_token(
 
             transactions.push(
                 trader
-                    .sell_token(
-                        token_amount_to_sell,
-                        seller,
-                        mint_meta,
-                        COMMANDS_SELL_SLIPPAGE,
-                        trade.PriorityLevel.HIGH
-                    )
+                    .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, trade.PriorityLevel.HIGH)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )

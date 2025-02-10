@@ -8,7 +8,7 @@ import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 import { Wallet } from './common/common.js';
-import { COMMITMENT, HELIUS_API_KEY, RPC, WALLETS_FILE } from './constants.js';
+import { COMMITMENT, HELIUS_API_KEY, RPC, TRADE_MAX_SLIPPAGE, WALLETS_FILE } from './constants.js';
 import base58 from 'bs58';
 
 //------------------------------------------------------------
@@ -234,6 +234,13 @@ async function main() {
             if (!buyer_wallet) throw new InvalidArgumentError('Invalid index.');
             return buyer_wallet.keypair;
         })
+        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
+                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
+            return parsed_value / 100;
+        })
         .addOption(
             new Option('-g, --program <type>', 'specify program')
                 .choices(Object.values(common.Program) as string[])
@@ -241,8 +248,8 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, mint, buyer, options) => {
-            const { program } = options;
-            await commands.buy_token_once(amount, mint, buyer, program);
+            const { slippage, program } = options;
+            await commands.buy_token_once(amount, mint, buyer, slippage, program);
         });
 
     program
@@ -265,7 +272,14 @@ async function main() {
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0.0 || parsed_value > 100.0)
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsed_value;
+            return parsed_value / 100;
+        })
+        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
+                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
+            return parsed_value / 100;
         })
         .addOption(
             new Option('-g, --program <type>', 'specify program')
@@ -274,8 +288,8 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, seller, options) => {
-            const { percent, program } = options;
-            await commands.sell_token_once(mint, seller, percent, program);
+            const { percent, slippage, program } = options;
+            await commands.sell_token_once(mint, seller, percent, slippage, program);
         });
 
     program
@@ -305,6 +319,13 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be greater than 0.0.');
             return parsed_value;
         })
+        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
+                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
+            return parsed_value / 100;
+        })
         .option('-f, --from <value>', 'Buy starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
@@ -327,8 +348,16 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { amount, min, max, from, to, list, program } = options;
-            await commands.buy_token(common.filter_wallets(wallets, from, to, list), mint, program, amount, min, max);
+            const { amount, min, max, slippage, from, to, list, program } = options;
+            await commands.buy_token(
+                common.filter_wallets(wallets, from, to, list),
+                mint,
+                program,
+                amount,
+                min,
+                max,
+                slippage
+            );
         });
 
     program
@@ -338,6 +367,20 @@ async function main() {
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
+        })
+        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > 100.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
+            return parsed_value / 100;
+        })
+        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
+                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
+            return parsed_value / 100;
         })
         .option('-f, --from <value>', 'Sell starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
@@ -354,13 +397,6 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
-        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 100.0)
-                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsed_value;
-        })
         .addOption(
             new Option('-g, --program <type>', 'specify program')
                 .choices(Object.values(common.Program) as string[])
@@ -368,8 +404,8 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { from, to, list, percent, program } = options;
-            await commands.sell_token(common.filter_wallets(wallets, from, to, list), mint, program, percent);
+            const { percent, slippage, from, to, list, program } = options;
+            await commands.sell_token(common.filter_wallets(wallets, from, to, list), mint, program, percent, slippage);
         });
 
     program
