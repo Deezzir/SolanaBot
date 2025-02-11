@@ -860,14 +860,14 @@ async function create_raydium_swap_tx(
 }
 
 async function get_vault_balance(vault: PublicKey): Promise<number> {
-    const balance = await CONNECTION.getTokenAccountBalance(vault);
+    const balance = await global.CONNECTION.getTokenAccountBalance(vault);
     return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
 }
 
-export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price_sol: number; mcap_sol: number }> {
+export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price_sol: number; mcap_sol: number, supply: bigint }> {
     try {
         const info = await global.CONNECTION.getAccountInfo(amm);
-        if (!info) return { price_sol: 0.0, mcap_sol: 0.0 };
+        if (!info) return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
         const pool_state = LIQUIDITY_STATE_LAYOUT_V4.decode(info.data);
 
         const base_token_balance = await get_vault_balance(pool_state.baseVault);
@@ -876,9 +876,9 @@ export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price
         const price_sol = base_token_balance / quote_token_balance;
         const token = await get_token_supply(pool_state.quoteMint);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
-        return { price_sol, mcap_sol };
+        return { price_sol, mcap_sol, supply: token.supply };
     } catch (err) {
-        return { price_sol: 0.0, mcap_sol: 0.0 };
+        return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
     }
 }
 

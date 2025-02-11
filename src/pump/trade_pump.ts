@@ -311,7 +311,7 @@ export class Trader {
         try {
             const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mint_meta.mint));
             mint_meta.raydium_pool = amm ? amm.toString() : null;
-            if (!mint_meta.raydium_pool) {
+            if (mint_meta.raydium_pool === null && !mint_meta.complete) {
                 const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));
                 if (!curve_state) throw new Error('Curve state not found.');
 
@@ -332,11 +332,14 @@ export class Trader {
                     complete: curve_state.complete
                 });
             } else {
+                if (mint_meta.raydium_pool === null) return mint_meta;
                 const metrics = await trade.get_raydium_token_metrics(new PublicKey(mint_meta.raydium_pool));
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
-                    market_cap: metrics.mcap_sol
+                    market_cap: metrics.mcap_sol,
+                    total_supply: metrics.supply,
+                    complete: true
                 });
             }
         } catch (error) {
