@@ -11,7 +11,8 @@ import {
     RpcResponseAndContext,
     ComputeBudgetProgram,
     Commitment,
-    VersionedTransactionResponse
+    VersionedTransactionResponse,
+    Finality
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -293,22 +294,19 @@ async function is_blockhash_expired(last_valid_block_height: number): Promise<bo
 
 async function check_transaction_status(
     signature: string,
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>
+    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
+    finality: Finality = 'confirmed'
 ): Promise<void> {
     const retry_interval = 1000;
     while (true) {
-        const { value: status } = await global.CONNECTION.getSignatureStatus(signature, {
-            searchTransactionHistory: true
-        });
+        const { value: status } = await CONNECTION.getSignatureStatus(signature);
 
-        if (status) {
-            if (
-                (status.confirmationStatus === COMMITMENT || status.confirmationStatus === 'finalized') &&
-                status.err === null
-            ) {
-                return;
+        if (status && status.confirmationStatus === finality) {
+            const tx = await CONNECTION.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: finality })
+            if (tx) {
+                if (tx.meta?.err === null) return
+                if (tx.meta?.err !== null) throw new Error(`Transaction failed with an error | Signature: ${signature}`);
             }
-            if (status.err) throw new Error(`Transaction failed | Signature: ${signature} | Error: ${status.err}`);
         }
 
         const is_expired = await is_blockhash_expired(context.value.lastValidBlockHeight);
@@ -330,7 +328,7 @@ export async function get_priority_fee(priority: PriorityOptions): Promise<numbe
 
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {
-        skipPreflight: false,
+        skipPreflight: true,
         preflightCommitment: COMMITMENT,
         maxRetries: TRADE_MAX_RETRIES
     });
@@ -364,7 +362,7 @@ export async function create_and_send_tx(
     versioned_tx.sign(signers);
 
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
-        skipPreflight: false,
+        skipPreflight: true,
         preflightCommitment: COMMITMENT,
         maxRetries: TRADE_MAX_RETRIES
     });
