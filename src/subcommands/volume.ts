@@ -2,8 +2,7 @@ import inquirer from 'inquirer';
 import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
 import * as trade from '../common/trade_common.js';
-
-const RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
+import { VOLUME_RAYDIUM_SWAP_TAX } from '../constants.js';
 
 type VolumeConfig = {
     type: VolumeType;
@@ -211,7 +210,7 @@ export async function simulate(volume_config: VolumeConfig) {
         for (let j = 0; j < volume_config.wallet_cnt; j++) {
             const sol_amount = common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount);
 
-            total_tax_sol += sol_amount * RAYDIUM_SWAP_TAX * 2;
+            total_tax_sol += sol_amount * VOLUME_RAYDIUM_SWAP_TAX * 2;
             total_volume_sol += sol_amount;
         }
         total_tax_sol += volume_config.jito_tip;

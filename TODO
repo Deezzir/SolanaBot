@@ -1,7 +1,5 @@
 # TODO
 
-- Test 3.0.0 changes
-
 - Add Volume bot
 - Add sell by percent to start/snipe command
 - Detect Raydium migration and change price update strategy
@@ -26,5 +24,4 @@
 - Pump Fun Shill, comments creation
 - Introduce bundled sells and buys
 - Pump/Moonshot Volume (and bump bot)
-- Warmup bundles
 - Cache?

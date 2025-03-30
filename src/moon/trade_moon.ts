@@ -1,9 +1,8 @@
 import { FixedSide } from '@wen-moon-ser/moonshot-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstruction, Keypair } from '@solana/web3.js';
+import { MOONSHOT_TRADE_PROGRAM_ID, SOL_MINT } from '../constants.js';
 import * as trade from '../common/trade_common.js';
 import * as common from '../common/common.js';
-
-const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 
 class MoonshotMintMeta implements trade.IMintMeta {
     url: string = '';
@@ -77,6 +76,14 @@ class MoonshotMintMeta implements trade.IMintMeta {
     public get token_usd_mc(): number {
         return this.marketCap;
     }
+
+    public get bond_complete(): boolean {
+        return this.moonshot.progress === 100;
+    }
+
+    public get amm(): PublicKey | null {
+        return this.dexId && this.dexId !== '' ? new PublicKey(this.dexId) : null;
+    }
 }
 
 function isMoonMeta(obj: any): obj is MoonshotMintMeta {
@@ -111,7 +118,7 @@ export class Trader {
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(sol_token_amount, buyer, mint, trade.SOL_MINT, amm, slippage);
+            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, amm, slippage);
         }
     }
 
@@ -149,8 +156,19 @@ export class Trader {
             return this.sell_token_moon(token_amount, seller, mint_meta, slippage, priority);
         } else {
             const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(token_amount, seller, trade.SOL_MINT, mint, amm, slippage);
+            return trade.swap(token_amount, seller, SOL_MINT, mint, amm, slippage);
         }
+    }
+
+    public static async buy_sell_bundle(
+        _sol_amount: number,
+        _trader: Signer,
+        _mint_meta: MoonshotMintMeta,
+        _tip: number,
+        _slippage: number = 0.05,
+        _priority?: trade.PriorityLevel
+    ): Promise<String> {
+        throw new Error('Not implemented');
     }
 
     public static async sell_token_with_retry(
@@ -211,10 +229,7 @@ export class Trader {
         throw new Error('Not Implemented');
     }
 
-    public static async update_mint_meta_reserves(
-        _mint_meta: MoonshotMintMeta,
-        _sol_price: number
-    ): Promise<MoonshotMintMeta> {
+    public static async update_mint_meta(_mint_meta: MoonshotMintMeta, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 

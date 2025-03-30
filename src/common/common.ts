@@ -1,20 +1,11 @@
 import { readFileSync } from 'fs';
-import dotenv from 'dotenv';
 import { basename } from 'path';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { parse } from 'csv-parse';
+import { IPFS_API, IPSF_API_KEY, PUMP_FETCH_API_URL } from '../constants.js';
 import base58 from 'bs58';
-dotenv.config();
-
-export const WALLETS_FILE = process.env.KEYS_FILE || 'keys.csv';
-export const KEYS_FILE_HEADERS = ['name', 'private_key', 'is_reserve', 'public_key', 'created_at'];
-export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/';
-
-const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
-const IPSF_API_KEY = process.env.IPFS_API_KEY || '';
-const FETCH_MINT_API_URL = 'https://frontend-api.pump.fun';
 
 export function staticImplements<T>() {
     return <U extends T>(constructor: U) => {
@@ -199,6 +190,23 @@ export function validate_float(input: string, min: number = -Infinity, max: numb
     return true;
 }
 
+export function random_amounts(total_amount: number, count: number): number[] {
+    const mean = total_amount / count;
+    const std = mean * 0.51;
+    let amounts = Array.from({ length: count }, () => normal_random(mean, std));
+    const sum = amounts.reduce((acc, curr) => acc + curr, 0);
+    amounts = amounts.map((amount) => (amount / sum) * total_amount);
+
+    amounts = amounts.map((amount) => Math.max(0, amount));
+
+    const adjusted_sum = amounts.reduce((acc, curr) => acc + curr, 0);
+    const correction = total_amount - adjusted_sum;
+    amounts[0] += correction;
+    amounts = amounts.map((amount) => parseFloat(amount.toFixed(3)));
+
+    return amounts;
+}
+
 function box_muller(): number {
     let u = 0,
         v = 0;
@@ -208,7 +216,7 @@ function box_muller(): number {
 }
 
 export function normal_random(mean: number, std: number): number {
-    return Math.abs(mean + box_muller() * Math.sqrt(std));
+    return Math.abs(mean + box_muller() * std);
 }
 
 export function uniform_random(min: number, max: number): number {
@@ -225,7 +233,7 @@ export function read_json(file_path: string): object {
 }
 
 export async function fetch_ipfs_json(cid: string): Promise<any> {
-    const url = `${IPFS}${cid}`;
+    const url = `${IPFS_API}${cid}`;
     try {
         const response = await fetch(url);
         const data = await response.json();
@@ -283,7 +291,7 @@ export async function create_metadata(meta: IPFSMetadata, image_path: string): P
         const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
         if (resp.status !== 'pinned') throw new Error('Failed to upload image to IPFS');
         const cid = resp.pin.cid;
-        meta.image = `${IPFS}${cid}`;
+        meta.image = `${IPFS_API}${cid}`;
 
         const meta_resp = await upload_ipfs(meta, 'application/json', 'metadata.json');
         if (meta_resp.status !== 'pinned') throw new Error('Failed to upload metadata to IPFS');
@@ -318,7 +326,7 @@ export function round_two(num: number): number {
 }
 
 export const fetch_sol_price = async (): Promise<number> => {
-    return fetch(`${FETCH_MINT_API_URL}/sol-price`)
+    return fetch(`${PUMP_FETCH_API_URL}/sol-price`)
         .then((response) => response.json())
         .then((data) => {
             if (!data || data.statusCode !== undefined) return 0.0;
