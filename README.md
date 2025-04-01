@@ -25,13 +25,9 @@ npm install
 4. Create a `.env` file in the root directory and add the following
 
 ```bash
-RPC=
+HELIUS_RPC=
 HELIUS_API_KEY=
 KEYS_FILE=keys.csv
-IPFS_API_KEY=
-MONGO_URI=
-MONGO_DB_NAME=
-JITOTIP_AUTH_KEY=
 ```
 
 5. Build the project

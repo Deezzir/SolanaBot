@@ -8,7 +8,7 @@ import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 import { Wallet } from './common/common.js';
-import { COMMITMENT, HELIUS_API_KEY, RPC, TRADE_MAX_SLIPPAGE, WALLETS_FILE } from './constants.js';
+import { COMMITMENT, HELIUS_API_KEY, HELIUS_RPC, TRADE_MAX_SLIPPAGE, WALLETS_FILE } from './constants.js';
 import base58 from 'bs58';
 
 //------------------------------------------------------------
@@ -34,7 +34,7 @@ async function main() {
     }
 
     const wallet_cnt = wallets.length;
-    global.CONNECTION = new Connection(RPC, COMMITMENT);
+    global.CONNECTION = new Connection(HELIUS_RPC, COMMITMENT);
     global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
     global.MOONSHOT = new Moonshot({
         rpcUrl: global.CONNECTION.rpcEndpoint,
