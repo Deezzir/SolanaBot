@@ -8,7 +8,7 @@ import { Helius } from 'helius-sdk';
 import {
     COMMITMENT,
     HELIUS_API_KEY,
-    RPC,
+    HELIUS_RPC,
     SNIPE_ITERATIONS,
     SNIPE_MIN_BUY,
     SNIPE_MIN_BUY_THRESHOLD
@@ -16,7 +16,7 @@ import {
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
-global.CONNECTION = new Connection(RPC, COMMITMENT);
+global.CONNECTION = new Connection(HELIUS_RPC, COMMITMENT);
 global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
 
 var MINT_METADATA: pump.PumpMintMeta;
