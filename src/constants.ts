@@ -68,6 +68,7 @@ export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL
 // PUMP CONSTANTS
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
+export const PUMP_FEE_PERCENTAGE = 0.01;
 export const PUMP_BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 export const PUMP_META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -76,6 +77,7 @@ export const PUMP_GLOBAL_ACCOUNT = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5
 export const PUMP_FEE_RECIPIENT_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
 export const PUMP_EVENT_AUTHORITUY_ACCOUNT = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
 export const PUMP_MINT_AUTHORITY_ACCOUNT = new PublicKey('TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM');
+export const PUMP_AMM_PROGRAM_ID = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA');
 
 // SNIPE CONSTANTS
 export const SNIPE_BUY_SLIPPAGE = 0.85;

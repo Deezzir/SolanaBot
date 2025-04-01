@@ -850,7 +850,7 @@ async function create_raydium_swap_tx(
     }
 }
 
-async function get_vault_balance(vault: PublicKey): Promise<number> {
+export async function get_vault_balance(vault: PublicKey): Promise<number> {
     const balance = await global.CONNECTION.getTokenAccountBalance(vault);
     return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
 }
