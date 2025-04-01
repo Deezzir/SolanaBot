@@ -27,11 +27,6 @@ import {
     getAssociatedTokenAddress,
     getMint
 } from '@solana/spl-token';
-import { Metaplex } from '@metaplex-foundation/js';
-import {
-    CreateMetadataAccountV3InstructionData,
-    getCreateMetadataAccountV3InstructionDataSerializer
-} from '@metaplex-foundation/mpl-token-metadata';
 import {
     Liquidity,
     LiquidityPoolInfo,
@@ -151,12 +146,6 @@ export type MintMeta = {
     token_decimals: number;
     mint: PublicKey;
 };
-
-export function decode_metaplex_instr(data: string): [CreateMetadataAccountV3InstructionData, number] {
-    const serializer = getCreateMetadataAccountV3InstructionDataSerializer();
-    const decoded = serializer.deserialize(bs58.decode(data));
-    return decoded;
-}
 
 export async function get_tx_with_retries(
     signature: string,
@@ -302,10 +291,14 @@ async function check_transaction_status(
         const { value: status } = await CONNECTION.getSignatureStatus(signature);
 
         if (status && status.confirmationStatus === finality) {
-            const tx = await CONNECTION.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: finality })
+            const tx = await CONNECTION.getTransaction(signature, {
+                maxSupportedTransactionVersion: 0,
+                commitment: finality
+            });
             if (tx) {
-                if (tx.meta?.err === null) return
-                if (tx.meta?.err !== null) throw new Error(`Transaction failed with an error | Signature: ${signature}`);
+                if (tx.meta?.err === null) return;
+                if (tx.meta?.err !== null)
+                    throw new Error(`Transaction failed with an error | Signature: ${signature}`);
             }
         }
 
@@ -480,21 +473,21 @@ export async function get_random_mints(trader: IProgramTrader, count: number): P
 }
 
 export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
-    const metaplex = Metaplex.make(global.CONNECTION);
-    const metaplex_acc = metaplex.nfts().pdas().metadata({ mint });
-    const metaplex_acc_info = await global.CONNECTION.getAccountInfo(metaplex_acc);
+    try {
+        const result = await global.HELIUS_CONNECTION.rpc.getAsset(mint.toString());
 
-    if (metaplex_acc_info) {
-        const token = await metaplex.nfts().findByMint({ mintAddress: mint });
-        return {
-            token_name: token.name,
-            token_symbol: token.symbol,
-            token_decimals: token.mint.decimals,
-            mint: mint
-        };
+        if (result.token_info && result.content) {
+            return {
+                token_name: result.content.metadata.name,
+                token_symbol: result.content.metadata.symbol,
+                token_decimals: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
+                mint: mint
+            };
+        }
+        throw new Error(`Failed to get the token metadata`);
+    } catch (err) {
+        throw new Error(`Failed to get the token metadata: ${err}`);
     }
-
-    throw new Error(`Failed to get the token metadata.`);
 }
 
 export async function get_token_balance(
@@ -862,7 +855,9 @@ async function get_vault_balance(vault: PublicKey): Promise<number> {
     return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
 }
 
-export async function get_raydium_token_metrics(amm: PublicKey): Promise<{ price_sol: number; mcap_sol: number, supply: bigint }> {
+export async function get_raydium_token_metrics(
+    amm: PublicKey
+): Promise<{ price_sol: number; mcap_sol: number; supply: bigint }> {
     try {
         const info = await global.CONNECTION.getAccountInfo(amm);
         if (!info) return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };

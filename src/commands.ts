@@ -11,7 +11,7 @@ import {
     COMMANDS_RPC_TOKEN,
     COMMANDS_SELL_SLIPPAGE,
     COMMITMENT,
-    RPC,
+    HELIUS_RPC,
     WALLETS_FILE_HEADERS
 } from './constants.js';
 import * as common from './common/common.js';
@@ -785,7 +785,7 @@ export async function benchmark(
     let max_time = 0;
     let errors = 0;
     let calls = 0;
-    const connection = new Connection(RPC, {
+    const connection = new Connection(HELIUS_RPC, {
         disableRetryOnRateLimit: true,
         httpHeaders: {
             Authorization: `Bearer ${COMMANDS_RPC_TOKEN}`
