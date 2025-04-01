@@ -18,10 +18,12 @@ import {
     COMMITMENT,
     IPFS,
     METAPLEX_PROGRAM_ID,
+    PUMP_AMM_PROGRAM_ID,
     PUMP_BONDING_ADDR,
     PUMP_CURVE_STATE_SIGNATURE,
     PUMP_CURVE_TOKEN_DECIMALS,
     PUMP_EVENT_AUTHORITUY_ACCOUNT,
+    PUMP_FEE_PERCENTAGE,
     PUMP_FEE_RECIPIENT_ACCOUNT,
     PUMP_FETCH_API_URL,
     PUMP_GLOBAL_ACCOUNT,
@@ -40,6 +42,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     bonding_curve!: string;
     associated_bonding_curve!: string;
     raydium_pool: string | null = null;
+    pump_pool: string | null = null;
     virtual_sol_reserves: bigint = BigInt(0);
     virtual_token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
@@ -75,6 +78,13 @@ export class PumpMintMeta implements trade.IMintMeta {
         return this.raydium_pool !== null ? new PublicKey(this.raydium_pool) : null;
     }
 }
+
+const PUMP_AMM_SIZE = 0xd3;
+const PUMP_AMM_STATE_OFFSETS = {
+    MINT: 0x2b,
+    BASE_VAULT: 0xab,
+    QUOTE_VAULT: 0x8b
+};
 
 const CURVE_STATE_SIZE = 0x29;
 const CURVE_STATE_OFFSETS = {
@@ -256,12 +266,13 @@ export class Trader {
             symbol: meta.token_symbol,
             name: meta.token_name,
             raydium_pool: null,
+            pump_pool: null,
             bonding_curve: bonding.toString(),
             associated_bonding_curve: assoc_bonding.toString(),
-            market_cap: 27.958993535,
-            usd_market_cap: 27.958993535 * sol_price,
-            virtual_sol_reserves: BigInt(30000000030),
-            virtual_token_reserves: BigInt(1072999999000001),
+            market_cap: 27.95,
+            usd_market_cap: 27.95 * sol_price,
+            virtual_sol_reserves: BigInt(30000000000),
+            virtual_token_reserves: BigInt(1073000000000000),
             total_supply: BigInt(1000000000000000)
         });
     }
@@ -278,7 +289,7 @@ export class Trader {
         const token_amount = this.get_token_amount_raw(sol_amount, mint_meta);
         let sell_instructions = await this.get_sell_token_instructions(
             {
-                uiAmount: token_amount / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
+                uiAmount: Number(token_amount) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
                 amount: token_amount.toString(),
                 decimals: 9
             },
@@ -309,9 +320,16 @@ export class Trader {
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
         try {
-            const amm = await trade.get_raydium_amm_from_mint(new PublicKey(mint_meta.mint));
-            mint_meta.raydium_pool = amm ? amm.toString() : null;
-            if (mint_meta.raydium_pool === null && !mint_meta.complete) {
+            const mint = new PublicKey(mint_meta.mint);
+            const [ray_amm, pump_amm] = await Promise.all([
+                trade.get_raydium_amm_from_mint(mint),
+                this.get_pump_amm_from_mint(mint)
+            ]);
+            mint_meta.raydium_pool = ray_amm?.toString() ?? null;
+            mint_meta.pump_pool = pump_amm?.toString() ?? null;
+            const pool = ray_amm ?? pump_amm;
+
+            if (!pool && !mint_meta.complete) {
                 const curve_state = await this.get_curve_state(new PublicKey(mint_meta.bonding_curve));
                 if (!curve_state) throw new Error('Curve state not found.');
 
@@ -331,9 +349,15 @@ export class Trader {
                     virtual_sol_reserves: curve_state.virtual_sol_reserves,
                     complete: curve_state.complete
                 });
-            } else {
-                if (mint_meta.raydium_pool === null) return mint_meta;
-                const metrics = await trade.get_raydium_token_metrics(new PublicKey(mint_meta.raydium_pool));
+            }
+
+            if (pool) {
+                const get_metrics = mint_meta.raydium_pool
+                    ? trade.get_raydium_token_metrics.bind(trade)
+                    : this.get_pump_token_metrics.bind(this);
+
+                const metrics = await get_metrics(new PublicKey(pool));
+
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -342,6 +366,7 @@ export class Trader {
                     complete: true
                 });
             }
+            return mint_meta;
         } catch (error) {
             if (error instanceof Error) {
                 throw new Error(`Failed to update mint meta reserves: ${error.message}`);
@@ -391,44 +416,52 @@ export class Trader {
         if (mint_meta.raydium_pool !== null) return new PublicKey(mint_meta.raydium_pool);
     }
 
-    private static get_token_amount_raw(sol_amount: number, token: Partial<PumpMintMeta>): number {
-        if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
-        const token_price = this.calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-        return Math.round((sol_amount / token_price) * 10 ** PUMP_CURVE_TOKEN_DECIMALS);
+    private static get_token_amount_raw(sol_amount: number, token: Partial<PumpMintMeta>): bigint {
+        if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0n;
+        if (sol_amount <= 0) return 0n;
+
+        const n = token.virtual_sol_reserves * token.virtual_token_reserves;
+        const new_sol_reserves = token.virtual_sol_reserves + BigInt(sol_amount * LAMPORTS_PER_SOL);
+        const new_token_reserves = n / new_sol_reserves + 1n;
+        const token_amount = token.virtual_token_reserves - new_token_reserves;
+        return token_amount;
     }
 
-    private static get_solana_amount_raw(token_amount: number, token: Partial<PumpMintMeta>): number {
-        if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0;
-        const token_price = this.calculate_curve_price(token.virtual_sol_reserves, token.virtual_token_reserves);
-        return token_amount * token_price;
+    private static get_solana_amount_raw(token_amount: number, token: Partial<PumpMintMeta>): bigint {
+        if (!token.virtual_sol_reserves || !token.virtual_token_reserves) return 0n;
+        if (token_amount <= 0) return 0n;
+
+        const token_amount_raw = BigInt(token_amount * 10 ** PUMP_CURVE_TOKEN_DECIMALS);
+        const n = (token_amount_raw * token.virtual_sol_reserves) / (token.virtual_token_reserves + token_amount_raw);
+        let fee_calc = (n * BigInt(PUMP_FEE_PERCENTAGE * 100)) / BigInt(100);
+        return n - fee_calc;
     }
 
-    private static calc_slippage_up(sol_amount: number, slippage: number): number {
-        const lamports = sol_amount * LAMPORTS_PER_SOL;
-        return Math.round(lamports * (1 + slippage));
+    private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
+        if (slippage <= 0 || slippage >= 1) throw new RangeError('Slippage must be between 0 and 1');
+        const percent = BigInt(100) - BigInt(slippage * 100);
+        return (sol_amount * percent) / BigInt(100);
     }
 
-    private static calc_slippage_down(sol_amount: number, slippage: number): number {
-        if (slippage >= 1) throw new RangeError('Slippage must be less than 1');
-        const lamports = sol_amount * LAMPORTS_PER_SOL;
-        return Math.round(lamports * (1 - slippage));
+    private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
+        return sol_amount - (sol_amount * BigInt(slippage * 100)) / BigInt(100);
     }
 
-    private static buy_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
+    private static buy_data(sol_amount: bigint, token_amount: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from('66063d1201daebea', 'hex');
         const token_amount_buf = Buffer.alloc(8);
-        token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
+        token_amount_buf.writeBigUInt64LE(token_amount, 0);
         const slippage_buf = Buffer.alloc(8);
-        slippage_buf.writeBigUInt64LE(BigInt(this.calc_slippage_up(sol_amount, slippage)), 0);
+        slippage_buf.writeBigUInt64LE(this.calc_slippage_up(sol_amount, slippage), 0);
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
-    private static sell_data(sol_amount: number, token_amount: number, slippage: number): Buffer {
+    private static sell_data(sol_amount: bigint, token_amount: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from('33e685a4017f83ad', 'hex');
         const token_amount_buf = Buffer.alloc(8);
-        token_amount_buf.writeBigUInt64LE(BigInt(token_amount), 0);
+        token_amount_buf.writeBigUInt64LE(token_amount, 0);
         const slippage_buf = Buffer.alloc(8);
-        slippage_buf.writeBigUInt64LE(BigInt(this.calc_slippage_down(sol_amount, slippage)), 0);
+        slippage_buf.writeBigUInt64LE(this.calc_slippage_down(sol_amount, slippage), 0);
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
@@ -446,12 +479,11 @@ export class Trader {
         const bonding_curve = new PublicKey(mint_meta.bonding_curve);
         const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
 
-        const token_amount = this.get_token_amount_raw(sol_amount, mint_meta);
-        const instruction_data = this.buy_data(sol_amount, token_amount, slippage);
+        const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
+        const token_amount_raw = this.get_token_amount_raw(sol_amount, mint_meta);
+        const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
         const assoc_address = await trade.calc_assoc_token_addr(buyer.publicKey, mint);
         const exists = await trade.check_account_exists(assoc_address);
-        // TODO: Create account in advance
-        // TODO: Make a transfer to bloxroute for obfuscation
 
         let instructions: TransactionInstruction[] = [];
         if (!exists) {
@@ -498,11 +530,10 @@ export class Trader {
         const assoc_bonding_curve = new PublicKey(mint_meta.associated_bonding_curve);
 
         if (token_amount.uiAmount === null) throw new Error(`Failed to get the token amount.`);
-        const token_amount_raw = parseInt(token_amount.amount);
-        if (isNaN(token_amount_raw)) throw new Error(`Failed to parse the token amount.`);
 
-        const sol_amount = this.get_solana_amount_raw(token_amount.uiAmount, mint_meta);
-        const instruction_data = this.sell_data(sol_amount, token_amount_raw, slippage);
+        const token_amount_raw = BigInt(token_amount.amount);
+        const sol_amount_raw = this.get_solana_amount_raw(token_amount.uiAmount, mint_meta);
+        const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const assoc_address = await trade.calc_assoc_token_addr(seller.publicKey, mint);
 
         let instructions: TransactionInstruction[] = [];
@@ -648,5 +679,48 @@ export class Trader {
             token_total_supply: common.read_biguint_le(acc_info.data, CURVE_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
             complete: common.read_bool(acc_info.data, CURVE_STATE_OFFSETS.COMPLETE, 1)
         };
+    }
+
+    private static async get_pump_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
+        try {
+            const [amm] = await HELIUS_CONNECTION.connection.getProgramAccounts(PUMP_AMM_PROGRAM_ID, {
+                filters: [
+                    { dataSize: PUMP_AMM_SIZE },
+                    {
+                        memcmp: {
+                            offset: PUMP_AMM_STATE_OFFSETS.MINT,
+                            bytes: mint.toBase58()
+                        }
+                    }
+                ],
+                commitment: COMMITMENT
+            });
+            return amm.pubkey;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    static async get_pump_token_metrics(
+        amm: PublicKey
+    ): Promise<{ price_sol: number; mcap_sol: number; supply: bigint }> {
+        try {
+            const info = await HELIUS_CONNECTION.connection.getAccountInfo(amm);
+            if (!info) return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
+
+            const qoute_mint = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.MINT, 32));
+            const base_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_VAULT, 32));
+            const quote_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
+
+            const base_token_balance = await trade.get_vault_balance(base_vault);
+            const quote_token_balance = await trade.get_vault_balance(quote_vault);
+
+            const price_sol = base_token_balance / quote_token_balance;
+            const token = await trade.get_token_supply(qoute_mint);
+            const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
+            return { price_sol, mcap_sol, supply: token.supply };
+        } catch (err) {
+            return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
+        }
     }
 }
