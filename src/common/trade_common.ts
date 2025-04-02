@@ -165,7 +165,7 @@ export async function get_tx_with_retries(
     return null;
 }
 
-export async function check_account_exists(account: PublicKey): Promise<boolean | undefined> {
+export async function check_ata_exists(account: PublicKey): Promise<boolean | undefined> {
     try {
         let account_info = await getAccount(global.CONNECTION, account);
         if (account_info && account_info.isInitialized) return true;
@@ -474,7 +474,7 @@ export async function get_random_mints(trader: IProgramTrader, count: number): P
 
 export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
     try {
-        const result = await global.HELIUS_CONNECTION.rpc.getAsset(mint.toString());
+        const result = await global.HELIUS_CONNECTION.rpc.getAsset({ id: mint.toString() });
 
         if (result.token_info && result.content) {
             return {
@@ -530,7 +530,7 @@ export async function send_tokens_with_account_create(
     let instructions: TransactionInstruction[] = [];
 
     const ata = await calc_assoc_token_addr(receiver, mint);
-    if (!(await check_account_exists(ata))) {
+    if (!(await check_ata_exists(ata))) {
         instructions.push(createAssociatedTokenAccountInstruction(payer.publicKey, ata, receiver, mint));
     }
 
@@ -541,7 +541,7 @@ export async function send_tokens_with_account_create(
 export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
     try {
         const assoc_address = await calc_assoc_token_addr(owner, mint);
-        if (!(await check_account_exists(assoc_address))) {
+        if (!(await check_ata_exists(assoc_address))) {
             let instructions: TransactionInstruction[] = [];
             instructions.push(createAssociatedTokenAccountInstruction(payer.publicKey, assoc_address, owner, mint));
             await create_and_send_smart_tx(instructions, [payer]);
@@ -734,7 +734,7 @@ async function create_raydium_swap_tx(
 
     if (token_in.equals(SOL_MINT)) {
         token_out_acc = await calc_assoc_token_addr(seller.publicKey, token_out);
-        if (!(await check_account_exists(token_out_acc))) {
+        if (!(await check_ata_exists(token_out_acc))) {
             instructions.push(
                 createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
             );
@@ -850,14 +850,12 @@ async function create_raydium_swap_tx(
     }
 }
 
-export async function get_vault_balance(vault: PublicKey): Promise<number> {
+export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {
     const balance = await global.CONNECTION.getTokenAccountBalance(vault);
-    return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
+    return { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
 }
 
-export async function get_raydium_token_metrics(
-    amm: PublicKey
-): Promise<{ price_sol: number; mcap_sol: number; supply: bigint }> {
+export async function get_raydium_token_metrics(amm: PublicKey): Promise<TokenMetrics> {
     try {
         const info = await global.CONNECTION.getAccountInfo(amm);
         if (!info) return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
@@ -866,10 +864,13 @@ export async function get_raydium_token_metrics(
         const base_token_balance = await get_vault_balance(pool_state.baseVault);
         const quote_token_balance = await get_vault_balance(pool_state.quoteVault);
 
-        const price_sol = base_token_balance / quote_token_balance;
+        const price_sol =
+            Number(base_token_balance.balance) /
+            Math.pow(10, base_token_balance.decimals) /
+            (Number(quote_token_balance.balance) / Math.pow(10, quote_token_balance.decimals));
         const token = await get_token_supply(pool_state.quoteMint);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
-        return { price_sol, mcap_sol, supply: token.supply };
+        return { price_sol: Number(price_sol) / Math.pow(10, token.decimals), mcap_sol, supply: token.supply };
     } catch (err) {
         return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
     }
@@ -992,10 +993,10 @@ export async function swap(
     swap_from: PublicKey,
     amm: PublicKey,
     slippage: number = 0.05,
-    _priority: PriorityLevel = PriorityLevel.DEFAULT
+    priority?: PriorityLevel
 ): Promise<String> {
     try {
-        return swap_raydium(amount, buyer, amm, swap_to, slippage);
+        return swap_raydium(amount, buyer, amm, swap_to, slippage, priority);
     } catch (error) {
         try {
             const signature = await swap_jupiter(amount, buyer, swap_from, swap_to, slippage);
