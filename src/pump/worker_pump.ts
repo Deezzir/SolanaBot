@@ -88,7 +88,8 @@ const buy = async () => {
                 WORKER_KEYPAIR,
                 MINT_METADATA,
                 WORKER_CONF.buy_slippage,
-                trade.PriorityLevel.VERY_HIGH
+                WORKER_CONF.priority_level,
+                WORKER_CONF.protection_tip
             );
             transactions.push(
                 process_buy(buy_promise, amount).then((result) => {
@@ -162,7 +163,8 @@ const sell = async () => {
                 WORKER_KEYPAIR,
                 MINT_METADATA,
                 WORKER_CONF.sell_slippage,
-                trade.PriorityLevel.HIGH
+                WORKER_CONF.priority_level,
+                WORKER_CONF.protection_tip
             );
             transactions.push(
                 process_sell(sell_promise, balance).then((result) => {

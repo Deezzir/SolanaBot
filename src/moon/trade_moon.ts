@@ -1,6 +1,6 @@
 import { FixedSide } from '@wen-moon-ser/moonshot-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstruction, Keypair } from '@solana/web3.js';
-import { MOONSHOT_TRADE_PROGRAM_ID, SOL_MINT } from '../constants.js';
+import { PriorityLevel, SOL_MINT } from '../constants.js';
 import * as trade from '../common/trade_common.js';
 import * as common from '../common/common.js';
 
@@ -110,37 +110,16 @@ export class Trader {
         buyer: Signer,
         mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         const amm = this.get_raydium_amm(mint_meta);
         if (!amm) {
-            return this.buy_token_moon(sol_amount, buyer, mint_meta, slippage, priority);
+            return this.buy_token_moon(sol_amount, buyer, mint_meta, slippage, priority, protection_tip);
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, amm, slippage);
-        }
-    }
-
-    public static async buy_token_with_retry(
-        sol_amount: number,
-        buyer: Signer,
-        mint_meta: MoonshotMintMeta,
-        slippage: number = 0.05,
-        retries: number,
-        priority?: trade.PriorityLevel
-    ): Promise<String | undefined> {
-        let buy_attempts = retries;
-        let bought = false;
-        while (buy_attempts > 0 && !bought) {
-            try {
-                return await this.buy_token(sol_amount, buyer, mint_meta, slippage, priority);
-            } catch (e) {
-                common.error(common.red(`Failed to buy the token, retrying... ${e}`));
-                buy_attempts--;
-                await common.sleep(3000);
-            }
-            return;
+            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, amm, slippage, priority, protection_tip);
         }
     }
 
@@ -149,14 +128,15 @@ export class Trader {
         seller: Signer,
         mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         const amm = this.get_raydium_amm(mint_meta);
         if (!amm) {
-            return this.sell_token_moon(token_amount, seller, mint_meta, slippage, priority);
+            return this.sell_token_moon(token_amount, seller, mint_meta, slippage, priority, protection_tip);
         } else {
             const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(token_amount, seller, SOL_MINT, mint, amm, slippage);
+            return trade.swap(token_amount, seller, SOL_MINT, mint, amm, slippage, priority, protection_tip);
         }
     }
 
@@ -166,36 +146,9 @@ export class Trader {
         _mint_meta: MoonshotMintMeta,
         _tip: number,
         _slippage: number = 0.05,
-        _priority?: trade.PriorityLevel
+        _priority?: PriorityLevel
     ): Promise<String> {
         throw new Error('Not implemented');
-    }
-
-    public static async sell_token_with_retry(
-        seller: Signer,
-        mint_meta: MoonshotMintMeta,
-        slippage: number = 0.05,
-        retries: number,
-        priority?: trade.PriorityLevel
-    ): Promise<String | undefined> {
-        let sell_attempts = retries;
-        while (sell_attempts > 0) {
-            try {
-                const balance = await trade.get_token_balance(seller.publicKey, new PublicKey(mint_meta.token_mint));
-                if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                    common.log(`No tokens yet to sell for mint ${mint_meta.token_mint}, waiting...`);
-                    sell_attempts--;
-                    await common.sleep(3000);
-                    continue;
-                }
-                return await this.sell_token(balance, seller, mint_meta, slippage, priority);
-            } catch (e) {
-                common.error(common.red(`Error selling the token, retrying... ${e}`));
-                sell_attempts--;
-                await common.sleep(1000);
-            }
-        }
-        return;
     }
 
     public static async get_mint_meta(mint: PublicKey): Promise<MoonshotMintMeta | undefined> {
@@ -242,17 +195,14 @@ export class Trader {
         buyer: Signer,
         mint_meta: MoonshotMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], {
-                priority_level: priority,
-                accounts: [MOONSHOT_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [buyer]);
+            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [buyer]);
     }
 
     private static async sell_token_moon(
@@ -260,17 +210,14 @@ export class Trader {
         seller: Signer,
         mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_sell_token_instructions(token_amount, seller, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [seller], {
-                priority_level: priority,
-                accounts: [MOONSHOT_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [seller]);
+            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [seller]);
     }
 
     private static async get_sell_token_instructions(

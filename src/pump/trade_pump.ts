@@ -4,6 +4,7 @@ import {
     LAMPORTS_PER_SOL,
     PublicKey,
     Signer,
+    SystemProgram,
     TokenAmount,
     TransactionInstruction
 } from '@solana/web3.js';
@@ -11,7 +12,10 @@ import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import {
     ASSOCIATED_TOKEN_PROGRAM_ID,
+    createAssociatedTokenAccountIdempotentInstruction,
     createAssociatedTokenAccountInstruction,
+    createCloseAccountInstruction,
+    createSyncNativeInstruction,
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import {
@@ -36,10 +40,11 @@ import {
     RENT_PROGRAM_ID,
     SOL_MINT,
     SYSTEM_PROGRAM_ID,
-    TRADE_RETRY_INTERVAL,
     PUMP_AMM_FEE_TOKEN_ACCOUNT,
     BUY_DISCRIMINATOR,
-    SELL_DISCRIMINATOR
+    SELL_DISCRIMINATOR,
+    PUMP_SWAP_PERCENTAGE,
+    PriorityLevel
 } from '../constants.js';
 
 export class PumpMintMeta implements trade.IMintMeta {
@@ -137,41 +142,20 @@ export class Trader {
         buyer: Signer,
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
-        const ray_amm = this.get_raydium_amm(mint_meta);
         const pump_amm = this.get_pump_amm(mint_meta);
+        const ray_amm = this.get_raydium_amm(mint_meta);
+        if (pump_amm) {
+            return this.buy_token_pumpswap(sol_amount, buyer, mint_meta, slippage, priority, protection_tip);
+        }
         if (ray_amm) {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.mint);
-            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, ray_amm, slippage);
+            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, ray_amm, slippage, priority, protection_tip);
         }
-        if (pump_amm) {
-            return this.buy_token_pumpswap(sol_amount, buyer, mint_meta, slippage, priority);
-        }
-        return this.buy_token_pump(sol_amount, buyer, mint_meta, slippage, priority);
-    }
-
-    public static async buy_token_with_retry(
-        sol_amount: number,
-        buyer: Signer,
-        mint_meta: PumpMintMeta,
-        slippage: number = 0.05,
-        retries: number,
-        priority?: trade.PriorityLevel
-    ): Promise<String | undefined> {
-        let buy_attempts = retries;
-        let bought = false;
-        while (buy_attempts > 0 && !bought) {
-            try {
-                return await this.buy_token(sol_amount, buyer, mint_meta, slippage, priority);
-            } catch (e) {
-                common.error(common.red(`Failed to buy the token, retrying... ${e}`));
-                buy_attempts--;
-                await common.sleep(TRADE_RETRY_INTERVAL);
-            }
-            return;
-        }
+        return this.buy_token_pump(sol_amount, buyer, mint_meta, slippage, priority, protection_tip);
     }
 
     public static async sell_token(
@@ -179,45 +163,19 @@ export class Trader {
         seller: Signer,
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
-        priority: trade.PriorityLevel
+        priority: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         const ray_amm = this.get_raydium_amm(mint_meta);
         const pump_amm = this.get_pump_amm(mint_meta);
+        if (pump_amm) {
+            return this.sell_token_pumpswap(token_amount, seller, mint_meta, slippage, priority, protection_tip);
+        }
         if (ray_amm) {
             const mint = new PublicKey(mint_meta.mint);
-            return trade.swap(token_amount, seller, SOL_MINT, mint, ray_amm, slippage);
+            return trade.swap(token_amount, seller, SOL_MINT, mint, ray_amm, slippage, priority, protection_tip);
         }
-        if (pump_amm) {
-            return this.sell_token_pumpswap(token_amount, seller, mint_meta, slippage, priority);
-        }
-        return this.sell_token_pump(token_amount, seller, mint_meta, slippage, priority);
-    }
-
-    public static async sell_token_with_retry(
-        seller: Signer,
-        mint_meta: PumpMintMeta,
-        slippage: number = 0.05,
-        retries: number,
-        priority: trade.PriorityLevel
-    ): Promise<String | undefined> {
-        let sell_attempts = retries;
-        while (sell_attempts > 0) {
-            try {
-                const balance = await trade.get_token_balance(seller.publicKey, new PublicKey(mint_meta.token_mint));
-                if (balance.uiAmount === 0 || balance.uiAmount === null) {
-                    common.log(`No tokens yet to sell for mint ${mint_meta.token_mint}, waiting...`);
-                    sell_attempts--;
-                    await common.sleep(TRADE_RETRY_INTERVAL);
-                    continue;
-                }
-                return await this.sell_token(balance, seller, mint_meta, slippage, priority);
-            } catch (e) {
-                common.error(common.red(`Error selling the token, retrying... ${e}`));
-                sell_attempts--;
-                await common.sleep(1000);
-            }
-        }
-        return;
+        return this.sell_token_pump(token_amount, seller, mint_meta, slippage, priority, protection_tip);
     }
 
     public static async get_mint_meta(mint: PublicKey): Promise<PumpMintMeta | undefined> {
@@ -310,7 +268,7 @@ export class Trader {
         mint_meta: PumpMintMeta,
         tip: number,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel
     ): Promise<String> {
         const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
 
@@ -344,7 +302,7 @@ export class Trader {
             );
         }
 
-        return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [trader], tip);
+        return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip);
     }
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number): Promise<PumpMintMeta> {
@@ -386,8 +344,8 @@ export class Trader {
                     total_supply: metrics.supply,
                     base_vault: amm_state.base_vault.toString(),
                     quote_vault: amm_state.quote_vault.toString(),
-                    sol_reserves: amm_state.base_vault_balance,
-                    token_reserves: amm_state.quote_vault_balance,
+                    sol_reserves: amm_state.quote_vault_balance,
+                    token_reserves: amm_state.base_vault_balance,
                     complete: true
                 });
             }
@@ -418,17 +376,14 @@ export class Trader {
         buyer: Signer,
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_buy_instructions(sol_amount, buyer, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], {
-                priority_level: priority,
-                accounts: [PUMP_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [buyer]);
+            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [buyer]);
     }
 
     private static async sell_token_pump(
@@ -436,17 +391,14 @@ export class Trader {
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05,
-        priority: trade.PriorityLevel
+        priority: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_sell_instructions(token_amount, seller, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [seller], {
-                priority_level: priority,
-                accounts: [PUMP_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [seller]);
+            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [seller]);
     }
 
     private static get_raydium_amm(mint_meta: PumpMintMeta): PublicKey | undefined {
@@ -520,8 +472,9 @@ export class Trader {
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
 
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw, mint_meta);
-        const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
+        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
+        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
+        const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
         const token_ata = await trade.calc_assoc_token_addr(buyer.publicKey, mint);
         const token_ata_exists = await trade.check_ata_exists(token_ata);
 
@@ -551,7 +504,6 @@ export class Trader {
                 data: instruction_data
             })
         );
-
         return instructions;
     }
 
@@ -785,8 +737,9 @@ export class Trader {
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
 
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw, mint_meta);
-        const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
+        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_SWAP_PERCENTAGE * 10000))) / 10000n;
+        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
+        const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
         const token_ata = await trade.calc_assoc_token_addr(buyer.publicKey, mint);
         const wsol_ata = await trade.calc_assoc_token_addr(buyer.publicKey, SOL_MINT);
         const token_ata_created = await trade.check_ata_exists(token_ata);
@@ -794,9 +747,20 @@ export class Trader {
         let instructions: TransactionInstruction[] = [];
         if (!token_ata_created) {
             instructions.push(
-                createAssociatedTokenAccountInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint)
+                createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint)
             );
         }
+        instructions.push(
+            ...[
+                createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, wsol_ata, buyer.publicKey, SOL_MINT),
+                SystemProgram.transfer({
+                    fromPubkey: buyer.publicKey,
+                    toPubkey: wsol_ata,
+                    lamports: sol_amount_raw
+                }),
+                createSyncNativeInstruction(wsol_ata)
+            ]
+        );
         instructions.push(
             new TransactionInstruction({
                 keys: [
@@ -822,6 +786,7 @@ export class Trader {
                 data: instruction_data
             })
         );
+        instructions.push(createCloseAccountInstruction(wsol_ata, buyer.publicKey, buyer.publicKey));
 
         return instructions;
     }
@@ -850,6 +815,9 @@ export class Trader {
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(
+            createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT)
+        );
+        instructions.push(
             new TransactionInstruction({
                 keys: [
                     { pubkey: amm, isSigner: false, isWritable: false },
@@ -874,6 +842,7 @@ export class Trader {
                 data: instruction_data
             })
         );
+        instructions.push(createCloseAccountInstruction(wsol_ata, seller.publicKey, seller.publicKey));
 
         return instructions;
     }
@@ -883,17 +852,14 @@ export class Trader {
         buyer: Signer,
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
-        priority?: trade.PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_buy_amm_instructions(sol_amount, buyer, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], {
-                priority_level: priority,
-                accounts: [PUMP_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [buyer]);
+            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [buyer]);
     }
 
     private static async sell_token_pumpswap(
@@ -901,16 +867,13 @@ export class Trader {
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05,
-        priority: trade.PriorityLevel
+        priority: PriorityLevel,
+        protection_tip?: number
     ): Promise<String> {
         let instructions = await this.get_sell_amm_instructions(token_amount, seller, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [seller], {
-                priority_level: priority,
-                accounts: [PUMP_TRADE_PROGRAM_ID.toString()]
-            });
-        } else {
-            return await trade.create_and_send_smart_tx(instructions, [seller]);
+            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip);
         }
+        return await trade.create_and_send_smart_tx(instructions, [seller]);
     }
 }

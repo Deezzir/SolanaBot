@@ -1,10 +1,11 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import {
+    COMMANDS_INTERVAL,
+    PriorityLevel,
     SPIDER_EXTRA_SOL,
     SPIDER_INTERVAL,
     SPIDER_RESCUE_DIR_PATH,
-    TRADE_MAX_RETRIES,
     WALLETS_FILE_HEADERS
 } from '../constants.js';
 import path from 'path';
@@ -99,7 +100,8 @@ function display_spider_tree(tree: SpiderTree) {
 }
 
 function setup_rescue_file(): string | undefined {
-    const target_file = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
+    const file_name = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
+    const target_file = `${file_name}.csv`;
     const target_file_path = path.join(SPIDER_RESCUE_DIR_PATH, target_file);
 
     try {
@@ -118,23 +120,23 @@ function setup_rescue_file(): string | undefined {
     }
 }
 
-function save_rescue_key(node: SpiderTreeNode, target_file: string, layer_cnt: number, index: number): boolean {
+function save_rescue_key(keypair: Keypair, target_file_path: string, layer_cnt: number, index: number): boolean {
     const key_name = `wallet${layer_cnt}_${index}`;
-    const private_key = bs58.encode(node.keypair.secretKey);
-    const public_key = node.keypair.publicKey.toString();
+    const private_key = bs58.encode(keypair.secretKey);
+    const public_key = keypair.publicKey.toString();
     const date = new Date().toLocaleDateString();
 
-    if (!existsSync(target_file)) {
+    if (existsSync(target_file_path)) {
         try {
             const row = [key_name, private_key, false, public_key, date].join(',');
-            appendFileSync(target_file, row + '\n', 'utf8');
+            appendFileSync(target_file_path, row + '\n', 'utf8');
             return true;
         } catch (error) {
             common.error(`[ERROR] Failed to write a wallet to a rescue file: ${error}`);
             return false;
         }
     }
-    return true;
+    return false;
 }
 
 function backup_spider_tree(tree: SpiderTree): string | undefined {
@@ -149,7 +151,7 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
         if (node === null) return true;
 
         postfixes.set(layer_cnt, (postfixes.get(layer_cnt) ?? 0) + 1);
-        const ok = save_rescue_key(node, target_file, layer_cnt, postfixes.get(layer_cnt) || 0);
+        const ok = save_rescue_key(node.keypair, target_file, layer_cnt, postfixes.get(layer_cnt) || 0);
         if (!ok) return false;
 
         if (node.left) {
@@ -199,18 +201,22 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name})...`
             );
 
-            let ok = await send_lamports_with_retries(
-                sol_amount,
-                sender,
-                receiver,
-                trade.PriorityLevel.HIGH,
-                layer_name
-            );
-            if (!ok) return false;
+            try {
+                const sig = await trade.send_lamports_with_retries(
+                    sol_amount,
+                    sender,
+                    receiver.publicKey,
+                    PriorityLevel.DEFAULT
+                );
+                common.log(`Transaction completed for ${layer_name}, signature: ${sig}`);
+            } catch (error) {
+                common.error(`[ERROR] Failed to send lamports: ${error}`);
+                return false;
+            }
 
             await common.sleep(SPIDER_INTERVAL);
 
-            ok = await _process_inner_transfers(node.left, layer_cnt + 1);
+            const ok = await _process_inner_transfers(node.left, layer_cnt + 1);
             if (!ok) return false;
         }
 
@@ -224,19 +230,22 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
             common.log(
                 `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`
             );
-
-            let ok = await send_lamports_with_retries(
-                sol_amount,
-                sender,
-                receiver,
-                trade.PriorityLevel.HIGH,
-                layer_name
-            );
-            if (!ok) return false;
+            try {
+                let sig = await trade.send_lamports_with_retries(
+                    sol_amount,
+                    sender,
+                    receiver.publicKey,
+                    PriorityLevel.DEFAULT
+                );
+                common.log(`Transaction completed for ${layer_name}, signature: ${sig}`);
+            } catch (error) {
+                common.error(`[ERROR] Failed to send lamports: ${error}`);
+                return false;
+            }
 
             await common.sleep(SPIDER_INTERVAL);
 
-            ok = await _process_inner_transfers(node.right, layer_cnt + 1);
+            const ok = await _process_inner_transfers(node.right, layer_cnt + 1);
             if (!ok) return false;
         }
 
@@ -252,32 +261,6 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
     return entries;
 }
 
-async function send_lamports_with_retries(
-    amount: number,
-    sender: Keypair,
-    receiver: Keypair,
-    priority: trade.PriorityLevel,
-    name: string,
-    max_retries: number = TRADE_MAX_RETRIES
-): Promise<boolean> {
-    for (let attempt = 1; attempt <= max_retries; attempt++) {
-        try {
-            const signature = await trade.send_lamports(amount, sender, receiver.publicKey, priority);
-            common.log(`Transaction completed for ${name}, signature: ${signature} `);
-            return true;
-        } catch (error) {
-            if (attempt < max_retries) {
-                common.error(`Transaction failed for ${name}, attempt ${attempt}. Retrying...`);
-                await common.sleep(SPIDER_INTERVAL * 3);
-                amount = await trade.get_balance(sender.publicKey);
-            } else {
-                common.error(`Transaction failed for ${name} after ${max_retries} attempts: ${error}`);
-            }
-        }
-    }
-    return false;
-}
-
 async function process_final_transfers(wallets: common.Wallet[], entries: Keypair[]): Promise<void> {
     if (entries.length === 0) return;
     if (entries.length !== wallets.length) {
@@ -285,7 +268,7 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
         return;
     }
 
-    const transactions: Promise<boolean>[] = [];
+    const transactions: Promise<String>[] = [];
 
     for (const [i, wallet] of wallets.entries()) {
         const sender = entries[i];
@@ -296,9 +279,7 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
         common.log(
             `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`
         );
-        transactions.push(
-            send_lamports_with_retries(amount, sender, receiver, trade.PriorityLevel.DEFAULT, wallet.name)
-        );
+        transactions.push(trade.send_lamports_with_retries(amount, sender, receiver.publicKey, PriorityLevel.DEFAULT));
 
         await common.sleep(50);
     }
@@ -315,7 +296,7 @@ export async function run_spider_transfer(
     keys: common.Wallet[],
     amount: number,
     sender: Keypair
-): Promise<common.Wallet[] | undefined> {
+): Promise<common.Wallet[]> {
     const keys_cnt = keys.length;
 
     let tree = {
@@ -327,7 +308,7 @@ export async function run_spider_transfer(
     display_spider_tree(tree);
 
     const target_file = backup_spider_tree(tree);
-    if (!target_file) return;
+    if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
     const rescue_keys = await common.get_wallets(target_file);
 
     common.log(`[Main Worker] Processing inner transfers...\n`);
@@ -341,4 +322,109 @@ export async function run_spider_transfer(
     }
 
     return rescue_keys;
+}
+
+export async function run_deep_transfer(
+    wallets: common.Wallet[],
+    amounts: number[],
+    sender: Keypair,
+    depth: number
+): Promise<common.Wallet[]> {
+    const failed: string[] = [];
+    const target_file = setup_rescue_file();
+    if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
+
+    const transfer_map = wallets.map((wallet, index) => {
+        const amount = amounts[index];
+        const path = [
+            sender,
+            ...Array.from({ length: depth }, () => {
+                const pair = new Keypair();
+                save_rescue_key(pair, target_file, 0, index);
+                return pair;
+            }),
+            wallet.keypair
+        ];
+
+        return {
+            amount,
+            wallet,
+            path
+        };
+    });
+
+    for (const entry of transfer_map) {
+        const wallet = entry.wallet;
+        const topup_amount = entry.amount;
+
+        common.log(
+            `Sending ${topup_amount} SOL to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+        );
+
+        for (let index = 1; index < entry.path.length; index++) {
+            const sender = entry.path[index - 1];
+            const receiver = entry.path[index];
+
+            try {
+                const signature = await trade.send_lamports_with_retries(
+                    topup_amount * LAMPORTS_PER_SOL,
+                    sender,
+                    receiver.publicKey,
+                    PriorityLevel.DEFAULT
+                );
+                common.log(
+                    common.green(`Transaction completed for ${wallet.name}, signature: ${signature}, depth: ${index}`)
+                );
+            } catch (error) {
+                common.error(common.red(`Transaction failed for ${wallet.name}: ${error}, depth: ${index}`));
+                failed.push(wallet.name);
+                break;
+            }
+            await common.sleep(SPIDER_INTERVAL);
+        }
+        common.log('');
+    }
+
+    if (failed.length > 0) {
+        common.error(common.red(`Failed transactions:`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
+    }
+
+    return await common.get_wallets(target_file);
+}
+
+export async function run_reg_transfer(wallets: common.Wallet[], amounts: number[], sender: Keypair): Promise<void> {
+    if (amounts.length !== wallets.length) throw new Error('The number of entries does not match the number of keys');
+
+    const transactions = [];
+    const failed: string[] = [];
+
+    for (const [i, wallet] of wallets.entries()) {
+        const receiver = wallet.keypair;
+        const topup_amount = amounts[i];
+        if (receiver.publicKey.equals(sender.publicKey)) continue;
+
+        common.log(
+            `Sending ${topup_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+        );
+        transactions.push(
+            trade
+                .send_lamports(topup_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.DEFAULT)
+                .then((signature) =>
+                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                )
+                .catch((error) => {
+                    common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`));
+                    failed.push(wallet.name);
+                })
+        );
+
+        await common.sleep(COMMANDS_INTERVAL);
+    }
+    await Promise.allSettled(transactions);
+
+    if (failed.length > 0) {
+        common.error(common.red(`\nFailed transactions:`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
+    }
 }
