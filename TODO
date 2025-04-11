@@ -1,29 +1,13 @@
 # TODO
 
-- Add Volume bot
-- Add sell by percent to start/snipe command
-- Detect Raydium migration and change price update strategy
-  - Ray Price Calc: [solask](https://solana.stackexchange.com/questions/11939/calculation-of-tocken-price-for-example-sol-usdc)
-  - Detection: [codebase](https://github.com/warp-id/solana-trading-bot?tab=readme-ov-file#configuration)
-  - Another example: [code](https://gist.github.com/endrsmar/684c336c3729ec4472b2f337c50c3cdb)
-  - Logic?:
-    - Update and monitor price coming from Pump
-    - Detect if the curve is complete(run onLogs in bg to check if `init` instruction occured)
-    - Subscribe to Raydium AMM to detect migration (done by prev step)
-    - Update metadata `raydium_pool` for the trade commands
-    - Switch price monitoring to another source (some RPC API or direct blockchain monitoring using Ray AMM)
-- Wallet stats, like age, number of bonds and winrate. (new command?)
-  - Wallet win rate
-    - Logic?
-      - Get all txs from a wallet pub key (multiple reqs)
-      - Determine all buy txs(Pump, Ray, Moonshot?)
-      - Using a mint from each buy tx, find every sell tx (may be multiple)
-      - Determine gains in %
-      - Calculate average on all buy/sell gain pairs (or other aggregate?)
-      - Maybe other metrics can be added (to discuss)
-- Pump Fun Shill, comments creation
 - Introduce bundled sells and buys
+
+- Add Volume bot
+- Nozomi
+- Generic trader
+- Add bundle snipe
+- Add sell by percent to start/snipe command
 - Pump/Moonshot Volume (and bump bot)
-- Cache, optimizations
-- PumpSwap
-- 
+- Token Metadata IPFS https://github.com/rckprtr/pumpdotfun-sdk/blob/576b978b25e1c8404bfecc55951bdfdcf44a1e1d/src/pumpfun.ts#L395
+- Pump Fun Shill, comments creation
+- Wallet stats, like age, number of bonds and winrate. (new command)

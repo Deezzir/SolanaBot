@@ -12,7 +12,9 @@ import {
     ComputeBudgetProgram,
     Commitment,
     VersionedTransactionResponse,
-    Finality
+    Finality,
+    AddressLookupTableAccount,
+    Transaction
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -45,6 +47,7 @@ import {
     COMMITMENT,
     JITO_ENDPOINTS,
     JUPITER_API_URL,
+    PriorityLevel,
     RAYDIUM_AMM_PROGRAM_ID,
     RAYDIUM_AUTHORITY,
     SOL_MINT,
@@ -73,30 +76,17 @@ export interface IProgramTrader {
         buyer: Signer,
         mint_meta: IMintMeta,
         slippage: number,
-        priority?: PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String>;
-    buy_token_with_retry(
-        sol_amount: number,
-        buyer: Signer,
-        mint_meta: IMintMeta,
-        slippage: number,
-        retries: number,
-        priority?: PriorityLevel
-    ): Promise<String | undefined>;
     sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<IMintMeta>,
         slippage: number,
-        priority?: PriorityLevel
+        priority?: PriorityLevel,
+        protection_tip?: number
     ): Promise<String>;
-    sell_token_with_retry(
-        seller: Signer,
-        mint_meta: Partial<IMintMeta>,
-        slippage: number,
-        retries: number,
-        priority?: PriorityLevel
-    ): Promise<String | undefined>;
     buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
@@ -118,19 +108,13 @@ export interface IProgramTrader {
     update_mint_meta(mint_meta: IMintMeta, sol_price: number): Promise<IMintMeta>;
 }
 
-export enum PriorityLevel {
-    MIN = 'Min',
-    LOW = 'Low',
-    MEDIUM = 'Medium',
-    HIGH = 'High',
-    VERY_HIGH = 'VeryHigh',
-    UNSAFE_MAX = 'UnsafeMax',
-    DEFAULT = 'Default'
-}
-
 type PriorityOptions = {
     accounts?: string[];
-    priority_level: PriorityLevel;
+    transaction?: {
+        instructions: TransactionInstruction[];
+        signers: Signer[];
+    };
+    priority_level?: PriorityLevel;
 };
 
 type RaydiumAmounts = {
@@ -145,6 +129,12 @@ export type MintMeta = {
     token_symbol: string;
     token_decimals: number;
     mint: PublicKey;
+};
+
+export type TokenMetrics = {
+    price_sol: number;
+    mcap_sol: number;
+    supply: bigint;
 };
 
 export async function get_tx_with_retries(
@@ -200,9 +190,9 @@ function get_random_jito_tip_account(): PublicKey {
     return new PublicKey(randomValidator);
 }
 
-async function send_bundle(serialized_txs: string[]): Promise<string[]> {
+async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
     const requests = JITO_ENDPOINTS.map((endpoint) =>
-        fetch(endpoint, {
+        fetch(`${endpoint}/bundles`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -226,13 +216,81 @@ async function send_bundle(serialized_txs: string[]): Promise<string[]> {
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
-export async function create_and_send_bundle(
-    instructions: TransactionInstruction[][],
+async function send_jito_tx(serialized_tx: string): Promise<string[]> {
+    const requests = JITO_ENDPOINTS.map((endpoint) =>
+        fetch(`${endpoint}/transactions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'sendTransaction',
+                params: [serialized_tx]
+            })
+        })
+    );
+    const responses = await Promise.all(
+        requests.map((resp) =>
+            resp
+                .then((resp) => resp.json())
+                .then((data) => data.result as string)
+                .catch((err) => err)
+        )
+    );
+    return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
+}
+
+export async function create_and_send_protected_tx(
+    instructions: TransactionInstruction[],
     signers: Signer[],
     tip: number
 ): Promise<String> {
+    if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
     const payer = signers.at(0)!;
+
+    const jito_tip_account = get_random_jito_tip_account();
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+
+    instructions.push(
+        SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: jito_tip_account,
+            lamports: tip * LAMPORTS_PER_SOL
+        })
+    );
+
+    const versioned_tx = new VersionedTransaction(
+        new TransactionMessage({
+            payerKey: payer.publicKey,
+            recentBlockhash: ctx.value.blockhash,
+            instructions: instructions.filter(Boolean)
+        }).compileToV0Message()
+    );
+    versioned_tx.sign(signers);
+    const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
+    const serialized_tx = bs58.encode(versioned_tx.serialize());
+
+    const responses = await send_jito_tx(serialized_tx);
+    if (responses.length > 0) {
+        await check_transaction_status(jito_tx_signature, ctx);
+        return responses[0];
+    } else {
+        throw new Error(`Failed to send the bundle, no successfull response from the JITO endpoints`);
+    }
+}
+
+export async function create_and_send_bundle(
+    instructions: TransactionInstruction[][],
+    signers: Signer[][],
+    tip: number
+): Promise<String> {
+    if (instructions.length === 0) throw new Error(`No instructions provided.`);
+    if (instructions.length !== signers.length) throw new Error(`Instructions and signers length mismatch.`);
+    if (signers[0].length === 0) throw new Error(`No payer provided.`);
+    const payer = signers[0][0];
 
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
@@ -263,17 +321,36 @@ export async function create_and_send_bundle(
                 instructions: instructions[i].filter(Boolean)
             }).compileToV0Message()
         );
-        versioned_tx.sign(signers);
+        versioned_tx.sign(signers[i]);
         serialized_txs.push(bs58.encode(versioned_tx.serialize()));
     }
 
-    const responses = await send_bundle(serialized_txs);
+    const responses = await send_jito_bundle(serialized_txs);
     if (responses.length > 0) {
         await check_transaction_status(jito_tx_signature, ctx);
         return responses[0];
     } else {
         throw new Error(`Failed to send the bundle, no successfull response from the JITO endpoints`);
     }
+}
+
+async function get_address_lt_accounts(keys: string[]): Promise<AddressLookupTableAccount[]> {
+    const addressLookupTableAccountInfos = await global.CONNECTION.getMultipleAccountsInfo(
+        keys.map((key) => new PublicKey(key))
+    );
+
+    return addressLookupTableAccountInfos.reduce((acc, accountInfo, index) => {
+        const addressLookupTableAddress = keys[index];
+        if (accountInfo) {
+            const addressLookupTableAccount = new AddressLookupTableAccount({
+                key: new PublicKey(addressLookupTableAddress),
+                state: AddressLookupTableAccount.deserialize(accountInfo.data)
+            });
+            acc.push(addressLookupTableAccount);
+        }
+
+        return acc;
+    }, new Array<AddressLookupTableAccount>());
 }
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
@@ -298,7 +375,7 @@ async function check_transaction_status(
             if (tx) {
                 if (tx.meta?.err === null) return;
                 if (tx.meta?.err !== null)
-                    throw new Error(`Transaction failed with an error | Signature: ${signature}`);
+                    throw new Error(`Transaction failed with an error | Signature: ${signature} `);
             }
         }
 
@@ -309,17 +386,32 @@ async function check_transaction_status(
     }
 }
 
-export async function get_priority_fee(priority: PriorityOptions): Promise<number> {
+export async function get_priority_fee(priority_opts: PriorityOptions): Promise<number> {
+    let encoded_tx: string | undefined;
+
+    if (priority_opts.transaction) {
+        const { blockhash, lastValidBlockHeight } = await global.CONNECTION.getLatestBlockhash(COMMITMENT);
+        const tx = new Transaction({
+            blockhash: blockhash,
+            lastValidBlockHeight: lastValidBlockHeight,
+            feePayer: priority_opts.transaction.signers[0].publicKey
+        }).add(...priority_opts.transaction.instructions);
+        encoded_tx = bs58.encode(tx.serialize({ verifySignatures: false, requireAllSignatures: false }));
+    }
+
     const response = await global.HELIUS_CONNECTION.rpc.getPriorityFeeEstimate({
-        accountKeys: priority.accounts,
+        transaction: encoded_tx,
+        accountKeys: priority_opts.accounts,
         options: {
-            priorityLevel: priority.priority_level
+            priorityLevel: priority_opts.priority_level,
+            recommended: priority_opts.priority_level === undefined ? true : undefined
         }
     });
     return Math.floor(response.priorityFeeEstimate || 0);
 }
 
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
+    if (instructions.length === 0) throw new Error(`No instructions provided.`);
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {
         skipPreflight: true,
         preflightCommitment: COMMITMENT,
@@ -330,32 +422,44 @@ export async function create_and_send_smart_tx(instructions: TransactionInstruct
 export async function create_and_send_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
-    priority?: PriorityOptions
+    priority?: PriorityLevel,
+    protection_tip?: number,
+    address_lt_accounts?: AddressLookupTableAccount[]
 ): Promise<String> {
+    if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
     if (priority) {
-        const fee = await get_priority_fee(priority);
+        const fee = await get_priority_fee({
+            priority_level: priority,
+            transaction: { instructions, signers }
+        });
         instructions.unshift(
             ComputeBudgetProgram.setComputeUnitPrice({
                 microLamports: fee
             })
         );
+        instructions.unshift(
+            ComputeBudgetProgram.setComputeUnitLimit({
+                units: 1_600_000
+            })
+        );
     }
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
+    if (protection_tip) return await create_and_send_protected_tx(instructions, signers, protection_tip);
+
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     const versioned_tx = new VersionedTransaction(
         new TransactionMessage({
             payerKey: signers[0].publicKey,
             recentBlockhash: ctx.value.blockhash,
             instructions: instructions.filter(Boolean)
-        }).compileToV0Message()
+        }).compileToV0Message(address_lt_accounts)
     );
-
     versioned_tx.sign(signers);
 
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
-        skipPreflight: true,
+        skipPreflight: false,
         preflightCommitment: COMMITMENT,
         maxRetries: TRADE_MAX_RETRIES
     });
@@ -370,7 +474,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
             commitment: COMMITMENT,
             maxSupportedTransactionVersion: 0
         });
-        if (!tx_details) throw new Error(`Transaction not found: ${signature}`);
+        if (!tx_details) throw new Error(`Transaction not found: ${signature} `);
         const balance_index = tx_details?.transaction.message
             .getAccountKeys()
             .staticAccountKeys.findIndex((i) => i.equals(address));
@@ -381,7 +485,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
         }
         return 0;
     } catch (err) {
-        throw new Error(`Failed to get the balance change: ${err}`);
+        throw new Error(`Failed to get the balance change: ${err} `);
     }
 }
 
@@ -411,7 +515,7 @@ export async function check_has_balances(wallets: common.Wallet[], min_balance: 
         if (!ok) common.error('[ERROR] Some accounts are empty.');
         return ok;
     } catch (err) {
-        common.error(`[ERROR] failed to process keys: ${err}`);
+        common.error(`[ERROR] failed to process keys: ${err} `);
         return false;
     }
 }
@@ -422,39 +526,64 @@ export async function send_lamports(
     receiver: PublicKey,
     priority?: PriorityLevel
 ): Promise<String> {
-    let instructions: TransactionInstruction[] = [];
-    let fees = 0;
-    let units = 500;
+    lamports = Math.floor(lamports);
 
     if (priority) {
-        fees = Math.floor(
-            await get_priority_fee({
-                priority_level: priority,
-                accounts: ['11111111111111111111111111111111']
-            })
-        );
-        instructions.push(
-            ComputeBudgetProgram.setComputeUnitLimit({
-                units: units
-            })
-        );
-
-        instructions.push(
+        let fees = 0;
+        let units = 500;
+        fees = await get_priority_fee({
+            priority_level: priority,
+            accounts: ['11111111111111111111111111111111']
+        });
+        let instructions = [
             ComputeBudgetProgram.setComputeUnitPrice({
                 microLamports: fees
+            }),
+            ComputeBudgetProgram.setComputeUnitLimit({
+                units: units
+            }),
+            SystemProgram.transfer({
+                fromPubkey: sender.publicKey,
+                toPubkey: receiver,
+                lamports: lamports - 5000 - Math.ceil((fees * units) / 10 ** 6)
             })
-        );
+        ];
+        return await create_and_send_tx(instructions, [sender]);
     }
 
-    instructions.push(
-        SystemProgram.transfer({
-            fromPubkey: sender.publicKey,
-            toPubkey: receiver,
-            lamports: lamports - 5000 - Math.ceil((fees * units) / 10 ** 6)
-        })
+    return await create_and_send_smart_tx(
+        [
+            SystemProgram.transfer({
+                fromPubkey: sender.publicKey,
+                toPubkey: receiver,
+                lamports: lamports
+            })
+        ],
+        [sender]
     );
+}
 
-    return await create_and_send_tx(instructions, [sender]);
+export async function send_lamports_with_retries(
+    amount: number,
+    sender: Keypair,
+    receiver: PublicKey,
+    priority?: PriorityLevel,
+    max_retries: number = 5
+): Promise<String> {
+    for (let attempt = 1; attempt <= max_retries; attempt++) {
+        try {
+            return await send_lamports(amount, sender, receiver, priority);
+        } catch (error) {
+            if (attempt < max_retries) {
+                common.error(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`);
+                const balance = await get_balance(sender.publicKey);
+                if (balance < amount) amount = balance;
+            } else {
+                common.error(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`);
+            }
+        }
+    }
+    throw new Error('Max retries reached, transaction failed');
 }
 
 export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
@@ -486,7 +615,7 @@ export async function get_token_meta(mint: PublicKey): Promise<MintMeta> {
         }
         throw new Error(`Failed to get the token metadata`);
     } catch (err) {
-        throw new Error(`Failed to get the token metadata: ${err}`);
+        throw new Error(`Failed to get the token metadata: ${err} `);
     }
 }
 
@@ -548,7 +677,7 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
         }
         return assoc_address;
     } catch (err) {
-        throw new Error(`Max retries reached, failed to get associated token account. Last error: ${err}`);
+        throw new Error(`Max retries reached, failed to get associated token account.Last error: ${err} `);
     }
 }
 
@@ -558,28 +687,31 @@ async function swap_jupiter(
     from: PublicKey,
     to: PublicKey,
     slippage: number = 0.05,
-    priority?: PriorityLevel
+    priority?: PriorityLevel,
+    protection_tip?: number
 ): Promise<String> {
+    const deserialize_instruction = (instruction: any) => {
+        return new TransactionInstruction({
+            programId: new PublicKey(instruction.programId),
+            keys: instruction.accounts.map((key: any) => ({
+                pubkey: new PublicKey(key.pubkey),
+                isSigner: key.isSigner,
+                isWritable: key.isWritable
+            })),
+            data: Buffer.from(instruction.data, 'base64')
+        });
+        protection_tip;
+    };
+
     const wallet = new Wallet(Keypair.fromSecretKey(seller.secretKey));
     const amount_in = amount.amount;
-    let fees = 0.0;
-    const url = `${JUPITER_API_URL}quote?inputMint=${from.toString()}&outputMint=${to.toString()}&amount=${amount_in}&slippageBps=${slippage * 10000}`;
+    const url = `${JUPITER_API_URL} quote ? inputMint = ${from.toString()}& outputMint=${to.toString()}& amount=${amount_in}& slippageBps=${slippage * 10000} `;
 
     const quoteResponse = await (await fetch(url)).json();
+    if (quoteResponse.errorCode) throw new Error(`Failed to get the quote: ${quoteResponse.error} `);
 
-    if (quoteResponse.errorCode) {
-        throw new Error(`Failed to get the quote: ${quoteResponse.error}`);
-    }
-
-    if (priority) {
-        fees = await get_priority_fee({
-            priority_level: priority,
-            accounts: ['JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4']
-        });
-    }
-
-    const { swapTransaction } = await (
-        await fetch(`${JUPITER_API_URL}swap`, {
+    const instructions_raw = await (
+        await fetch(`${JUPITER_API_URL} swap - instructions`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -587,24 +719,27 @@ async function swap_jupiter(
             body: JSON.stringify({
                 quoteResponse,
                 userPublicKey: wallet.publicKey.toString(),
-                wrapAndUnwrapSol: true,
-                computeUnitPriceMicroLamports: fees
+                wrapAndUnwrapSol: true
             })
         })
     ).json();
+    if (instructions_raw.error) throw new Error(`Failed to get swap instructions: ${instructions_raw.error} `);
 
-    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
-    var tx = VersionedTransaction.deserialize(swapTransactionBuf);
-    tx.sign([wallet.payer]);
+    const { addressLookupTableAddresses, swapInstructionPayload, cleanupInstruction, setupInstructions } =
+        instructions_raw;
 
-    const signature = await CONNECTION.sendRawTransaction(tx.serialize());
-    const latestBlockHash = await CONNECTION.getLatestBlockhash();
-    await CONNECTION.confirmTransaction({
-        blockhash: latestBlockHash.blockhash,
-        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-        signature: signature
-    });
-    return signature;
+    const lta_accounts: AddressLookupTableAccount[] = [];
+    lta_accounts.push(...(await get_address_lt_accounts(addressLookupTableAddresses)));
+    const instructions: TransactionInstruction[] = [
+        ...setupInstructions.map(deserialize_instruction),
+        deserialize_instruction(swapInstructionPayload),
+        deserialize_instruction(cleanupInstruction)
+    ];
+
+    if (priority) {
+        return await create_and_send_tx(instructions, [seller], priority, protection_tip, lta_accounts);
+    }
+    return await create_and_send_smart_tx(instructions, [seller]);
 }
 
 export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
@@ -623,7 +758,7 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
             const mint = acc.data.mint;
             const { decimals } = await get_token_supply(mint);
             const balance = Number(acc.data.amount) / 10 ** decimals;
-            common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()}`);
+            common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()} `);
             return acc.data.mint;
         });
 
@@ -637,11 +772,8 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
             }
 
             try {
-                const signature = await create_and_send_tx(intructions, [owner.payer], {
-                    accounts: [TOKEN_PROGRAM_ID.toString()],
-                    priority_level: PriorityLevel.MEDIUM
-                });
-                common.log(`${chunk.length} accounts closed | Signature ${signature}`);
+                const signature = await create_and_send_tx(intructions, [owner.payer], PriorityLevel.DEFAULT);
+                common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {
                 if (err instanceof Error) {
@@ -717,7 +849,8 @@ async function create_raydium_swap_tx(
     pool_keys: LiquidityPoolKeys,
     pool_info: LiquidityPoolInfo,
     slippage: number,
-    priority?: PriorityLevel
+    priority?: PriorityLevel,
+    protection_tip?: number
 ) {
     const raw_amount_in = parseInt(amount.amount, 10);
     const { amount_in, token_in, token_out, min_amount_out } = await calc_raydium_amounts(
@@ -841,13 +974,9 @@ async function create_raydium_swap_tx(
     }
 
     if (priority) {
-        return await create_and_send_tx(instructions, [seller], {
-            priority_level: priority,
-            accounts: ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8']
-        });
-    } else {
-        return await create_and_send_smart_tx(instructions, [seller]);
+        return await create_and_send_tx(instructions, [seller], priority, protection_tip);
     }
+    return await create_and_send_smart_tx(instructions, [seller]);
 }
 
 export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {
@@ -953,7 +1082,8 @@ async function swap_raydium(
     amm: PublicKey,
     swap_to: PublicKey,
     slippage: number = 0.05,
-    priority?: PriorityLevel
+    priority?: PriorityLevel,
+    protection_tip?: number
 ): Promise<String> {
     const pool_keys = await get_raydium_poolkeys(amm);
     if (pool_keys) {
@@ -962,7 +1092,16 @@ async function swap_raydium(
             poolKeys: pool_keys
         });
         const raw_slippage = slippage * 100;
-        return create_raydium_swap_tx(amount, seller, swap_to, pool_keys, pool_info, raw_slippage, priority);
+        return create_raydium_swap_tx(
+            amount,
+            seller,
+            swap_to,
+            pool_keys,
+            pool_info,
+            raw_slippage,
+            priority,
+            protection_tip
+        );
     }
     throw new Error(`Failed to get the pool keys.`);
 }
@@ -976,7 +1115,7 @@ export function get_sol_token_amount(amount: number): TokenAmount {
 }
 
 export function get_token_amount_by_percent(token_amount: TokenAmount, percent: number): TokenAmount {
-    if (percent < 0.0 || percent > 1.0) throw new Error(`Invalid percent: ${percent}`);
+    if (percent < 0.0 || percent > 1.0) throw new Error(`Invalid percent: ${percent} `);
     if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
     if (percent === 1.0) return token_amount;
     return {
@@ -993,10 +1132,11 @@ export async function swap(
     swap_from: PublicKey,
     amm: PublicKey,
     slippage: number = 0.05,
-    priority?: PriorityLevel
+    priority?: PriorityLevel,
+    protection_tip?: number
 ): Promise<String> {
     try {
-        return swap_raydium(amount, buyer, amm, swap_to, slippage, priority);
+        return swap_raydium(amount, buyer, amm, swap_to, slippage, priority, protection_tip);
     } catch (error) {
         try {
             const signature = await swap_jupiter(amount, buyer, swap_from, swap_to, slippage);

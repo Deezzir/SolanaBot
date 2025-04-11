@@ -432,3 +432,23 @@ export function print_footer(columns: { width: number }[]) {
         .join(BORDER_CHARS.bottomMiddle);
     log(`${BORDER_CHARS.bottomLeft}${bottomBorder}${BORDER_CHARS.bottomRight}`);
 }
+
+export function debounce<T extends (...args: any[]) => any>(
+    func: T,
+    delay: number
+): (...args: Parameters<T>) => Promise<ReturnType<T>> {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let resolvePromise: (value: ReturnType<T>) => void;
+
+    return (...args: Parameters<T>) => {
+        clearTimeout(timeoutId);
+
+        return new Promise<ReturnType<T>>((resolve) => {
+            resolvePromise = resolve;
+            timeoutId = setTimeout(async () => {
+                const result = await func(...args);
+                resolvePromise(result);
+            }, delay);
+        });
+    };
+}

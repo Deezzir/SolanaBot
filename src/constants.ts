@@ -19,8 +19,8 @@ export const COMMITMENT = 'confirmed';
 
 // COMMANDS CONSTANTS
 export const COMMANDS_INTERVAL = 50;
-export const COMMANDS_SELL_SLIPPAGE = 0.8;
-export const COMMANDS_BUY_SLIPPAGE = 0.1;
+export const COMMANDS_SELL_SLIPPAGE = 0.1;
+export const COMMANDS_BUY_SLIPPAGE = 0.05;
 export const COMMANDS_RPC_TOKEN = get_env_variable('RPC_TOKEN', 'test');
 
 // WALLET CONSTANTS
@@ -56,12 +56,21 @@ export const JITO_TIP_ACCOUNTS = [
     '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT'
 ];
 export const JITO_ENDPOINTS = [
-    'https://mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles',
-    'https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles'
+    'https://mainnet.block-engine.jito.wtf/api/v1',
+    'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1',
+    'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1',
+    'https://ny.mainnet.block-engine.jito.wtf/api/v1',
+    'https://tokyo.mainnet.block-engine.jito.wtf/api/v1'
 ];
+export enum PriorityLevel {
+    MIN = 'Min',
+    LOW = 'Low',
+    MEDIUM = 'Medium',
+    HIGH = 'High',
+    VERY_HIGH = 'VeryHigh',
+    UNSAFE_MAX = 'UnsafeMax',
+    DEFAULT = 'Default'
+}
 
 // MOON CONSTANTS
 export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
@@ -70,6 +79,7 @@ export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01;
+export const PUMP_SWAP_PERCENTAGE = 0.0025;
 export const PUMP_BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 export const PUMP_META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');

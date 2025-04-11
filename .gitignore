@@ -146,6 +146,7 @@ dist
 keys*
 drop*
 keys_back
+.rescue
 *.json
 *.png
 Tokens

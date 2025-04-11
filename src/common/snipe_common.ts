@@ -3,6 +3,7 @@ import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
 import { PublicKey } from '@solana/web3.js';
 import {
+    PriorityLevel,
     SNIPE_BUY_SLIPPAGE,
     SNIPE_META_UPDATE_INTERVAL,
     SNIPE_SELL_SLIPPAGE,
@@ -21,6 +22,8 @@ type BotConfig = {
     buy_interval: number;
     sell_slippage: number;
     buy_slippage: number;
+    priority_level: PriorityLevel;
+    protection_tip: number;
     token_name: string | undefined;
     token_ticker: string | undefined;
     mint: PublicKey | undefined;
@@ -36,6 +39,8 @@ export type WorkerConfig = {
     is_buy_once: boolean;
     sell_slippage: number;
     buy_slippage: number;
+    priority_level: PriorityLevel;
+    protection_tip?: number;
 };
 
 type WorkerJob = {
@@ -182,7 +187,9 @@ export abstract class SniperBase implements ISniper {
                 mcap_threshold: this.bot_config.mcap_threshold,
                 is_buy_once: this.bot_config.is_buy_once,
                 sell_slippage: this.bot_config.sell_slippage,
-                buy_slippage: this.bot_config.buy_slippage
+                buy_slippage: this.bot_config.buy_slippage,
+                priority_level: this.bot_config.priority_level,
+                protection_tip: this.bot_config.protection_tip
             };
 
             const worker = new Worker(this.get_worker_path(), {
@@ -304,7 +311,9 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
         start_interval,
         is_buy_once,
         sell_slippage,
-        buy_slippage
+        buy_slippage,
+        priority_level,
+        protection_tip
     } = json;
 
     if (mint === undefined && token_name === undefined && token_ticker === undefined) {
@@ -377,12 +386,28 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
         json.buy_slippage = buy_slippage / 100;
     }
 
+    if (priority_level !== undefined) {
+        if (typeof priority_level !== 'string' || !(priority_level in PriorityLevel)) {
+            throw new Error('[ERROR] priority_level must be a valid string.');
+        }
+        json.priority_level = PriorityLevel[priority_level as keyof typeof PriorityLevel];
+    }
+
+    if (protection_tip !== undefined) {
+        if (typeof protection_tip !== 'number' || protection_tip < 0.0) {
+            throw new Error('[ERROR] protection_tip must be a number greater than 0.0.');
+        }
+        json.protection_tip = protection_tip;
+    }
+
     if (!('is_buy_once' in json)) json.is_buy_once = false;
     if (!('buy_interval' in json)) json.buy_interval = 0;
     if (!('start_interval' in json)) json.start_interval = 0;
     if (!('mcap_threshold' in json)) json.mcap_threshold = Infinity;
     if (!('sell_slippage' in json)) json.sell_slippage = SNIPE_SELL_SLIPPAGE;
     if (!('buy_slippage' in json)) json.buy_slippage = SNIPE_BUY_SLIPPAGE;
+    if (!('protection_tip' in json)) json.protection_tip = undefined;
+    if (!('priority_level' in json)) json.priority_level = PriorityLevel.DEFAULT;
 
     return json as BotConfig;
 }
@@ -395,7 +420,7 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
             {
                 type: 'input',
                 name: 'thread_cnt',
-                message: `Enter the number of bots to run(${keys_cnt} accounts available):`,
+                message: `Enter the number of bots to run (${keys_cnt} accounts available):`,
                 validate: (value: string) =>
                     common.validate_int(value, 1, keys_cnt)
                         ? true
@@ -408,16 +433,16 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
                 message: 'Enter the start interval in seconds:',
                 validate: (value: string) => {
                     if (value === '') return true;
-                    if (!common.validate_int(value, 0))
+                    if (!common.validate_float(value, 0.0))
                         return 'Please enter a valid number greater than or equal to 0.';
                     return true;
                 },
-                filter: (value: string) => (value === '' ? 0 : parseInt(value, 10))
+                filter: (value: string) => (value === '' ? 0 : parseFloat(value))
             },
             {
                 type: 'input',
                 name: 'start_buy',
-                message: 'Enter the start Solana amount that the bot will buy the token for:',
+                message: 'Enter the start SOL amount that the bot will buy the token for:',
                 validate: (value: string) => {
                     if (!common.validate_float(value, 0.001)) return 'Please enter a valid number greater than 0.001.';
                     start_buy = parseFloat(value);
@@ -470,6 +495,23 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
                 filter: (value: string) => (value === '' ? SNIPE_BUY_SLIPPAGE : parseFloat(value) / 100)
             },
             {
+                type: 'list',
+                name: 'priority_level',
+                message: 'Choose the priority level for the bot:',
+                choices: Object.values(PriorityLevel).map((level) => level.toString())
+            },
+            {
+                type: 'input',
+                name: 'protection_tip',
+                message: 'Enter the protection tip in percentage (leave blank for no protection):',
+                default: '',
+                validate: (value: string) =>
+                    value === '' || common.validate_float(value, 0.0)
+                        ? true
+                        : 'Please enter a valid number greater than 0.0',
+                filter: (value: string) => (value === '' ? undefined : parseFloat(value))
+            },
+            {
                 type: 'confirm',
                 name: 'is_buy_once',
                 message: 'Do you want to buy only once?',
@@ -480,11 +522,16 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
         if (!answers.is_buy_once) {
             const buy_interval = await inquirer.prompt([
                 {
-                    type: 'number',
+                    type: 'input',
                     name: 'buy_interval',
                     message: 'Enter the interval between each buy in seconds:',
-                    validate: (value: number | undefined) =>
-                        value && value > 0 ? true : 'Please enter a valid number greater than 0.'
+                    validate: (value: string) => {
+                        if (value === '') return true;
+                        if (!common.validate_float(value, 0.0))
+                            return 'Please enter a valid number greater than or equal to 0.';
+                        return true;
+                    },
+                    filter: (value: string) => (value === '' ? 0 : parseFloat(value))
                 }
             ]);
             answers = { ...answers, ...buy_interval };
@@ -548,7 +595,7 @@ async function get_config(keys_cnt: number, trader: trade.IProgramTrader): Promi
         ]);
 
         if (prompt.proceed) break;
-        else await common.clear_lines_up(Object.keys(answers).length + 6);
+        else await common.clear_lines_up(Object.keys(answers).length + 7);
     } while (true);
 
     return answers;
@@ -593,7 +640,9 @@ function log_bot_config(bot_config: BotConfig) {
         mint: bot_config.mint ? bot_config.mint.toString() : 'N/A',
         token_name: bot_config.token_name ? bot_config.token_name : 'N/A',
         token_ticker: bot_config.token_ticker ? bot_config.token_ticker : 'N/A',
-        is_buy_once: bot_config.is_buy_once ? 'Yes' : 'No'
+        is_buy_once: bot_config.is_buy_once ? 'Yes' : 'No',
+        priority_level: bot_config.priority_level.toString(),
+        protection_tip: bot_config.protection_tip ? `${bot_config.protection_tip} SOL` : 'N/A'
     };
 
     const max_length = Math.max(...Object.values(to_print).map((value) => value.toString().length));

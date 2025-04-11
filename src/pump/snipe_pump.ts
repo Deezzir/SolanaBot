@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { COMMITMENT, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
+import { PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
@@ -91,7 +91,7 @@ export class Runner extends snipe.SniperBase {
                         }
                     }
                 },
-                COMMITMENT
+                'processed'
             );
 
             if (this._subscription_id === undefined) {
