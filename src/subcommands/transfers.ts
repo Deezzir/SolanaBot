@@ -1,10 +1,10 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import {
-    COMMANDS_INTERVAL,
+    COMMANDS_INTERVAL_MS,
     PriorityLevel,
     SPIDER_EXTRA_SOL,
-    SPIDER_INTERVAL,
+    SPIDER_INTERVAL_MS,
     SPIDER_RESCUE_DIR_PATH,
     WALLETS_FILE_HEADERS
 } from '../constants.js';
@@ -214,7 +214,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 return false;
             }
 
-            await common.sleep(SPIDER_INTERVAL);
+            await common.sleep(SPIDER_INTERVAL_MS);
 
             const ok = await _process_inner_transfers(node.left, layer_cnt + 1);
             if (!ok) return false;
@@ -243,7 +243,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 return false;
             }
 
-            await common.sleep(SPIDER_INTERVAL);
+            await common.sleep(SPIDER_INTERVAL_MS);
 
             const ok = await _process_inner_transfers(node.right, layer_cnt + 1);
             if (!ok) return false;
@@ -313,12 +313,12 @@ export async function run_spider_transfer(
 
     common.log(`[Main Worker] Processing inner transfers...\n`);
     const final_entries = await process_inner_transfers(tree);
-    await common.sleep(SPIDER_INTERVAL * 2);
+    await common.sleep(SPIDER_INTERVAL_MS * 2);
 
     if (final_entries) {
         common.log(`\n[Main Worker] Processing final transfers...\n`);
         await process_final_transfers(keys, final_entries);
-        await common.sleep(SPIDER_INTERVAL * 2);
+        await common.sleep(SPIDER_INTERVAL_MS * 2);
     }
 
     return rescue_keys;
@@ -380,7 +380,7 @@ export async function run_deep_transfer(
                 failed.push(wallet.name);
                 break;
             }
-            await common.sleep(SPIDER_INTERVAL);
+            await common.sleep(SPIDER_INTERVAL_MS);
         }
         common.log('');
     }
@@ -419,7 +419,7 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
                 })
         );
 
-        await common.sleep(COMMANDS_INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL_MS);
     }
     await Promise.allSettled(transactions);
 

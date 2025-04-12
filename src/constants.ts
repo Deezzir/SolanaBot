@@ -14,17 +14,18 @@ function get_env_variable(var_name: string, default_value: string = ''): any {
 
 // NETWORK CONSTANTS
 export const HELIUS_API_KEY = get_env_variable('HELIUS_API_KEY');
-export const HELIUS_RPC = get_env_variable('HELIUS_RPC');
+export const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 export const COMMITMENT = 'confirmed';
 
 // COMMANDS CONSTANTS
-export const COMMANDS_INTERVAL = 50;
+export const COMMANDS_INTERVAL_MS = 50;
 export const COMMANDS_SELL_SLIPPAGE = 0.1;
 export const COMMANDS_BUY_SLIPPAGE = 0.05;
-export const COMMANDS_RPC_TOKEN = get_env_variable('RPC_TOKEN', 'test');
+export const COMMANDS_MAX_RETRIES = 5;
+export const COMMANDS_DELAY_MS = 100;
 
 // WALLET CONSTANTS
-export const WALLETS_FILE = get_env_variable('KEYS_FILE', 'keys.csv');
+export const WALLETS_FILE = 'keys.csv';
 export const WALLETS_FILE_HEADERS = ['name', 'private_key', 'is_reserve', 'public_key', 'created_at'];
 
 // IPFS CONSTANTS
@@ -34,7 +35,7 @@ export const IPSF_API_KEY = get_env_variable('IPFS_API_KEY');
 
 // TRADE COMMON CONSTANTS
 export const TRADE_MAX_RETRIES = 0;
-export const TRADE_RETRY_INTERVAL = 1000;
+export const TRADE_RETRY_INTERVAL_MS = 1000;
 export const TRADE_MAX_SLIPPAGE = 500.0;
 export const TRADE_DEFAULT_CURVE_DECIMALS = 6;
 export const TRADE_SWAP_SEED = 'swap';
@@ -101,16 +102,14 @@ export const SELL_DISCRIMINATOR: Uint8Array = new Uint8Array([51, 230, 133, 164,
 export const SNIPE_BUY_SLIPPAGE = 0.85;
 export const SNIPE_SELL_SLIPPAGE = 0.5;
 export const SNIPE_MIN_BUY_THRESHOLD = 0.00001;
-export const SNIPE_MIN_BALANCE_THRESHOLD = 0.01;
 export const SNIPE_MIN_BUY = 0.005;
-export const SNIPE_MAX_RETRIES = 5;
 export const SNIPE_ITERATIONS = 1;
-export const SNIPE_META_UPDATE_INTERVAL = 300;
+export const SNIPE_META_UPDATE_INTERVAL_MS = 300;
 
 // SPIDER CONSTANTS
 export const SPIDER_RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
 export const SPIDER_EXTRA_SOL: number = 0.005;
-export const SPIDER_INTERVAL: number = 1000;
+export const SPIDER_INTERVAL_MS: number = 1000;
 
 // DROP CONSTANTS
 export const DROP_MONGO_URI = get_env_variable('MONGO_URI', 'mongodb://localhost:27017');
@@ -121,3 +120,7 @@ export const DROP_PRESALE_COLLECTION = 'presaleusers';
 
 // VOLUME CONSTANTS
 export const VOLUME_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
+
+// WALLET PNL CONSTANTS
+export const PNL_BATCH_SIZE = 50;
+export const PNL_BATCH_DELAY_MS = 0;
