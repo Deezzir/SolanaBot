@@ -1,12 +1,11 @@
 import inquirer from 'inquirer';
 import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
-import * as trade from '../common/trade_common.js';
 import { VOLUME_RAYDIUM_SWAP_TAX } from '../constants.js';
 
 type VolumeConfig = {
     type: VolumeType;
-    amm: PublicKey;
+    mint: PublicKey;
     wallet_cnt: number;
     min_sol_amount: number;
     max_sol_amount: number;
@@ -80,15 +79,10 @@ async function get_config() {
         answers = await inquirer.prompt<VolumeConfig>([
             {
                 type: 'input',
-                name: 'amm',
-                message: 'Enter the Raydium Pair ID (AMM) of the token:',
+                name: 'mint',
+                message: 'Enter the Mint (CA) of the token:',
                 validate: async (value: string) => {
-                    if (!common.is_valid_pubkey(value)) return 'Please enter a valid publik key.';
-                    try {
-                        await trade.get_raydium_poolkeys(new PublicKey(value));
-                    } catch {
-                        return 'Please enter a valid Raydium Pair ID (AMM).';
-                    }
+                    if (!common.is_valid_pubkey(value)) return 'Please enter a valid public key.';
                     return true;
                 },
                 filter: (value: string) => new PublicKey(value)
@@ -228,13 +222,13 @@ export async function simulate(volume_config: VolumeConfig) {
 }
 
 async function validate_volume_config(json: any): Promise<VolumeConfig> {
-    const required_fields = ['amm', 'executions', 'jito_tip', 'min_sol_amount', 'max_sol_amount'];
+    const required_fields = ['mint', 'executions', 'jito_tip', 'min_sol_amount', 'max_sol_amount'];
 
     for (const field of required_fields) {
         if (!json[field]) throw new Error(`[ERROR] Missing required field: ${field}`);
     }
 
-    const { amm, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, jito_tip, simulate, type } = json;
+    const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, jito_tip, simulate, type } = json;
 
     if (type !== undefined) {
         if (typeof type === 'string' && VolumeTypeStrings.some((t) => t.toLowerCase() === type.toLowerCase())) {
@@ -244,12 +238,8 @@ async function validate_volume_config(json: any): Promise<VolumeConfig> {
         }
     }
 
-    if (!common.is_valid_pubkey(amm)) {
-        try {
-            await trade.get_raydium_poolkeys(new PublicKey(amm));
-        } catch {
-            throw new Error('[ERROR] Invalid Raydium Pair ID (AMM) public key.');
-        }
+    if (!common.is_valid_pubkey(mint)) {
+        throw new Error('[ERROR] Invalid Raydium Pair ID (AMM) public key.');
     }
 
     if (typeof min_sol_amount !== 'number' || min_sol_amount <= 0) {
@@ -300,7 +290,7 @@ function log_volume_config(volume_config: VolumeConfig) {
     const to_print = {
         ...volume_config,
         type: VolumeTypeStrings[volume_config.type],
-        amm: volume_config.amm.toString(),
+        amm: volume_config.mint.toString(),
         simulate: volume_config.simulate ? 'Yes' : 'No',
         min_sol_amount: volume_config.min_sol_amount.toFixed(2),
         max_sol_amount: volume_config.max_sol_amount.toFixed(2)

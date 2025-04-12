@@ -1,6 +1,7 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TransactionInstruction, Signer } from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
+import { GenericTrader } from './generic/generic.js';
 import { Wallet } from '@project-serum/anchor';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import bs58 from 'bs58';
@@ -12,6 +13,7 @@ import {
     COMMANDS_SELL_SLIPPAGE,
     COMMITMENT,
     HELIUS_RPC,
+    JITO_BUNDLE_SIZE,
     PriorityLevel,
     WALLETS_FILE_HEADERS
 } from './constants.js';
@@ -30,6 +32,9 @@ function get_trader(program: common.Program): trade.IProgramTrader {
         }
         case common.Program.Moonshot: {
             return MoonTrader;
+        }
+        case common.Program.Generic: {
+            return GenericTrader;
         }
         default: {
             throw new Error(`[ERROR] Invalid program received: ${program}`);
@@ -483,39 +488,71 @@ export async function buy_token(
     common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
 
     const trader = get_trader(program);
-    const transactions: Promise<void>[] = [];
+    let mint_meta = await trader.get_mint_meta(mint);
+    if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
 
-    for (const wallet of wallets) {
-        const buyer = wallet.keypair;
-        let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
-
-        try {
-            const mint_meta = await trader.get_mint_meta(mint);
-            if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
-
-            const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
-            if (balance < buy_amount) continue;
-
-            common.log(
-                `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
-            );
-
-            transactions.push(
-                trader
-                    .buy_token(buy_amount, buyer, mint_meta, SLIPPAGE, priority)
-                    .then((signature) =>
-                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
-                    )
-                    .catch((error) =>
-                        common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`))
-                    )
-            );
-        } catch (error) {
-            common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
+    if (!bundle_tip) {
+        const transactions: Promise<void>[] = [];
+        for (const wallet of wallets) {
+            const buyer = wallet.keypair;
+            let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
+            try {
+                const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
+                if (balance < buy_amount) continue;
+                common.log(
+                    `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                );
+                transactions.push(
+                    trader
+                        .buy_token(buy_amount, buyer, mint_meta, SLIPPAGE, priority)
+                        .then((signature) =>
+                            common.log(
+                                common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                            )
+                        )
+                        .catch((error) =>
+                            common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`))
+                        )
+                );
+                mint_meta = await trader.update_mint_meta(mint_meta);
+            } catch (error) {
+                common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
+            }
         }
+        await Promise.allSettled(transactions);
+    } else {
+        const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
+        const bundles: Promise<void>[] = [];
+        for (const wallet_bundle of wallet_bundles) {
+            const instructions: TransactionInstruction[][] = [];
+            const signers: Signer[][] = [];
+            for (const wallet of wallet_bundle) {
+                const buyer = wallet.keypair;
+                let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
+                try {
+                    const balance = await trade.get_balance(buyer.publicKey);
+                    if (balance < buy_amount) continue;
+                    common.log(
+                        `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                    );
+                    const [instrs] = await trader.buy_token_instructions(buy_amount, buyer, mint_meta, SLIPPAGE);
+                    instructions.push(instrs);
+                    signers.push([buyer]);
+                } catch (error) {
+                    common.error(common.red(`Failed to add buy instruction to bundle ${wallet.name}: ${error}`));
+                }
+            }
+            if (instructions.length === 0) continue;
+            bundles.push(
+                trade
+                    .create_and_send_bundle(instructions, signers, bundle_tip)
+                    .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
+                    .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
+            );
+            mint_meta = await trader.update_mint_meta(mint_meta);
+        }
+        await Promise.allSettled(bundles);
     }
-
-    await Promise.allSettled(transactions);
 }
 
 export async function sell_token(
@@ -523,6 +560,7 @@ export async function sell_token(
     mint: PublicKey,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump,
+    bundle_tip?: number,
     percent?: number,
     slippage?: number
 ): Promise<void> {
@@ -535,37 +573,72 @@ export async function sell_token(
     common.log(common.yellow(`Selling ${PERCENT * 100}% of the tokens...\n`));
 
     const trader = get_trader(program);
-    const transactions: Promise<void>[] = [];
+    let mint_meta = await trader.get_mint_meta(mint);
+    if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
 
-    for (const wallet of wallets) {
-        const mint_meta = await trader.get_mint_meta(mint);
-        if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
-
-        const seller = wallet.keypair;
-        try {
-            const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
-            if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
-
-            const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
-
-            common.log(
-                `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
-            );
-
-            transactions.push(
-                trader
-                    .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, priority)
-                    .then((signature) =>
-                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
-                    )
-                    .catch(() => common.error(common.red(`Transaction failed for ${wallet.name}`)))
-            );
-        } catch (error) {
-            common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));
+    if (!bundle_tip) {
+        const transactions: Promise<void>[] = [];
+        for (const wallet of wallets) {
+            const seller = wallet.keypair;
+            try {
+                const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
+                if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
+                const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
+                common.log(
+                    `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                );
+                transactions.push(
+                    trader
+                        .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, priority)
+                        .then((signature) =>
+                            common.log(
+                                common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`)
+                            )
+                        )
+                        .catch(() => common.error(common.red(`Transaction failed for ${wallet.name}`)))
+                );
+                mint_meta = await trader.update_mint_meta(mint_meta);
+            } catch (error) {
+                common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));
+            }
         }
-    }
+        await Promise.allSettled(transactions);
+    } else {
+        const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
+        const bundles: Promise<void>[] = [];
+        for (const wallet_bundle of wallet_bundles) {
+            const instructions: TransactionInstruction[][] = [];
+            const signers: Signer[][] = [];
+            for (const wallet of wallet_bundle) {
+                const seller = wallet.keypair;
+                try {
+                    const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
+                    if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
+                    const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
 
-    await Promise.allSettled(transactions);
+                    const [instrs] = await trader.sell_token_instructions(
+                        token_amount_to_sell,
+                        seller,
+                        mint_meta,
+                        SLIPPAGE
+                    );
+                    instructions.push(instrs);
+                    signers.push([seller]);
+                } catch (error) {
+                    common.error(common.red(`Failed to add sell instruction to bundle ${wallet.name}: ${error}`));
+                }
+            }
+            if (instructions.length === 0) continue;
+            bundles.push(
+                trade
+                    .create_and_send_bundle(instructions, signers, bundle_tip)
+                    .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
+                    .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
+            );
+            mint_meta = await trader.update_mint_meta(mint_meta);
+        }
+        await Promise.allSettled(bundles);
+    }
 }
 
 export async function topup(
@@ -642,6 +715,9 @@ export async function start(
         case common.Program.Moonshot: {
             sniper = new MoonRunner(bot_config, trader);
             break;
+        }
+        case common.Program.Generic: {
+            throw new Error('[ERROR] Generic program is not supported for sniping.');
         }
         default: {
             throw new Error(`[ERROR] Invalid program received: ${program}`);
@@ -784,11 +860,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         })

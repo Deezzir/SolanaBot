@@ -1,8 +1,17 @@
 import { FixedSide } from '@wen-moon-ser/moonshot-sdk';
-import { LAMPORTS_PER_SOL, PublicKey, Signer, TokenAmount, TransactionInstruction, Keypair } from '@solana/web3.js';
+import {
+    LAMPORTS_PER_SOL,
+    PublicKey,
+    Signer,
+    TokenAmount,
+    TransactionInstruction,
+    Keypair,
+    AddressLookupTableAccount
+} from '@solana/web3.js';
 import { PriorityLevel, SOL_MINT } from '../constants.js';
 import * as trade from '../common/trade_common.js';
 import * as common from '../common/common.js';
+import { swap_raydium_instructions } from '../common/trade_dex.js';
 
 class MoonshotMintMeta implements trade.IMintMeta {
     url: string = '';
@@ -77,12 +86,8 @@ class MoonshotMintMeta implements trade.IMintMeta {
         return this.marketCap;
     }
 
-    public get bond_complete(): boolean {
-        return this.moonshot.progress === 100;
-    }
-
-    public get amm(): PublicKey | null {
-        return this.dexId && this.dexId !== '' ? new PublicKey(this.dexId) : null;
+    public get migrated(): boolean {
+        return this.dexId && this.dexId !== '' ? true : false;
     }
 }
 
@@ -113,13 +118,30 @@ export class Trader {
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<String> {
+        const [instructions, address_lt_accounts] = await this.buy_token_instructions(
+            sol_amount,
+            buyer,
+            mint_meta,
+            slippage
+        );
+        if (priority) {
+            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip, address_lt_accounts);
+        }
+        return await trade.create_and_send_smart_tx(instructions, [buyer]);
+    }
+
+    public static async buy_token_instructions(
+        sol_amount: number,
+        buyer: Signer,
+        mint_meta: MoonshotMintMeta,
+        slippage: number = 0.05
+    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const amm = this.get_raydium_amm(mint_meta);
         if (!amm) {
-            return this.buy_token_moon(sol_amount, buyer, mint_meta, slippage, priority, protection_tip);
+            return this.get_buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
         } else {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
-            const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(sol_token_amount, buyer, mint, SOL_MINT, amm, slippage, priority, protection_tip);
+            return swap_raydium_instructions(sol_token_amount, buyer, amm, SOL_MINT, slippage);
         }
     }
 
@@ -131,12 +153,36 @@ export class Trader {
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<String> {
+        const [instructions, address_lt_accounts] = await this.sell_token_instructions(
+            token_amount,
+            seller,
+            mint_meta,
+            slippage
+        );
+        if (priority) {
+            return await trade.create_and_send_tx(
+                instructions,
+                [seller],
+                priority,
+                protection_tip,
+                address_lt_accounts
+            );
+        }
+        return await trade.create_and_send_smart_tx(instructions, [seller]);
+    }
+
+    public static async sell_token_instructions(
+        token_amount: TokenAmount,
+        seller: Signer,
+        mint_meta: MoonshotMintMeta,
+        slippage: number = 0.05
+    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const amm = this.get_raydium_amm(mint_meta);
         if (!amm) {
-            return this.sell_token_moon(token_amount, seller, mint_meta, slippage, priority, protection_tip);
+            return this.get_sell_token_instructions(token_amount, seller, mint_meta, slippage);
         } else {
             const mint = new PublicKey(mint_meta.baseToken.address);
-            return trade.swap(token_amount, seller, SOL_MINT, mint, amm, slippage, priority, protection_tip);
+            return swap_raydium_instructions(token_amount, seller, amm, mint, slippage);
         }
     }
 
@@ -151,7 +197,7 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async get_mint_meta(mint: PublicKey): Promise<MoonshotMintMeta | undefined> {
+    public static async get_mint_meta(mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta | undefined> {
         return fetch(`https://api.moonshot.cc/token/v1/solana/${mint.toString()}`)
             .then((response) => response.json())
             .then((data) => {
@@ -178,7 +224,7 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async init_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
+    public static async default_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
@@ -190,42 +236,12 @@ export class Trader {
         if (mint_meta.dexId === 'raydium') return new PublicKey(mint_meta.pairAddress);
     }
 
-    private static async buy_token_moon(
-        sol_amount: number,
-        buyer: Signer,
-        mint_meta: MoonshotMintMeta,
-        slippage: number = 0.05,
-        priority?: PriorityLevel,
-        protection_tip?: number
-    ): Promise<String> {
-        let instructions = await this.get_buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
-        if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip);
-        }
-        return await trade.create_and_send_smart_tx(instructions, [buyer]);
-    }
-
-    private static async sell_token_moon(
-        token_amount: TokenAmount,
-        seller: Signer,
-        mint_meta: Partial<MoonshotMintMeta>,
-        slippage: number = 0.05,
-        priority?: PriorityLevel,
-        protection_tip?: number
-    ): Promise<String> {
-        let instructions = await this.get_sell_token_instructions(token_amount, seller, mint_meta, slippage);
-        if (priority) {
-            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip);
-        }
-        return await trade.create_and_send_smart_tx(instructions, [seller]);
-    }
-
     private static async get_sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05
-    ): Promise<TransactionInstruction[]> {
+    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -252,7 +268,7 @@ export class Trader {
             fixedSide: FixedSide.IN
         });
 
-        return ixs;
+        return [ixs, undefined];
     }
 
     private static async get_buy_token_instructions(
@@ -260,7 +276,7 @@ export class Trader {
         buyer: Signer,
         mint_meta: Partial<MoonshotMintMeta>,
         slippage: number = 0.05
-    ): Promise<TransactionInstruction[]> {
+    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -287,6 +303,6 @@ export class Trader {
             slippageBps: raw_slippage
         });
 
-        return ixs;
+        return [ixs, undefined];
     }
 }

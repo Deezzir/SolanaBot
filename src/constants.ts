@@ -45,6 +45,7 @@ export const SOL_MINT = new PublicKey('So111111111111111111111111111111111111111
 export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+export const JITO_BUNDLE_SIZE = 4;
 export const JITO_TIP_ACCOUNTS = [
     '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
     'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
