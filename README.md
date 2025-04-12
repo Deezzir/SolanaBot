@@ -25,9 +25,7 @@ npm install
 4. Create a `.env` file in the root directory and add the following
 
 ```bash
-HELIUS_RPC=
 HELIUS_API_KEY=
-KEYS_FILE=keys.csv
 ```
 
 5. Build the project

@@ -27,7 +27,6 @@ import {
     TRADE_SWAP_SEED,
     COMMITMENT
 } from '../constants.js';
-import BN from 'bn.js';
 import {
     calc_assoc_token_addr,
     check_ata_exists,
@@ -44,6 +43,7 @@ import {
     createInitializeAccountInstruction,
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
+import BN from 'bn.js';
 
 type RaydiumAmounts = {
     amount_in: RayTokenAmount;
@@ -52,7 +52,7 @@ type RaydiumAmounts = {
     min_amount_out: CurrencyAmount;
 };
 
-export type JupiterQuote = {
+type JupiterQuote = {
     inputMint: string;
     inAmount: string;
     outputMint: string;
@@ -417,7 +417,7 @@ export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<Public
     }
 }
 
-export async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys> {
+async function get_raydium_poolkeys(amm: PublicKey): Promise<LiquidityPoolKeys> {
     const ammAccount = await global.CONNECTION.getAccountInfo(amm);
     if (ammAccount) {
         try {

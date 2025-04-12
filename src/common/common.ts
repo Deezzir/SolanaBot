@@ -3,8 +3,15 @@ import { basename } from 'path';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
-import { parse } from 'csv-parse';
-import { IPFS_API, IPSF_API_KEY, PUMP_FETCH_API_URL } from '../constants.js';
+import { parse } from 'csv-parse/sync';
+import {
+    COMMANDS_DELAY_MS,
+    COMMANDS_MAX_RETRIES,
+    IPFS_API,
+    IPSF_API_KEY,
+    PUMP_FETCH_API_URL,
+    WALLETS_FILE_HEADERS
+} from '../constants.js';
 import base58 from 'bs58';
 
 export function staticImplements<T>() {
@@ -95,10 +102,6 @@ export function error(message: string): void {
     if (global.RL !== undefined) global.RL.prompt(true);
 }
 
-export function generate_keypairs(count: number): Keypair[] {
-    return [...new Array(count)].map(() => Keypair.generate());
-}
-
 export function check_reserve_exists(keys: Wallet[]): boolean {
     const reserveCount = keys.filter((wallet) => wallet.is_reserve).length;
     return reserveCount === 1;
@@ -119,14 +122,20 @@ export async function to_confirm(message: string) {
     rl.close();
 }
 
-export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
+export function get_wallets(keys_csv_path: string): Wallet[] {
     const rows: Wallet[] = [];
     let index = 1;
     try {
         const content = readFileSync(keys_csv_path);
-        const records = parse(content, { columns: true, trim: true });
+        const records = parse(content, {
+            delimiter: ',',
+            trim: true,
+            columns: WALLETS_FILE_HEADERS,
+            skip_empty_lines: true,
+            from_line: 2
+        });
 
-        for await (const record of records) {
+        records.forEach((record: any) => {
             const is_reserve = record.is_reserve === 'true';
             const name = record.name;
             const keypair = Keypair.fromSecretKey(base58.decode(record.private_key));
@@ -137,7 +146,7 @@ export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
                 keypair: keypair,
                 is_reserve: is_reserve
             });
-        }
+        });
         return rows;
     } catch (error) {
         if (error instanceof Error) {
@@ -370,6 +379,7 @@ export function read_bool(buf: Buffer, offset: number, length: number): boolean 
 export const COLUMN_WIDTHS = {
     id: 5,
     name: 12,
+    symbol: 7,
     publicKey: 44,
     solBalance: 14,
     allocation: 10,
@@ -434,22 +444,18 @@ export function print_footer(columns: { width: number }[]) {
     log(`${BORDER_CHARS.bottomLeft}${bottomBorder}${BORDER_CHARS.bottomRight}`);
 }
 
-export function debounce<T extends (...args: any[]) => any>(
-    func: T,
-    delay: number
-): (...args: Parameters<T>) => Promise<ReturnType<T>> {
-    let timeoutId: ReturnType<typeof setTimeout>;
-    let resolvePromise: (value: ReturnType<T>) => void;
-
-    return (...args: Parameters<T>) => {
-        clearTimeout(timeoutId);
-
-        return new Promise<ReturnType<T>>((resolve) => {
-            resolvePromise = resolve;
-            timeoutId = setTimeout(async () => {
-                const result = await func(...args);
-                resolvePromise(result);
-            }, delay);
-        });
-    };
+export async function retry_with_backoff<T>(
+    operation: () => Promise<T>,
+    retries = COMMANDS_MAX_RETRIES,
+    delay = COMMANDS_DELAY_MS
+): Promise<T> {
+    try {
+        await sleep(delay);
+        return await operation();
+    } catch (error: any) {
+        if (retries === 0 || !error.toString().includes('429')) {
+            throw error;
+        }
+        return retry_with_backoff(operation, retries - 1, delay * 3);
+    }
 }

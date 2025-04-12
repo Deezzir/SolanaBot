@@ -7,7 +7,6 @@ import { exit } from 'process';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
-import { Wallet } from './common/common.js';
 import {
     COMMITMENT,
     HELIUS_API_KEY,
@@ -29,19 +28,24 @@ function reserve_wallet_check(wallets: common.Wallet[]) {
     }
 }
 
-async function main() {
-    let wallets: Wallet[] = [];
-
+function get_wallets_from_file(file: string): common.Wallet[] {
     try {
-        wallets = await common.get_wallets(WALLETS_FILE);
+        const wallets = common.get_wallets(file);
+        if (wallets.length === 0) common.error(common.yellow('[WARNING] The file does not containt any wallets.'));
+        return wallets;
     } catch (error) {
         if (error instanceof Error) {
             common.error(common.yellow(`[WARNING] ${error.message}`));
         }
     }
+    return [];
+}
 
-    const wallet_cnt = wallets.length;
-    global.CONNECTION = new Connection(HELIUS_RPC, COMMITMENT);
+async function main() {
+    let wallets = get_wallets_from_file(WALLETS_FILE);
+    let wallet_cnt = wallets.length;
+
+    global.CONNECTION = new Connection(HELIUS_RPC, { disableRetryOnRateLimit: true, commitment: COMMITMENT });
     global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
     global.MOONSHOT = new Moonshot({
         rpcUrl: global.CONNECTION.rpcEndpoint,
@@ -53,7 +57,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('3.5.0').description('Solana Bot CLI');
+    program.version('4.0.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -63,6 +67,17 @@ async function main() {
         writeErr: (str) => process.stderr.write(str),
         outputError: (str, write) => write(common.red(str))
     });
+
+    program.addOption(
+        new Option('-k, --keys <path>', 'Path to the CSV file with the wallets')
+            .argParser((value) => {
+                if (!existsSync(value)) throw new InvalidOptionArgumentError('Keys file does not exist.');
+                wallets = get_wallets_from_file(value);
+                wallet_cnt = wallets.length;
+                return value;
+            })
+            .default(WALLETS_FILE, WALLETS_FILE)
+    );
 
     program
         .command('start')
@@ -137,6 +152,16 @@ async function main() {
         .alias('b')
         .description('Get the balance of the accounts')
         .action(async () => await commands.balance(wallets));
+
+    program
+        .command('wallet-pnl')
+        .alias('pnl')
+        .description('Get the PNL of the account')
+        .argument('<address>', 'Public address of the account', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not a address.');
+            return new PublicKey(value);
+        })
+        .action(async (address) => await commands.wallet_pnl(address));
 
     program
         .command('spl-balance')
@@ -568,7 +593,7 @@ async function main() {
                 return parsed_value;
             }
         )
-        .option('-s, --spider', 'Topup the account using the spider', false)
+        .addOption(new Option('-s, --spider', 'Topup the account using the spider').default(false).conflicts('depth'))
         .option('-r, --random', 'Topup with random values using <amount> argument as a mean value', false)
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {

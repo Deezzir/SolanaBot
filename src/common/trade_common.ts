@@ -14,7 +14,8 @@ import {
     VersionedTransactionResponse,
     Finality,
     AddressLookupTableAccount,
-    Transaction
+    Transaction,
+    ConfirmedSignatureInfo
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -29,17 +30,17 @@ import {
     getMint
 } from '@solana/spl-token';
 import fetch from 'cross-fetch';
-import { Wallet } from '@project-serum/anchor';
 import {
     COMMITMENT,
     JITO_ENDPOINTS,
     PriorityLevel,
     TRADE_DEFAULT_CURVE_DECIMALS,
-    TRADE_MAX_RETRIES
+    TRADE_MAX_RETRIES,
+    TRADE_RETRY_INTERVAL_MS,
+    JITO_TIP_ACCOUNTS
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
-import { JITO_TIP_ACCOUNTS } from 'helius-sdk';
 
 export interface IMintMeta {
     readonly token_name: string;
@@ -173,8 +174,8 @@ export async function get_balance(pubkey: PublicKey): Promise<number> {
 }
 
 function get_random_jito_tip_account(): PublicKey {
-    const randomValidator = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
-    return new PublicKey(randomValidator);
+    const random_tip_account = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+    return new PublicKey(random_tip_account);
 }
 
 async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
@@ -229,7 +230,7 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
-export async function create_and_send_protected_tx(
+async function create_and_send_protected_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
     tip: number
@@ -569,6 +570,7 @@ export async function send_lamports_with_retries(
                 common.error(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`);
             }
         }
+        await common.sleep(TRADE_RETRY_INTERVAL_MS * attempt);
     }
     throw new Error('Max retries reached, transaction failed');
 }
@@ -670,7 +672,7 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
+export async function close_accounts(owner: Keypair): Promise<PublicKey[]> {
     const token_accounts = await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
         programId: TOKEN_PROGRAM_ID
     });
@@ -700,7 +702,7 @@ export async function close_accounts(owner: Wallet): Promise<PublicKey[]> {
             }
 
             try {
-                const signature = await create_and_send_tx(intructions, [owner.payer], PriorityLevel.DEFAULT);
+                const signature = await create_and_send_tx(intructions, [owner], PriorityLevel.DEFAULT);
                 common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {
@@ -736,4 +738,26 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
         amount: (BigInt(token_amount.amount) * BigInt(percent)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
+}
+
+export async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSignatureInfo[]> {
+    const all_signatures: ConfirmedSignatureInfo[] = [];
+    let last_signature: string | undefined;
+
+    while (true) {
+        const options: any = { limit: 50 };
+        if (last_signature) options.before = last_signature;
+
+        const signatures = await common.retry_with_backoff(() =>
+            global.CONNECTION.getSignaturesForAddress(public_key, options)
+        );
+
+        all_signatures.push(...signatures);
+        last_signature = signatures[signatures.length - 1].signature;
+        if (signatures.length < 50 || signatures.length === 0) break;
+
+        await common.sleep(TRADE_RETRY_INTERVAL_MS);
+    }
+
+    return all_signatures;
 }

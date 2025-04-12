@@ -5,7 +5,7 @@ import { PublicKey } from '@solana/web3.js';
 import {
     PriorityLevel,
     SNIPE_BUY_SLIPPAGE,
-    SNIPE_META_UPDATE_INTERVAL,
+    SNIPE_META_UPDATE_INTERVAL_MS,
     SNIPE_SELL_SLIPPAGE,
     TRADE_MAX_SLIPPAGE
 } from '../constants.js';
@@ -115,7 +115,7 @@ export abstract class SniperBase implements ISniper {
                 } catch (err) {
                     common.error(`[ERROR] Failed to update token metadata`);
                 }
-            }, SNIPE_META_UPDATE_INTERVAL);
+            }, SNIPE_META_UPDATE_INTERVAL_MS);
 
             this.workers_post_message('buy');
             await this.workers_wait();
@@ -673,6 +673,7 @@ function update_bot_config(bot_config: BotConfig, key: string, value: string): v
         case 'mcap_threshold':
             if (common.validate_int(value, 5000)) bot_config.mcap_threshold = parseInt(value, 10);
             else common.error('Invalid market cap threshold.');
+            break;
         default:
             common.error('Invalid key.');
             break;

@@ -2,14 +2,11 @@ import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TransactionInstructio
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
 import { GenericTrader } from './generic/generic.js';
-import { Wallet } from '@project-serum/anchor';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import bs58 from 'bs58';
-import pLimit from 'p-limit';
 import {
     COMMANDS_BUY_SLIPPAGE,
-    COMMANDS_INTERVAL,
-    COMMANDS_RPC_TOKEN,
+    COMMANDS_INTERVAL_MS,
     COMMANDS_SELL_SLIPPAGE,
     COMMITMENT,
     HELIUS_RPC,
@@ -24,6 +21,7 @@ import * as snipe_common from './common/snipe_common.js';
 import * as transfers from './subcommands/transfers.js';
 import * as volume from './subcommands/volume.js';
 import * as token_drop from './subcommands/token_drop.js';
+import * as pnl from './subcommands/pnl.js';
 
 function get_trader(program: common.Program): trade.IProgramTrader {
     switch (program) {
@@ -50,7 +48,7 @@ export async function clean(wallets: common.Wallet[]): Promise<void> {
     let unsold_set: string[] = [];
 
     for (const wallet of wallets) {
-        const closer = new Wallet(wallet.keypair);
+        const closer = wallet.keypair;
 
         const balance = await trade.get_balance(closer.publicKey);
         if (balance === 0) {
@@ -139,7 +137,7 @@ export async function promote(
         );
 
         times--;
-        await common.sleep(COMMANDS_INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL_MS);
     }
 
     await Promise.allSettled(transactions);
@@ -350,6 +348,7 @@ export async function warmup(
     common.log(common.yellow(`Warming up ${wallets.length} accounts...`));
 
     const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (MAX - MIN) + MIN));
+    if (token_cnts.length !== wallets.length) throw new Error();
     const trader = get_trader(program);
 
     for (const [i, wallet] of wallets.entries()) {
@@ -414,7 +413,7 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
                 .catch((error) => common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`)))
         );
 
-        await common.sleep(COMMANDS_INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL_MS);
     }
 
     await Promise.allSettled(transactions);
@@ -462,7 +461,7 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
             }
         }
 
-        await common.sleep(COMMANDS_INTERVAL);
+        await common.sleep(COMMANDS_INTERVAL_MS);
     }
 
     await Promise.allSettled(transactions);
@@ -776,6 +775,93 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
     common.log(common.green('Wallet generation completed\n'));
 }
 
+export async function wallet_pnl(public_key: PublicKey): Promise<void> {
+    const sol_price = await common.fetch_sol_price();
+
+    common.log(common.yellow(`Getting the wallet ${public_key.toString()} PnL...`));
+    common.log(`SOL price: $${common.format_currency(sol_price)}\n`);
+
+    const wallet_pnl = await pnl.get_wallet_pnl(public_key, sol_price);
+
+    common.print_header([
+        { title: 'Symbol', width: common.COLUMN_WIDTHS.name },
+        { title: 'Mint', width: common.COLUMN_WIDTHS.publicKey },
+        { title: 'Unrealized($)', width: common.COLUMN_WIDTHS.solBalance, align: 'right' },
+        { title: 'Realized($)', width: common.COLUMN_WIDTHS.solBalance, align: 'right' },
+        { title: 'Profit($)', width: common.COLUMN_WIDTHS.solBalance, align: 'right' },
+        { title: 'Buy/Sell TXs', width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
+    ]);
+
+    let total_unrealized = 0;
+    let total_realized = 0;
+    let total_invested_sol = 0;
+
+    for (const token of wallet_pnl.profit_loss) {
+        const unrealized_usd = token.unrealized_pnl * sol_price;
+        let realized_usd = token.realized_pnl * sol_price;
+        const total_profit_usd = unrealized_usd + realized_usd;
+
+        const buy_txs = token.transactions.filter((tx) => tx.change_sol < 0);
+        const sell_txs = token.transactions.filter((tx) => tx.change_sol > 0);
+        const buy_cnt = buy_txs.length;
+        const sell_cnt = sell_txs.length;
+
+        total_unrealized += unrealized_usd;
+        total_realized += realized_usd;
+
+        const total_invested = buy_txs.reduce((sum, tx) => sum + Math.abs(tx.change_sol), 0);
+        total_invested_sol += total_invested;
+
+        common.print_row([
+            { content: `$${token.symbol}`, width: common.COLUMN_WIDTHS.name },
+            { content: token.mint, width: common.COLUMN_WIDTHS.publicKey },
+            {
+                content: `${common.format_currency(unrealized_usd)}`,
+                width: common.COLUMN_WIDTHS.solBalance,
+                align: 'right'
+            },
+            {
+                content: `${common.format_currency(realized_usd)}`,
+                width: common.COLUMN_WIDTHS.solBalance,
+                align: 'right'
+            },
+            {
+                content: `${common.format_currency(total_profit_usd)}`,
+                width: common.COLUMN_WIDTHS.solBalance,
+                align: 'right'
+            },
+            { content: `${buy_cnt}/${sell_cnt}`, width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
+        ]);
+    }
+
+    common.print_footer([
+        { width: common.COLUMN_WIDTHS.name },
+        { width: common.COLUMN_WIDTHS.publicKey },
+        { width: common.COLUMN_WIDTHS.solBalance },
+        { width: common.COLUMN_WIDTHS.solBalance },
+        { width: common.COLUMN_WIDTHS.solBalance },
+        { width: common.COLUMN_WIDTHS.solBalance }
+    ]);
+
+    const total = total_realized + total_unrealized;
+    const total_invested_usd = total_invested_sol * sol_price;
+    const total_pnl = total_invested_usd > 0 ? (total / total_invested_usd) * 100 : 0;
+
+    let accent = total_realized > 0 ? common.green : common.red;
+    common.log(`\nTotal Realized: ${accent('$' + common.format_currency(total_realized))}`);
+
+    accent = total_unrealized > 0 ? common.green : common.red;
+    common.log(`Total Unrealized: ${accent('$' + common.format_currency(total_unrealized))}`);
+
+    accent = total > 0 ? common.green : common.red;
+    common.log(
+        `Total Profit: ${accent('$' + common.format_currency(total))} | ${accent(common.format_currency(total / sol_price) + 'SOL')}`
+    );
+
+    accent = total_pnl > 0 ? common.green : common.red;
+    common.log(`Total PnL: ${accent(total_pnl.toFixed(2) + '%')}\n`);
+}
+
 export async function start_volume(json_config?: object): Promise<void> {
     const volume_config = await volume.setup_config(json_config);
     const volume_type_name = volume.VolumeTypeStrings[volume_config.type];
@@ -820,23 +906,21 @@ export async function benchmark(
     update_interval = 10
 ): Promise<void> {
     const public_key = new PublicKey(test_public_key);
-    const limit = pLimit(batch_size);
 
     let total_call_time = 0;
     let min_time = Number.MAX_VALUE;
     let max_time = 0;
     let errors = 0;
     let calls = 0;
-    const connection = new Connection(HELIUS_RPC, {
-        disableRetryOnRateLimit: true,
-        httpHeaders: {
-            Authorization: `Bearer ${COMMANDS_RPC_TOKEN}`
-        }
-    });
-
+    const connection = new Connection(HELIUS_RPC, { disableRetryOnRateLimit: true });
     const start_time = process.hrtime();
-    const tasks = Array.from({ length: NUM_REQUESTS }, (_, i) =>
-        limit(async () => {
+
+    const task_queue = Array.from({ length: NUM_REQUESTS }, (_, i) => i);
+    async function worker(): Promise<void> {
+        while (task_queue.length > 0) {
+            const i = task_queue.shift();
+            if (i === undefined) return;
+
             calls++;
             const startTime = process.hrtime();
 
@@ -844,7 +928,7 @@ export async function benchmark(
                 await connection.getBalance(public_key);
             } catch (error) {
                 errors++;
-                return;
+                continue;
             }
 
             const [seconds, nanoseconds] = process.hrtime(startTime);
@@ -867,10 +951,11 @@ export async function benchmark(
                         `TPS: ${tps.toFixed(2)}`
                 );
             }
-        })
-    );
+        }
+    }
+    const workers = Array.from({ length: batch_size }, () => worker());
+    await Promise.all(workers);
 
-    await Promise.all(tasks);
     const end_time = process.hrtime(start_time);
     const total_elapsed_time = end_time[0] * 1000 + end_time[1] / 1e6;
     const avg_time = total_elapsed_time / (NUM_REQUESTS - errors);

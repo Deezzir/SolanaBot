@@ -1,11 +1,9 @@
 # TODO
 
-- Wallet stats, like age, number of bonds and winrate. (new command)
-- Add Volume bot
+- Add Volume and bump bot
+- Remove raydium sdk dependancy
 - Add bundle snipe
 - Add sell by percent to start/snipe command
-- Nozomi
+- Check out Nozomi
 - Finish Moonshot
 - Rework snipe logic
-- Pump/Moonshot Volume (and bump bot)
-- Pump Fun Shill, comments creation

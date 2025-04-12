@@ -12,7 +12,7 @@ import * as trade from '../common/trade_common.js';
 import { PriorityLevel, SOL_MINT, TRADE_DEFAULT_CURVE_DECIMALS } from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
 
-export class GenericMintMeta implements trade.IMintMeta {
+class GenericMintMeta implements trade.IMintMeta {
     mint!: PublicKey;
     name: string = 'Unknown';
     symbol: string = 'Unknown';
