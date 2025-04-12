@@ -437,6 +437,11 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
+        .option('-b, --bundle <tip>', 'Enable bundles by providing tip amount', (value) => {
+            if (!common.validate_float(value, 0))
+                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+            return parseFloat(value);
+        })
         .addOption(
             new Option('-pr, --priority <level>', 'specify priority level')
                 .choices(Object.values(PriorityLevel) as string[])
@@ -449,12 +454,13 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { percent, slippage, from, to, list, priority, program } = options;
+            const { percent, slippage, from, to, list, bundle, priority, program } = options;
             await commands.sell_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
                 program,
+                bundle,
                 percent,
                 slippage
             );

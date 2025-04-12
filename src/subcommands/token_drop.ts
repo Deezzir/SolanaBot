@@ -166,7 +166,7 @@ async function count_records(col_name: string): Promise<number> {
     }
 }
 
-async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.MintMeta): Promise<void> {
+async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.MintAsset): Promise<void> {
     if (!DB) {
         await connect_db();
     }
@@ -256,7 +256,7 @@ async function drop_tokens(col_name: string, drop: Keypair, mint_meta: trade.Min
     }
 }
 
-async function airdrop(percent: number, ui_balance: number, mint_meta: trade.MintMeta, drop: Keypair): Promise<void> {
+async function airdrop(percent: number, ui_balance: number, mint_meta: trade.MintAsset, drop: Keypair): Promise<void> {
     const airdrop_count = await count_records(DROP_AIRDROP_COLLECTION);
     if (airdrop_count === 0) {
         common.error(common.red('\nNo airdrop records found, skipping...'));
@@ -276,7 +276,7 @@ async function airdrop(percent: number, ui_balance: number, mint_meta: trade.Min
     common.log(common.green(`Airdrop completed`));
 }
 
-async function presale(percent: number, ui_balance: number, mint_meta: trade.MintMeta, drop: Keypair): Promise<void> {
+async function presale(percent: number, ui_balance: number, mint_meta: trade.MintAsset, drop: Keypair): Promise<void> {
     const presale_count = await count_records(DROP_PRESALE_COLLECTION);
     if (presale_count === 0) {
         common.error(common.red('\nNo presale records found, skipping...'));
@@ -299,7 +299,7 @@ async function presale(percent: number, ui_balance: number, mint_meta: trade.Min
 export async function execute(
     drop: Keypair,
     token_balance: number,
-    mint_meta: trade.MintMeta,
+    mint_meta: trade.MintAsset,
     airdrop_percent: number,
     presale_percent: number
 ): Promise<void> {

@@ -51,7 +51,8 @@ type IPFSResponse = {
 
 export enum Program {
     Pump = 'pump',
-    Moonshot = 'moonshot'
+    Moonshot = 'moonshot',
+    Generic = 'generic'
 }
 
 export function bold(message: string): string {
