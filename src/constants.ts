@@ -1,12 +1,11 @@
 import dotenv from 'dotenv';
-import * as common from './common/common.js';
 import { PublicKey } from '@solana/web3.js';
 dotenv.config({ path: './.env' });
 
 function get_env_variable(var_name: string, default_value: string = ''): any {
     const variable = process.env[var_name] || default_value;
     if (!variable) {
-        common.error(common.red(`${var_name} is not set`));
+        console.error(`${var_name} is not set`);
         process.exit(1);
     }
     return variable;
