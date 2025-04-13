@@ -37,7 +37,8 @@ import {
     TRADE_DEFAULT_CURVE_DECIMALS,
     TRADE_MAX_RETRIES,
     TRADE_RETRY_INTERVAL_MS,
-    JITO_TIP_ACCOUNTS
+    JITO_TIP_ACCOUNTS,
+    JITO_BUNDLE_SIZE
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -127,7 +128,7 @@ export type TokenMetrics = {
 
 export async function get_tx_with_retries(
     signature: string,
-    max_retries: number = TRADE_MAX_RETRIES
+    max_retries: number = 5
 ): Promise<VersionedTransactionResponse | null> {
     let retries = max_retries;
 
@@ -189,7 +190,12 @@ async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
                 jsonrpc: '2.0',
                 id: 1,
                 method: 'sendBundle',
-                params: [serialized_txs]
+                params: [
+                    serialized_txs,
+                    {
+                        encoding: 'base64'
+                    }
+                ]
             })
         })
     );
@@ -215,7 +221,12 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
                 jsonrpc: '2.0',
                 id: 1,
                 method: 'sendTransaction',
-                params: [serialized_tx]
+                params: [
+                    serialized_tx,
+                    {
+                        "encoding": "base64"
+                    }
+                ]
             })
         })
     );
@@ -259,7 +270,7 @@ async function create_and_send_protected_tx(
     );
     versioned_tx.sign(signers);
     const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
-    const serialized_tx = bs58.encode(versioned_tx.serialize());
+    const serialized_tx = Buffer.from(versioned_tx.serialize()).toString('base64');
 
     const responses = await send_jito_tx(serialized_tx);
     if (responses.length > 0) {
@@ -276,6 +287,7 @@ export async function create_and_send_bundle(
     tip: number
 ): Promise<String> {
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
+    if (instructions.length > JITO_BUNDLE_SIZE) throw new Error(`Bundle size exceeded.`);
     if (instructions.length !== signers.length) throw new Error(`Instructions and signers length mismatch.`);
     if (signers[0].length === 0) throw new Error(`No payer provided.`);
     const payer = signers[0][0];
@@ -283,34 +295,35 @@ export async function create_and_send_bundle(
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
-    const jito_tip_tx_message = new TransactionMessage({
-        payerKey: payer.publicKey,
-        recentBlockhash: ctx.value.blockhash,
-        instructions: [
-            SystemProgram.transfer({
-                fromPubkey: payer.publicKey,
-                toPubkey: jito_tip_account,
-                lamports: tip * LAMPORTS_PER_SOL
-            })
-        ]
-    }).compileToV0Message();
-    const jito_tip_tx = new VersionedTransaction(jito_tip_tx_message);
+    const jito_tip_tx = new VersionedTransaction(
+        new TransactionMessage({
+            payerKey: payer.publicKey,
+            recentBlockhash: ctx.value.blockhash,
+            instructions: [
+                SystemProgram.transfer({
+                    fromPubkey: payer.publicKey,
+                    toPubkey: jito_tip_account,
+                    lamports: tip * LAMPORTS_PER_SOL
+                })
+            ]
+        }).compileToV0Message()
+    );
     jito_tip_tx.sign([payer]);
     const jito_tx_signature = bs58.encode(jito_tip_tx.signatures[0]);
 
     let serialized_txs = [];
 
-    serialized_txs.push(bs58.encode(jito_tip_tx.serialize()));
+    serialized_txs.push(Buffer.from(jito_tip_tx.serialize()).toString('base64'));
     for (let i = 0; i < instructions.length; i++) {
         const versioned_tx = new VersionedTransaction(
             new TransactionMessage({
-                payerKey: payer.publicKey,
+                payerKey: signers[i][0].publicKey,
                 recentBlockhash: ctx.value.blockhash,
                 instructions: instructions[i].filter(Boolean)
             }).compileToV0Message()
         );
         versioned_tx.sign(signers[i]);
-        serialized_txs.push(bs58.encode(versioned_tx.serialize()));
+        serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }
 
     const responses = await send_jito_bundle(serialized_txs);
@@ -515,20 +528,28 @@ export async function send_lamports(
     priority?: PriorityLevel
 ): Promise<String> {
     lamports = Math.floor(lamports);
+    const send_instruction = SystemProgram.transfer({
+        fromPubkey: sender.publicKey,
+        toPubkey: receiver,
+        lamports: lamports
+    });
 
     if (priority) {
         let fees = 0;
         let units = 500;
         fees = await get_priority_fee({
             priority_level: priority,
-            accounts: ['11111111111111111111111111111111']
+            transaction: {
+                instructions: [send_instruction],
+                signers: [sender]
+            }
         });
         let instructions = [
-            ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: fees
-            }),
             ComputeBudgetProgram.setComputeUnitLimit({
                 units: units
+            }),
+            ComputeBudgetProgram.setComputeUnitPrice({
+                microLamports: fees
             }),
             SystemProgram.transfer({
                 fromPubkey: sender.publicKey,
@@ -539,16 +560,7 @@ export async function send_lamports(
         return await create_and_send_tx(instructions, [sender]);
     }
 
-    return await create_and_send_smart_tx(
-        [
-            SystemProgram.transfer({
-                fromPubkey: sender.publicKey,
-                toPubkey: receiver,
-                lamports: lamports
-            })
-        ],
-        [sender]
-    );
+    return await create_and_send_smart_tx([send_instruction], [sender]);
 }
 
 export async function send_lamports_with_retries(
@@ -565,6 +577,7 @@ export async function send_lamports_with_retries(
             if (attempt < max_retries) {
                 common.error(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`);
                 const balance = await get_balance(sender.publicKey);
+                if (balance === 0) throw new Error(`Sender has no balance.`);
                 if (balance < amount) amount = balance;
             } else {
                 common.error(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`);
@@ -702,7 +715,7 @@ export async function close_accounts(owner: Keypair): Promise<PublicKey[]> {
             }
 
             try {
-                const signature = await create_and_send_tx(intructions, [owner], PriorityLevel.DEFAULT);
+                const signature = await create_and_send_tx(intructions, [owner], PriorityLevel.HIGH);
                 common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {

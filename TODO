@@ -1,9 +1,10 @@
 # TODO
 
+- Check promote and create token
 - Add Volume and bump bot
 - Remove raydium sdk dependancy
 - Add bundle snipe
 - Add sell by percent to start/snipe command
 - Check out Nozomi
-- Finish Moonshot
+- Finish Moonshot (without dep)
 - Rework snipe logic

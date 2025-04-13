@@ -371,21 +371,24 @@ async function validate_bot_config(json: any, keys_cnt: number, trader: trade.IP
         if (typeof sell_slippage !== 'number' || sell_slippage < 0.0 || sell_slippage > TRADE_MAX_SLIPPAGE) {
             throw new Error(`[ERROR] sell_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
         }
-        json.sell_slippage = sell_slippage / 100;
+        json.sell_slippage = sell_slippage;
     }
 
     if (buy_slippage !== undefined) {
         if (typeof buy_slippage !== 'number' || buy_slippage < 0.0 || buy_slippage > TRADE_MAX_SLIPPAGE) {
             throw new Error(`[ERROR] buy_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
         }
-        json.buy_slippage = buy_slippage / 100;
+        json.buy_slippage = buy_slippage;
     }
 
     if (priority_level !== undefined) {
-        if (typeof priority_level !== 'string' || !(priority_level in PriorityLevel)) {
-            throw new Error('[ERROR] priority_level must be a valid string.');
+        if (
+            typeof priority_level !== 'string' ||
+            !Object.values(PriorityLevel).includes(priority_level as PriorityLevel)
+        ) {
+            throw new Error(`[ERROR] priority_level must be a valid string, values: ${Object.values(PriorityLevel)}`);
         }
-        json.priority_level = PriorityLevel[priority_level as keyof typeof PriorityLevel];
+        json.priority_level = priority_level as PriorityLevel;
     }
 
     if (protection_tip !== undefined) {
@@ -629,15 +632,19 @@ export async function setup_config(
 function log_bot_config(bot_config: BotConfig) {
     const to_print = {
         ...bot_config,
-        mcap_threshold: bot_config.mcap_threshold === Infinity ? 'N/A' : bot_config.mcap_threshold,
-        start_interval: bot_config.start_interval !== 0 ? bot_config.start_interval : 'N/A',
-        buy_interval: bot_config.buy_interval !== 0 ? bot_config.buy_interval : 'N/A',
+        mcap_threshold: bot_config.mcap_threshold === Infinity ? 'N/A' : `$${common.format_currency(bot_config.mcap_threshold)}`,
+        start_interval: bot_config.start_interval !== 0 ? `${bot_config.start_interval} secs` : 'N/A',
+        buy_interval: bot_config.buy_interval !== 0 ? `${bot_config.buy_interval} secs` : 'N/A',
         mint: bot_config.mint ? bot_config.mint.toString() : 'N/A',
         token_name: bot_config.token_name ? bot_config.token_name : 'N/A',
         token_ticker: bot_config.token_ticker ? bot_config.token_ticker : 'N/A',
         is_buy_once: bot_config.is_buy_once ? 'Yes' : 'No',
         priority_level: bot_config.priority_level.toString(),
-        protection_tip: bot_config.protection_tip ? `${bot_config.protection_tip} SOL` : 'N/A'
+        protection_tip: bot_config.protection_tip ? `${bot_config.protection_tip} SOL` : 'N/A',
+        spend_limit: bot_config.spend_limit ? `${bot_config.spend_limit} SOL` : 'N/A',
+        start_buy: bot_config.start_buy ? `${bot_config.start_buy} SOL` : 'N/A',
+        buy_slippage: bot_config.buy_slippage ? `${bot_config.buy_slippage * 100}%` : 'N/A',
+        sell_slippage: bot_config.sell_slippage ? `${bot_config.sell_slippage * 100}%` : 'N/A'
     };
 
     const max_length = Math.max(...Object.values(to_print).map((value) => value.toString().length));

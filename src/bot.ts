@@ -206,6 +206,16 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50');
             return parsed_value;
         })
+        .option('-b, --bundle <tip>', 'Amount to tip for buy/sell bundle', (value) => {
+            if (!common.validate_float(value, 0))
+                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+            return parseFloat(value);
+        })
+        .addOption(
+            new Option('-pr, --priority <level>', 'specify priority level')
+                .choices(Object.values(PriorityLevel) as string[])
+                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
+        )
         .addOption(
             new Option('-g, --program <type>', 'specify program')
                 .choices(Object.values(common.Program) as string[])
@@ -213,8 +223,8 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
-            const { from, to, list, min, max, program } = options;
-            await commands.warmup(common.filter_wallets(wallets, from, to, list), program, min, max);
+            const { from, to, list, bundle, priority, min, max, program } = options;
+            await commands.warmup(common.filter_wallets(wallets, from, to, list), bundle, priority, program, min, max);
         });
 
     program
@@ -270,8 +280,8 @@ async function main() {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
-            return parsed_value / 100;
+                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
+            return parsed_value;
         })
         .option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount', (value) => {
             if (!common.validate_float(value, 0))
@@ -312,16 +322,16 @@ async function main() {
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 100.0)
-                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsed_value / 100;
+            if (parsed_value < 0.0 || parsed_value > 1.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
+            return parsed_value;
         })
         .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
-            return parsed_value / 100;
+                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
+            return parsed_value;
         })
         .option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount', (value) => {
             if (!common.validate_float(value, 0))
@@ -376,8 +386,8 @@ async function main() {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
-            return parsed_value / 100;
+                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
+            return parsed_value;
         })
         .option('-f, --from <number>', 'Buy starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
@@ -436,16 +446,16 @@ async function main() {
         .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 100.0)
-                throw new InvalidOptionArgumentError('Invalid range (0.0 - 100.0).');
-            return parsed_value / 100;
+            if (parsed_value < 0.0 || parsed_value > 1.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
+            return parsed_value;
         })
         .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0 - ${TRADE_MAX_SLIPPAGE}).`);
-            return parsed_value / 100;
+                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
+            return parsed_value;
         })
         .option('-f, --from <number>', 'Sell starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
@@ -695,7 +705,7 @@ async function main() {
         .argument('<airdrop_percent>', 'Percent of tokens to be airdroped', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
-            if (parsed_value < 0 || parsed_value > 100) throw new InvalidArgumentError('Invalid range (0-100).');
+            if (parsed_value < 0 || parsed_value > 1.0) throw new InvalidArgumentError('Invalid range (0.0 - 1.0).');
             return parsed_value;
         })
         .argument('<mint>', 'Public address of the mint', (value) => {
@@ -712,7 +722,8 @@ async function main() {
         .option('-p, --presale <percent>', 'Turn on the presale', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0 || parsed_value > 100) throw new InvalidOptionArgumentError('Invalid range (0-100).');
+            if (parsed_value < 0 || parsed_value > 1.0)
+                throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
             return parsed_value;
         })
         .action(async (airdrop_percent, mint, drop, options) => {
