@@ -113,11 +113,9 @@ export const SPIDER_EXTRA_SOL: number = 0.005;
 export const SPIDER_INTERVAL_MS: number = 1000;
 
 // DROP CONSTANTS
-export const DROP_MONGO_URI = get_env_variable('MONGO_URI', 'mongodb://localhost:27017');
-export const DROP_MONGO_DB_NAME = get_env_variable('MONGO_DB_NAME', 'test');
 export const DROP_RECORDS_PER_ITERATION = 10;
-export const DROP_AIRDROP_COLLECTION = 'airdropusers';
-export const DROP_PRESALE_COLLECTION = 'presaleusers';
+export const DROP_AIRDROP_CSV = 'airdropusers.csv';
+export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
 export const VOLUME_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
