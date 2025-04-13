@@ -632,7 +632,8 @@ export async function setup_config(
 function log_bot_config(bot_config: BotConfig) {
     const to_print = {
         ...bot_config,
-        mcap_threshold: bot_config.mcap_threshold === Infinity ? 'N/A' : `$${common.format_currency(bot_config.mcap_threshold)}`,
+        mcap_threshold:
+            bot_config.mcap_threshold === Infinity ? 'N/A' : `$${common.format_currency(bot_config.mcap_threshold)}`,
         start_interval: bot_config.start_interval !== 0 ? `${bot_config.start_interval} secs` : 'N/A',
         buy_interval: bot_config.buy_interval !== 0 ? `${bot_config.buy_interval} secs` : 'N/A',
         mint: bot_config.mint ? bot_config.mint.toString() : 'N/A',

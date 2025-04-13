@@ -224,7 +224,7 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
                 params: [
                     serialized_tx,
                     {
-                        "encoding": "base64"
+                        encoding: 'base64'
                     }
                 ]
             })
@@ -286,35 +286,29 @@ export async function create_and_send_bundle(
     signers: Signer[][],
     tip: number
 ): Promise<String> {
-    if (instructions.length === 0) throw new Error(`No instructions provided.`);
-    if (instructions.length > JITO_BUNDLE_SIZE) throw new Error(`Bundle size exceeded.`);
+    if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
+        throw new Error(`Bundle size exceeded or size is 0.`);
     if (instructions.length !== signers.length) throw new Error(`Instructions and signers length mismatch.`);
-    if (signers[0].length === 0) throw new Error(`No payer provided.`);
-    const payer = signers[0][0];
+    for (let i = 0; i < instructions.length; i++) {
+        if (instructions[i].length === 0) throw new Error(`No instructions provided for tx ${i}.`);
+        if (signers[i].length === 0) throw new Error(`No signers provided for tx ${i}.`);
+    }
 
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    let signature: string;
 
-    const jito_tip_tx = new VersionedTransaction(
-        new TransactionMessage({
-            payerKey: payer.publicKey,
-            recentBlockhash: ctx.value.blockhash,
-            instructions: [
+    let serialized_txs = [];
+    for (let i = 0; i < instructions.length; i++) {
+        if (i === 0) {
+            instructions[i].push(
                 SystemProgram.transfer({
-                    fromPubkey: payer.publicKey,
+                    fromPubkey: signers[i][0].publicKey,
                     toPubkey: jito_tip_account,
                     lamports: tip * LAMPORTS_PER_SOL
                 })
-            ]
-        }).compileToV0Message()
-    );
-    jito_tip_tx.sign([payer]);
-    const jito_tx_signature = bs58.encode(jito_tip_tx.signatures[0]);
-
-    let serialized_txs = [];
-
-    serialized_txs.push(Buffer.from(jito_tip_tx.serialize()).toString('base64'));
-    for (let i = 0; i < instructions.length; i++) {
+            );
+        }
         const versioned_tx = new VersionedTransaction(
             new TransactionMessage({
                 payerKey: signers[i][0].publicKey,
@@ -323,12 +317,13 @@ export async function create_and_send_bundle(
             }).compileToV0Message()
         );
         versioned_tx.sign(signers[i]);
+        if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
         serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }
 
     const responses = await send_jito_bundle(serialized_txs);
     if (responses.length > 0) {
-        await check_transaction_status(jito_tx_signature, ctx);
+        await check_transaction_status(signature!, ctx);
         return responses[0];
     } else {
         throw new Error(`Failed to send the bundle, no successfull response from the JITO endpoints`);

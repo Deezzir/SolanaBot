@@ -42,8 +42,8 @@ import {
     SOL_MINT,
     SYSTEM_PROGRAM_ID,
     PUMP_AMM_FEE_TOKEN_ACCOUNT,
-    BUY_DISCRIMINATOR,
-    SELL_DISCRIMINATOR,
+    PUMP_BUY_DISCRIMINATOR,
+    PUMP_SELL_DISCRIMINATOR,
     PUMP_SWAP_PERCENTAGE,
     PriorityLevel
 } from '../constants.js';
@@ -264,18 +264,12 @@ export class Trader {
         sol_amount?: number
     ): Promise<[String, PublicKey]> {
         if (!mint) mint = Keypair.generate();
-        let instructions = await this.get_create_token_instructions(creator, meta, cid, mint);
+        const instructions = await this.get_create_token_instructions(creator, meta, cid, mint);
 
         if (sol_amount && sol_amount > 0) {
-            const token_meta = new PumpMintMeta({
-                mint: mint.publicKey.toString(),
-                base_vault: instructions[0].keys[2].pubkey.toString(),
-                quote_vault: instructions[0].keys[3].pubkey.toString(),
-                market_cap: 27.95,
-                total_supply: BigInt(1_000_000_000_000_000) // 1 * 10**9 * 10**6
-            });
+            const token_meta = await this.default_mint_meta(mint.publicKey);
             const [buy_instructions, _] = await this.get_buy_instructions(sol_amount, creator, token_meta, 0.05);
-            instructions = instructions.concat(buy_instructions);
+            instructions.unshift(...buy_instructions);
         }
 
         const sig = await trade.create_and_send_smart_tx(instructions, [creator, mint]);
@@ -455,7 +449,7 @@ export class Trader {
     }
 
     private static buy_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
-        const instruction_buf = Buffer.from(BUY_DISCRIMINATOR);
+        const instruction_buf = Buffer.from(PUMP_BUY_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
         const slippage_buf = Buffer.alloc(8);
@@ -464,7 +458,7 @@ export class Trader {
     }
 
     private static sell_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
-        const instruction_buf = Buffer.from(SELL_DISCRIMINATOR);
+        const instruction_buf = Buffer.from(PUMP_SELL_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
         const slippage_buf = Buffer.alloc(8);
