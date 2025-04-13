@@ -91,19 +91,14 @@ export async function create_token(
 ): Promise<void> {
     common.log('Creating a token...\n');
 
-    let meta: common.IPFSMetadata;
     const trader = get_trader(program);
     const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
+    const meta = await common.fetch_ipfs_json(cid);
+
+    if (dev_buy && dev_buy > balance) throw new Error(`[ERROR] Dev balance is not enough to buy for ${dev_buy} SOL`);
 
     common.log(common.yellow(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
-
-    if (dev_buy && dev_buy > balance) {
-        throw new Error(`[ERROR] Dev balance is not enough to buy for ${dev_buy} SOL`);
-    }
-
     if (mint) common.log(`Custom Mint address: ${mint.publicKey.toString()}`);
-
-    meta = (await common.fetch_ipfs_json(cid)) as common.IPFSMetadata;
     common.log(`Token name: ${meta.name} | Symbol: ${meta.symbol}`);
     common.log(`Token Meta: ${JSON.stringify(meta, null, 2)}`);
     common.log(`Dev Buy: ${dev_buy || 0}\n`);
@@ -125,13 +120,11 @@ export async function promote(
 ): Promise<void> {
     common.log(common.yellow(`Creating ${times} tokens with CID ${cid}...\n`));
 
-    let meta: common.IPFSMetadata;
     const trader = get_trader(program);
-
     const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
-    common.log(common.bold(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
+    const meta = await common.fetch_ipfs_json(cid);
 
-    meta = (await common.fetch_ipfs_json(cid)) as common.IPFSMetadata;
+    common.log(common.bold(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
     common.log(common.bold(`Token name: ${meta.name} | Symbol: ${meta.symbol}\n`));
 
     const transactions = [];

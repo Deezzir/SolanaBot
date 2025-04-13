@@ -7,8 +7,9 @@ import { parse } from 'csv-parse/sync';
 import {
     COMMANDS_DELAY_MS,
     COMMANDS_MAX_RETRIES,
+    IPFS,
     IPFS_API,
-    IPSF_API_KEY,
+    IPFS_JWT,
     PUMP_FETCH_API_URL,
     WALLETS_FILE_HEADERS
 } from '../constants.js';
@@ -41,19 +42,18 @@ export type IPFSMetadata = {
 };
 
 type IPFSResponse = {
-    requestid: string;
-    status: string;
-    created: string;
-    pin: {
-        cid: string;
+    data: {
+        id: string;
         name: string;
-        origin: [];
-        meta: {};
+        cid: string;
+        created_at: string;
+        size: number;
+        number_of_files: number;
+        mime_type: string;
+        user_id: string;
+        group_id: string;
+        is_duplicate: boolean;
     };
-    info: {
-        size: string;
-    };
-    delegates: string[];
 };
 
 export enum Program {
@@ -242,52 +242,34 @@ export function read_json(file_path: string): object {
     }
 }
 
-export async function fetch_ipfs_json(cid: string): Promise<any> {
+export async function fetch_ipfs_json(cid: string): Promise<IPFSMetadata> {
     const url = `${IPFS_API}${cid}`;
     try {
         const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
-        return data;
+        return data as IPFSMetadata;
     } catch (error) {
         throw new Error(`[ERROR] Failed to fetch IPFS JSON: ${error}`);
     }
 }
 
-async function upload_ipfs(data: any, content_type: string, file_name: string): Promise<IPFSResponse> {
-    var headers = new Headers();
-    headers.append('x-api-key', IPSF_API_KEY);
-
-    var body_data: BodyInit;
+async function upload_ipfs(file: File): Promise<IPFSResponse> {
     const form_data = new FormData();
 
-    if (content_type.includes('json')) {
-        form_data.append('Key', file_name);
-        form_data.append('Content-Type', 'application/json; charset=utf-8');
-        const blob = new Blob([JSON.stringify(data)], {
-            type: 'application/json'
-        });
-        form_data.append('Body', blob, 'filename.json');
-        body_data = form_data;
-    } else {
-        if (data instanceof File) {
-            form_data.append('Body', data, file_name);
-        } else {
-            throw new Error('The provided data is not a file.');
-        }
-        form_data.append('Key', file_name);
-        form_data.append('ContentType', content_type);
-        body_data = form_data;
-    }
+    form_data.append('file', file);
+    form_data.append('network', 'public');
+    form_data.append('name', file.name);
 
-    const requestOptions: RequestInit = {
+    const request: RequestInit = {
         method: 'POST',
-        headers: headers,
-        body: body_data,
-        redirect: 'follow'
+        headers: { Authorization: `Bearer ${IPFS_JWT}` },
+        body: form_data
     };
 
     try {
-        const response = await fetch(IPFS_API, requestOptions);
+        const response = await fetch(IPFS_API, request);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         return data as IPFSResponse;
     } catch (error) {
@@ -297,15 +279,18 @@ async function upload_ipfs(data: any, content_type: string, file_name: string): 
 
 export async function create_metadata(meta: IPFSMetadata, image_path: string): Promise<string> {
     try {
-        const image_file = new File([readFileSync(image_path)], basename(image_path));
-        const resp = await upload_ipfs(image_file, image_file.type, image_file.name);
-        if (resp.status !== 'pinned') throw new Error('Failed to upload image to IPFS');
-        const cid = resp.pin.cid;
-        meta.image = `${IPFS_API}${cid}`;
+        const uuid = crypto.randomUUID();
+        const image_file = new File([readFileSync(image_path)], `${uuid}-${basename(image_path)}`, {
+            type: 'image/png'
+        });
+        const image_resp = await upload_ipfs(image_file);
+        meta.image = `${IPFS}${image_resp.data.cid}`;
 
-        const meta_resp = await upload_ipfs(meta, 'application/json', 'metadata.json');
-        if (meta_resp.status !== 'pinned') throw new Error('Failed to upload metadata to IPFS');
-        return meta_resp.pin.cid;
+        const json = JSON.stringify(meta);
+        const json_blob = new Blob([json]);
+        const json_file = new File([json_blob], `${uuid}-metadata.json`, { type: 'application/json' });
+        const meta_resp = await upload_ipfs(json_file);
+        return meta_resp.data.cid;
     } catch (error) {
         if (error instanceof Error) {
             throw new Error(`[ERROR] Failed to create metadata: ${error.message}`);

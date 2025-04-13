@@ -29,9 +29,9 @@ export const WALLETS_FILE = 'keys.csv';
 export const WALLETS_FILE_HEADERS = ['name', 'private_key', 'is_reserve', 'public_key', 'created_at'];
 
 // IPFS CONSTANTS
-export const IPFS = 'https://quicknode.quicknode-ipfs.com/ipfs/';
-export const IPFS_API = 'https://api.quicknode.com/ipfs/rest/v1/s3/put-object';
-export const IPSF_API_KEY = get_env_variable('IPFS_API_KEY');
+export const IPFS = 'https://ipfs.io/ipfs/';
+export const IPFS_API = 'https://uploads.pinata.cloud/v3/files';
+export const IPFS_JWT = get_env_variable('PINATA_IPFS_JWT');
 
 // TRADE COMMON CONSTANTS
 export const TRADE_MAX_RETRIES = 0;
@@ -46,7 +46,7 @@ export const SOL_MINT = new PublicKey('So111111111111111111111111111111111111111
 export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-export const JITO_BUNDLE_SIZE = 4;
+export const JITO_BUNDLE_SIZE = 5;
 export const JITO_TIP_ACCOUNTS = [
     '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
     'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
@@ -95,8 +95,9 @@ export const PUMP_AMM_GLOBAL_ACCOUNT = new PublicKey('ADyA8hdefvWN2dbGGWFotbzWxr
 export const PUMP_AMM_EVENT_AUTHORITY_ACCOUNT = new PublicKey('GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR');
 export const PUMP_AMM_FEE_ACCOUNT = new PublicKey('62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV');
 export const PUMP_AMM_FEE_TOKEN_ACCOUNT = new PublicKey('94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb');
-export const BUY_DISCRIMINATOR: Uint8Array = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
-export const SELL_DISCRIMINATOR: Uint8Array = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
+export const PUMP_BUY_DISCRIMINATOR: Uint8Array = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
+export const PUMP_SELL_DISCRIMINATOR: Uint8Array = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
+export const PUMP_CREATE_DISCRIMINATOR: Uint8Array = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
 
 // SNIPE CONSTANTS
 export const SNIPE_BUY_SLIPPAGE = 0.85;
