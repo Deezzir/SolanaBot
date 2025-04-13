@@ -1006,9 +1006,11 @@ export async function benchmark(
 }
 
 export async function drop(
-    airdrop_percent: number,
     mint: PublicKey,
     drop: Keypair,
+    airdrop_path: string,
+    presale_path: string,
+    airdrop_percent: number = 0,
     presale_percent: number = 0
 ): Promise<void> {
     common.log(common.yellow(`Dropping the mint ${mint.toString()}...`));
@@ -1027,8 +1029,8 @@ export async function drop(
             )
         );
     } catch (err) {
-        throw new Error('[ERROR] Failed to process dropper file');
+        throw new Error('[ERROR] Failed to get dropper balance');
     }
 
-    token_drop.execute(drop, token_balance, mint_meta, airdrop_percent, presale_percent);
+    token_drop.execute(drop, token_balance, mint_meta, airdrop_percent, presale_percent, airdrop_path, presale_path);
 }

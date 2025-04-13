@@ -9,6 +9,8 @@ import { Helius } from 'helius-sdk';
 import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 import {
     COMMITMENT,
+    DROP_AIRDROP_CSV,
+    DROP_PRESALE_CSV,
     HELIUS_API_KEY,
     HELIUS_RPC,
     PriorityLevel,
@@ -702,12 +704,6 @@ async function main() {
         .command('drop')
         .alias('dr')
         .description('Do the drop')
-        .argument('<airdrop_percent>', 'Percent of tokens to be airdroped', (value) => {
-            const parsed_value = parseInt(value);
-            if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
-            if (parsed_value < 0 || parsed_value > 1.0) throw new InvalidArgumentError('Invalid range (0.0 - 1.0).');
-            return parsed_value;
-        })
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
@@ -719,16 +715,40 @@ async function main() {
             if (!drop_wallet) throw new InvalidArgumentError('Invalid index.');
             return drop_wallet.keypair;
         })
-        .option('-p, --presale <percent>', 'Turn on the presale', (value) => {
+        .option('-ap, --airdrop <percent>', 'Percent of tokens to be airdroped', (value) => {
+            const parsed_value = parseInt(value);
+            if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
+            if (parsed_value < 0 || parsed_value > 1.0) throw new InvalidArgumentError('Invalid range (0.0 - 1.0).');
+            return parsed_value;
+        })
+        .option('-pp, --presale <percent>', 'Turn on the presale', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0 || parsed_value > 1.0)
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
             return parsed_value;
         })
-        .action(async (airdrop_percent, mint, drop, options) => {
-            const { presale_percent } = options;
-            await commands.drop(airdrop_percent, mint, drop, presale_percent);
+        .option(
+            '-af, --airdrop-file <path>',
+            'Path to the CSV file with the airdrop list',
+            (value) => {
+                if (!existsSync(value)) throw new InvalidOptionArgumentError('Airdrop file does not exist.');
+                return value;
+            },
+            DROP_AIRDROP_CSV
+        )
+        .option(
+            '-pf, --presale-file <path>',
+            'Path to the CSV file with the presale list',
+            (value) => {
+                if (!existsSync(value)) throw new InvalidOptionArgumentError('Presale file does not exist.');
+                return value;
+            },
+            DROP_PRESALE_CSV
+        )
+        .action(async (mint, drop, options) => {
+            const { presale, airdrop, airdrop_file, presale_file } = options;
+            await commands.drop(mint, drop, airdrop_file, presale_file, airdrop, presale);
         });
 
     program

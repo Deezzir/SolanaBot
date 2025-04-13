@@ -45,7 +45,8 @@ import {
     PUMP_BUY_DISCRIMINATOR,
     PUMP_SELL_DISCRIMINATOR,
     PUMP_SWAP_PERCENTAGE,
-    PriorityLevel
+    PriorityLevel,
+    PUMP_CREATE_DISCRIMINATOR
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
@@ -561,7 +562,7 @@ export class Trader {
     }
 
     private static create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
-        const instruction_buf = Buffer.from('181ec828051c0777', 'hex');
+        const instruction_buf = Buffer.from(PUMP_CREATE_DISCRIMINATOR);
 
         const token_name_buf = Buffer.alloc(4 + token_name.length);
         token_name_buf.writeUInt32LE(token_name.length, 0);
