@@ -71,7 +71,7 @@ async function fetch_records(collectionName: string): Promise<WithId<Document>[]
 }
 
 function calc_airdrop_amount(airdrop_percent: number, total_tokens: number, record_count: number): number {
-    const airdrop_amount = ((airdrop_percent / 100) * total_tokens) / record_count;
+    const airdrop_amount = (airdrop_percent * total_tokens) / record_count;
     return Math.floor(airdrop_amount);
 }
 
@@ -83,7 +83,7 @@ async function calc_presale_amounts(
         await connect_db();
     }
     try {
-        const presale_tokens = Math.floor((presale_percent / 100) * total_tokens);
+        const presale_tokens = Math.floor(presale_percent * total_tokens);
         const collection = DB?.collection(DROP_PRESALE_COLLECTION);
         const result = await collection
             ?.aggregate([
@@ -303,6 +303,16 @@ export async function execute(
     airdrop_percent: number,
     presale_percent: number
 ): Promise<void> {
+    if (airdrop_percent < 0 || presale_percent < 0) {
+        throw new Error('Airdrop and presale percentages must be non-negative');
+    }
+    if (airdrop_percent + presale_percent > 1) {
+        throw new Error('Airdrop and presale percentages must not exceed 100%');
+    }
+    if (token_balance <= 0) {
+        throw new Error('Token balance must be greater than 0');
+    }
+
     try {
         await connect_db();
 

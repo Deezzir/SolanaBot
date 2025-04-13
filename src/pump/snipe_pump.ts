@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
+import { COMMITMENT, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
@@ -91,14 +91,13 @@ export class Runner extends snipe.SniperBase {
                         }
                     }
                 },
-                'processed'
+                COMMITMENT
             );
 
             if (this._subscription_id === undefined) {
                 reject(new Error('Failed to subscribe to logs'));
             }
-        }).catch((error) => {
-            common.error(`[ERROR] An error occurred: ${error}`);
+        }).catch(() => {
             return null;
         });
     }

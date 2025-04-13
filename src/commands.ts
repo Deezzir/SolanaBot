@@ -1,4 +1,12 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TransactionInstruction, Signer } from '@solana/web3.js';
+import {
+    Keypair,
+    PublicKey,
+    LAMPORTS_PER_SOL,
+    Connection,
+    TransactionInstruction,
+    Signer,
+    ComputeBudgetProgram
+} from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
 import { GenericTrader } from './generic/generic.js';
@@ -335,12 +343,15 @@ export async function buy_token_once(
 
 export async function warmup(
     wallets: common.Wallet[],
+    bundle_tip: number = 0.0005,
+    priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump,
     min?: number,
     max?: number
 ): Promise<void> {
     const MIN = min || 1;
     const MAX = max || 5;
+    const SLIPPAGE = 0.5;
 
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
     if (MAX < MIN) throw new Error('[ERROR] Invalid min and max values.');
@@ -370,14 +381,13 @@ export async function warmup(
                 `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
             )
         );
-
         for (const mint of mints) {
             let amount = Math.max(0.005, parseFloat(common.normal_random(0.01, 0.01).toFixed(4)));
             common.log(
                 `Warming up with ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`
             );
             try {
-                const bundle_id = await trader.buy_sell_bundle(amount, buyer, mint, 0.0005, 0.3, PriorityLevel.MIN);
+                const bundle_id = await trader.buy_sell_bundle(amount, buyer, mint, bundle_tip, SLIPPAGE, priority);
                 common.log(common.green(`Bundle completed for ${wallet.name}, bundle ID: ${bundle_id}`));
             } catch (error) {
                 common.log(
@@ -522,6 +532,7 @@ export async function buy_token(
     } else {
         const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
         const bundles: Promise<void>[] = [];
+        let priority_fee: number | undefined = undefined;
         for (const wallet_bundle of wallet_bundles) {
             const instructions: TransactionInstruction[][] = [];
             const signers: Signer[][] = [];
@@ -535,6 +546,20 @@ export async function buy_token(
                         `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
                     );
                     const [instrs] = await trader.buy_token_instructions(buy_amount, buyer, mint_meta, SLIPPAGE);
+                    if (priority && !priority_fee) {
+                        priority_fee = await trade.get_priority_fee({
+                            priority_level: priority,
+                            transaction: {
+                                instructions: instrs,
+                                signers: [buyer]
+                            }
+                        });
+                    }
+                    instrs.unshift(
+                        ComputeBudgetProgram.setComputeUnitPrice({
+                            microLamports: priority_fee!
+                        })
+                    );
                     instructions.push(instrs);
                     signers.push([buyer]);
                 } catch (error) {
@@ -605,6 +630,7 @@ export async function sell_token(
     } else {
         const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
         const bundles: Promise<void>[] = [];
+        let priority_fee: number | undefined = undefined;
         for (const wallet_bundle of wallet_bundles) {
             const instructions: TransactionInstruction[][] = [];
             const signers: Signer[][] = [];
@@ -620,6 +646,20 @@ export async function sell_token(
                         seller,
                         mint_meta,
                         SLIPPAGE
+                    );
+                    if (priority && !priority_fee) {
+                        priority_fee = await trade.get_priority_fee({
+                            priority_level: priority,
+                            transaction: {
+                                instructions: instrs,
+                                signers: [seller]
+                            }
+                        });
+                    }
+                    instrs.unshift(
+                        ComputeBudgetProgram.setComputeUnitPrice({
+                            microLamports: priority_fee!
+                        })
                     );
                     instructions.push(instrs);
                     signers.push([seller]);

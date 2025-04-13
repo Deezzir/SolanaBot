@@ -390,7 +390,7 @@ export async function run_deep_transfer(
         for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
     }
 
-    return await common.get_wallets(target_file);
+    return common.get_wallets(target_file);
 }
 
 export async function run_reg_transfer(wallets: common.Wallet[], amounts: number[], sender: Keypair): Promise<void> {

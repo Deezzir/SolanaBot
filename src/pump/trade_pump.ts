@@ -225,7 +225,6 @@ export class Trader {
 
             return mint_meta;
         } catch (error) {
-            common.error(`[ERROR] Failed to get the mint metadata: ${error}`);
             return undefined;
         }
     }
@@ -240,12 +239,16 @@ export class Trader {
             .then((data: any) => {
                 if (!data || data.statusCode !== undefined) return [];
                 const shuffled = data.sort(() => 0.5 - Math.random());
-                return shuffled
-                    .slice(0, count)
-                    .map((item: any) => {
-                        return new PumpMintMeta(item);
-                    })
-                    .filter((i: PumpMintMeta) => !i.raydium_pool);
+                return shuffled.slice(0, count).map((item: any) => {
+                    const mapped = {
+                        ...item,
+                        base_vault: item.bonding_curve,
+                        quote_vault: item.associated_bonding_curve,
+                        sol_reserves: BigInt(item.virtual_sol_reserves),
+                        token_reserves: BigInt(item.virtual_token_reserves)
+                    };
+                    return new PumpMintMeta(mapped);
+                });
             })
             .catch((err) => {
                 common.error(`[ERROR] Failed fetching the mints: ${err}`);
@@ -311,13 +314,14 @@ export class Trader {
         slippage: number = 0.05,
         priority?: PriorityLevel
     ): Promise<String> {
-        const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
-        const token_amount = this.get_token_amount_raw(sol_amount_raw, mint_meta);
+        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
+        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         let [buy_instructions] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
-                uiAmount: Number(token_amount) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
-                amount: token_amount.toString(),
+                uiAmount: Number(token_amount_raw) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
+                amount: token_amount_raw.toString(),
                 decimals: PUMP_CURVE_TOKEN_DECIMALS
             },
             trader,
@@ -358,7 +362,6 @@ export class Trader {
             mint_meta.raydium_pool = ray_amm?.toString() ?? null;
             mint_meta.pump_pool = pump_amm?.toString() ?? null;
             const hasPool = ray_amm || pump_amm;
-
             if (!hasPool && !mint_meta.complete) {
                 const curve_state = await this.get_curve_state(new PublicKey(mint_meta.base_vault));
                 if (!curve_state) throw new Error('Curve state not found.');
@@ -395,7 +398,6 @@ export class Trader {
 
             if (ray_amm) {
                 const metrics = await get_raydium_token_metrics(ray_amm);
-                console.log('Raydium AMM metrics:', metrics);
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -483,7 +485,7 @@ export class Trader {
         const mint = new PublicKey(mint_meta.mint);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
-        const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
+        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
 
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
@@ -535,7 +537,6 @@ export class Trader {
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
-
         const sol_amount_raw = this.get_solana_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = await trade.calc_assoc_token_addr(seller.publicKey, mint);
@@ -748,7 +749,7 @@ export class Trader {
         const amm = new PublicKey(mint_meta.pump_pool);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
-        const sol_amount_raw = BigInt(sol_amount * LAMPORTS_PER_SOL);
+        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
 
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_SWAP_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);

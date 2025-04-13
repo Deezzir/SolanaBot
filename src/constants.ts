@@ -36,7 +36,7 @@ export const IPSF_API_KEY = get_env_variable('IPFS_API_KEY');
 // TRADE COMMON CONSTANTS
 export const TRADE_MAX_RETRIES = 0;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
-export const TRADE_MAX_SLIPPAGE = 500.0;
+export const TRADE_MAX_SLIPPAGE = 5.0;
 export const TRADE_DEFAULT_CURVE_DECIMALS = 6;
 export const TRADE_SWAP_SEED = 'swap';
 export const METAPLEX_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
