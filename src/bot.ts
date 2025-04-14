@@ -82,9 +82,9 @@ async function main() {
     );
 
     program
-        .command('start')
-        .alias('s')
-        .description('Start the bot')
+        .command('snipe')
+        .alias('sn')
+        .description('Start the snipe bot')
         .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
@@ -102,7 +102,7 @@ async function main() {
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             let { config, from, program } = options;
-            await commands.start(common.filter_wallets(wallets, from), program, config);
+            await commands.snipe(common.filter_wallets(wallets, from), program, config);
         });
 
     program
@@ -113,10 +113,15 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
         })
+        .addOption(
+            new Option('-g, --program <type>', 'specify program')
+                .choices(Object.values(common.Program) as string[])
+                .default(common.Program.Pump, common.Program.Pump)
+        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            const { config } = options;
-            await commands.start_volume(config);
+            const { config, program } = options;
+            await commands.start_volume(program, config);
         });
 
     program
@@ -369,20 +374,28 @@ async function main() {
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             return parsed_value;
         })
-        .option('--min <number>', 'Minimum amount for random buy in SOL (cannot be used with "--amount" parameter)', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value <= 0.0)
-                throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
-            return parsed_value;
-        })
-        .option('--max <number>', 'Maximum amount for random buy in SOL (cannot be used with "--amount" parameter)', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value <= 0.0)
-                throw new InvalidOptionArgumentError('Invalid maximum amount. Must be greater than 0.0.');
-            return parsed_value;
-        })
+        .option(
+            '--min <number>',
+            'Minimum amount for random buy in SOL (cannot be used with "--amount" parameter)',
+            (value) => {
+                const parsed_value = parseFloat(value);
+                if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+                if (parsed_value <= 0.0)
+                    throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
+                return parsed_value;
+            }
+        )
+        .option(
+            '--max <number>',
+            'Maximum amount for random buy in SOL (cannot be used with "--amount" parameter)',
+            (value) => {
+                const parsed_value = parseFloat(value);
+                if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+                if (parsed_value <= 0.0)
+                    throw new InvalidOptionArgumentError('Invalid maximum amount. Must be greater than 0.0.');
+                return parsed_value;
+            }
+        )
         .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');

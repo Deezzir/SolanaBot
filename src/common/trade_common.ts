@@ -49,6 +49,8 @@ export interface IMintMeta {
     readonly token_mint: string;
     readonly token_usd_mc: number;
     readonly migrated: boolean;
+    readonly platform_fee: number;
+    readonly mint_pubkey: PublicKey;
 }
 
 export interface IProgramTrader {

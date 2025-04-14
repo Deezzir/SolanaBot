@@ -9,7 +9,15 @@ import {
 } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import { IPFS, IPFS_API, IPFS_JWT, PriorityLevel, SOL_MINT, TRADE_DEFAULT_CURVE_DECIMALS } from '../constants.js';
+import {
+    IPFS,
+    IPFS_API,
+    IPFS_JWT,
+    PriorityLevel,
+    SOL_MINT,
+    TRADE_DEFAULT_CURVE_DECIMALS,
+    TRADE_RAYDIUM_SWAP_TAX
+} from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
@@ -34,6 +42,7 @@ class GenericMintMeta implements trade.IMintMeta {
     total_supply: bigint = BigInt(0);
     usd_market_cap: number = 0;
     market_cap: number = 0;
+    fee: number = TRADE_RAYDIUM_SWAP_TAX;
 
     constructor(data: Partial<GenericMintMeta> = {}) {
         Object.assign(this, data);
@@ -57,6 +66,14 @@ class GenericMintMeta implements trade.IMintMeta {
 
     public get migrated(): boolean {
         return false;
+    }
+
+    public get platform_fee(): number {
+        return this.fee;
+    }
+
+    public get mint_pubkey(): PublicKey {
+        return this.mint;
     }
 }
 

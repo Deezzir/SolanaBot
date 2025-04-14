@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
 import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
-import { VOLUME_RAYDIUM_SWAP_TAX } from '../constants.js';
+import * as trade from '../common/trade_common.js';
 
 type VolumeConfig = {
     type: VolumeType;
@@ -16,13 +16,12 @@ type VolumeConfig = {
 };
 
 export enum VolumeType {
-    Fast = 0,
-    Natural = 1
+    Fast = 'Fast',
+    Natural = 'Natural',
+    Bump = 'Bump'
 }
 
-export const VolumeTypeStrings = ['Fast', 'Natural'];
-
-export async function execute_fast(volume_config: VolumeConfig) {
+export async function execute_fast(volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
     for (let exec = 1; exec <= volume_config.executions; exec++) {
         common.log(common.blue(`Running execution: ${exec}`));
 
@@ -34,7 +33,11 @@ export async function execute_fast(volume_config: VolumeConfig) {
     common.log('The Fast Volume Bot completed');
 }
 
-export async function execute_natural(_volume_config: VolumeConfig) {
+export async function execute_natural(_volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
+    throw new Error('[ERROR] Not implemented.');
+}
+
+export async function execute_bump(_volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
     throw new Error('[ERROR] Not implemented.');
 }
 
@@ -52,12 +55,9 @@ async function get_config() {
                 type: 'list',
                 name: 'type',
                 message: 'Choose the type of the Volume Bot:',
-                choices: VolumeTypeStrings,
-                default: 0,
-                filter: (value: string) =>
-                    value.toLowerCase().includes(VolumeTypeStrings[VolumeType.Fast])
-                        ? VolumeType.Fast
-                        : VolumeType.Natural
+                choices: Object.values(VolumeType) as string[],
+                default: VolumeType.Fast,
+                filter: (value: string) => value as VolumeType
             }
         ]);
 
@@ -92,7 +92,7 @@ async function get_config() {
                 name: 'min_sol_amount',
                 message: 'Enter the minimum amount of SOL to buy (eg. 0.1):',
                 validate: (value: string) => {
-                    if (!common.validate_float(value, 0.001)) return 'Please enter a valid number greater than 0.001.';
+                    if (!common.validate_float(value, 0.0001)) return 'Please enter a valid number greater than 0.001.';
                     min_sol_amount = parseFloat(value);
                     return true;
                 },
@@ -103,7 +103,7 @@ async function get_config() {
                 name: 'max_sol_amount',
                 message: 'Enter the maximum amount of SOL to buy (eg. 0.5):',
                 validate: (value: string) => {
-                    if (!common.validate_float(value, 0.001)) return 'Please enter a valid number greater than 0.001.';
+                    if (!common.validate_float(value, 0.0001)) return 'Please enter a valid number greater than 0.001.';
                     if (parseFloat(value) < min_sol_amount)
                         return 'Please enter a number greater than the minimum amount.';
                     return true;
@@ -193,8 +193,10 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
     }
 }
 
-export async function simulate(volume_config: VolumeConfig) {
+export async function simulate(volume_config: VolumeConfig, trader: trade.IProgramTrader) {
     const sol_price = await common.fetch_sol_price();
+    const mint_meta = await trader.get_mint_meta(volume_config.mint);
+    if (!mint_meta) throw new Error('[ERROR] Failed to fetch mint metadata.');
 
     let total_tax_sol = 0;
     let total_volume_sol = 0;
@@ -204,7 +206,7 @@ export async function simulate(volume_config: VolumeConfig) {
         for (let j = 0; j < volume_config.wallet_cnt; j++) {
             const sol_amount = common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount);
 
-            total_tax_sol += sol_amount * VOLUME_RAYDIUM_SWAP_TAX * 2;
+            total_tax_sol += sol_amount * mint_meta.platform_fee * 2;
             total_volume_sol += sol_amount;
         }
         total_tax_sol += volume_config.jito_tip;
@@ -223,49 +225,37 @@ export async function simulate(volume_config: VolumeConfig) {
 
 async function validate_volume_config(json: any): Promise<VolumeConfig> {
     const required_fields = ['mint', 'executions', 'jito_tip', 'min_sol_amount', 'max_sol_amount'];
-
     for (const field of required_fields) {
         if (!json[field]) throw new Error(`[ERROR] Missing required field: ${field}`);
     }
-
     const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, jito_tip, simulate, type } = json;
-
     if (type !== undefined) {
-        if (typeof type === 'string' && VolumeTypeStrings.some((t) => t.toLowerCase() === type.toLowerCase())) {
-            json.type = VolumeTypeStrings.findIndex((t) => t.toLowerCase() === type.toLowerCase());
-        } else {
-            throw new Error("[ERROR] Invalid type, must be an either 'fast' or 'natural'.");
+        if (typeof type !== 'string' || !Object.values(VolumeType).includes(type as VolumeType)) {
+            throw new Error(`[ERROR] type must be a valid string, values: ${Object.values(VolumeType)}`);
         }
+        json.type = type as VolumeType;
     }
-
     if (!common.is_valid_pubkey(mint)) {
         throw new Error('[ERROR] Invalid Raydium Pair ID (AMM) public key.');
     }
-
     if (typeof min_sol_amount !== 'number' || min_sol_amount <= 0) {
         throw new Error('[ERROR] Invalid min_sol_amount number. Must be greater than 0.');
     }
-
     if (typeof max_sol_amount !== 'number' || max_sol_amount <= 0 || max_sol_amount < min_sol_amount) {
         throw new Error('[ERROR] Invalid max_sol_amount number. Must be greater than 0 and min_sol_amount.');
     }
-
     if (typeof executions !== 'number' || !Number.isInteger(executions) || executions <= 0) {
         throw new Error('[ERROR] Invalid executions number. Must be greater than 0.');
     }
-
     if (typeof jito_tip !== 'number' || jito_tip < 0.0) {
         throw new Error('[ERROR] Invalid jito_tip number. Must be greater than or equal to 0.');
     }
-
     if (simulate && typeof simulate !== 'boolean') {
         throw new Error('[ERROR] Invalid simulate.');
     }
-
     if (delay && simulate === false && (typeof delay !== 'number' || delay <= 0)) {
         throw new Error('[ERROR] Invalid delay number. Must be greater than 0.');
     }
-
     if (type) {
         if (
             type === VolumeType.Fast &&
@@ -278,10 +268,10 @@ async function validate_volume_config(json: any): Promise<VolumeConfig> {
             throw new Error('[ERROR] Invalid wallet_cnt number. Must be undefined for Natural type.');
         }
     }
-
     if (!('simulate' in json)) json.simulate = false;
     if (!('type' in json)) json.type = VolumeType.Fast;
     if (!('wallet_cnt' in json)) json.wallet_cnt = 1;
+    if (!('mint' in json)) json.mint = new PublicKey(mint);
 
     return json as VolumeConfig;
 }
@@ -289,11 +279,11 @@ async function validate_volume_config(json: any): Promise<VolumeConfig> {
 function log_volume_config(volume_config: VolumeConfig) {
     const to_print = {
         ...volume_config,
-        type: VolumeTypeStrings[volume_config.type],
-        amm: volume_config.mint.toString(),
+        type: VolumeType[volume_config.type],
+        mint: volume_config.mint.toString(),
         simulate: volume_config.simulate ? 'Yes' : 'No',
-        min_sol_amount: volume_config.min_sol_amount.toFixed(2),
-        max_sol_amount: volume_config.max_sol_amount.toFixed(2)
+        min_sol_amount: volume_config.min_sol_amount.toFixed(5),
+        max_sol_amount: volume_config.max_sol_amount.toFixed(5)
     };
 
     const max_length = Math.max(...Object.values(to_print).map((value) => value.toString().length));

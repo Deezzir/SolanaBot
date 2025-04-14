@@ -8,7 +8,7 @@ import {
     Keypair,
     AddressLookupTableAccount
 } from '@solana/web3.js';
-import { PriorityLevel, SOL_MINT } from '../constants.js';
+import { PriorityLevel, SOL_MINT, TRADE_RAYDIUM_SWAP_TAX } from '../constants.js';
 import * as trade from '../common/trade_common.js';
 import * as common from '../common/common.js';
 import { swap_raydium_instructions } from '../common/trade_dex.js';
@@ -65,6 +65,7 @@ class MoonshotMintMeta implements trade.IMintMeta {
         curvePosition: '',
         marketcapThreshold: ''
     };
+    fee: number = TRADE_RAYDIUM_SWAP_TAX;
 
     constructor(data: Partial<MoonshotMintMeta> = {}) {
         Object.assign(this, data);
@@ -88,6 +89,14 @@ class MoonshotMintMeta implements trade.IMintMeta {
 
     public get migrated(): boolean {
         return this.dexId && this.dexId !== '' ? true : false;
+    }
+
+    public get platform_fee(): number {
+        return this.fee;
+    }
+
+    public get mint_pubkey(): PublicKey {
+        return new PublicKey(this.baseToken.address);
     }
 }
 
