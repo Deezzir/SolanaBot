@@ -47,7 +47,8 @@ import {
     PUMP_SWAP_PERCENTAGE,
     PriorityLevel,
     PUMP_CREATE_DISCRIMINATOR,
-    PUMP_IPFS_API_URL
+    PUMP_IPFS_API_URL,
+    TRADE_RAYDIUM_SWAP_TAX
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
@@ -71,6 +72,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     usd_market_cap: number = 0;
     market_cap: number = 0;
     complete: boolean = false;
+    fee: number = PUMP_FEE_PERCENTAGE;
 
     constructor(data: Partial<PumpMintMeta> = {}) {
         Object.assign(this, data);
@@ -97,6 +99,14 @@ export class PumpMintMeta implements trade.IMintMeta {
             return true;
         }
         return false;
+    }
+
+    public get platform_fee(): number {
+        return this.platform_fee;
+    }
+
+    public get mint_pubkey(): PublicKey {
+        return new PublicKey(this.mint);
     }
 }
 
@@ -397,7 +407,8 @@ export class Trader {
                     quote_vault: amm_state.quote_vault.toString(),
                     sol_reserves: amm_state.quote_vault_balance,
                     token_reserves: amm_state.base_vault_balance,
-                    complete: true
+                    complete: true,
+                    fee: PUMP_SWAP_PERCENTAGE
                 });
             }
 
@@ -408,7 +419,8 @@ export class Trader {
                     usd_market_cap: metrics.mcap_sol * sol_price,
                     market_cap: metrics.mcap_sol,
                     total_supply: metrics.supply,
-                    complete: true
+                    complete: true,
+                    fee: TRADE_RAYDIUM_SWAP_TAX
                 });
             }
 

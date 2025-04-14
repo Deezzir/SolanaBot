@@ -33,6 +33,7 @@ export const IPFS_API = 'https://uploads.pinata.cloud/v3/files';
 export const IPFS_JWT = get_env_variable('PINATA_IPFS_JWT');
 
 // TRADE COMMON CONSTANTS
+export const TRADE_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
 export const TRADE_MAX_RETRIES = 0;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
 export const TRADE_MAX_SLIPPAGE = 5.0;
@@ -80,8 +81,8 @@ export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_IPFS_API_URL = 'https://pump.fun/api/ipfs';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
-export const PUMP_FEE_PERCENTAGE = 0.01;
-export const PUMP_SWAP_PERCENTAGE = 0.0025;
+export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
+export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%
 export const PUMP_BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
 export const PUMP_META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -106,6 +107,7 @@ export const SNIPE_MIN_BUY_THRESHOLD = 0.00001;
 export const SNIPE_MIN_BUY = 0.005;
 export const SNIPE_ITERATIONS = 1;
 export const SNIPE_META_UPDATE_INTERVAL_MS = 300;
+export const SNIPE_MIN_MCAP = 5000;
 
 // SPIDER CONSTANTS
 export const SPIDER_RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
@@ -118,7 +120,6 @@ export const DROP_AIRDROP_CSV = 'airdropusers.csv';
 export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
-export const VOLUME_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
 
 // WALLET PNL CONSTANTS
 export const PNL_BATCH_SIZE = 50;
