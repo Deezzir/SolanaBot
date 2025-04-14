@@ -159,7 +159,7 @@ export async function promote(
     await Promise.allSettled(transactions);
 }
 
-export async function spl_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
+export async function token_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
@@ -490,6 +490,7 @@ export async function buy_token(
     mint: PublicKey,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump,
+    protection_tip?: number,
     bundle_tip?: number,
     amount?: number,
     min?: number,
@@ -498,8 +499,10 @@ export async function buy_token(
 ): Promise<void> {
     const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
 
+    if (protection_tip && bundle_tip) throw new Error('[ERROR] Protection tip and bundle tip cannot be used together.');
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
     if (!amount && (!min || !max)) throw new Error('[ERROR] Either amount or min and max should be provided.');
+    if ((min && !max) || (!min && max)) throw new Error('[ERROR] Both min and max should be provided.');
     if (max && min && max < min) throw new Error('[ERROR] Invalid min and max values.');
 
     common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
@@ -521,7 +524,7 @@ export async function buy_token(
                 );
                 transactions.push(
                     trader
-                        .buy_token(buy_amount, buyer, mint_meta, SLIPPAGE, priority)
+                        .buy_token(buy_amount, buyer, mint_meta, SLIPPAGE, priority, protection_tip)
                         .then((signature) =>
                             common.log(
                                 common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`)
@@ -592,6 +595,7 @@ export async function sell_token(
     mint: PublicKey,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump,
+    protection_tip?: number,
     bundle_tip?: number,
     percent?: number,
     slippage?: number
@@ -599,6 +603,7 @@ export async function sell_token(
     const SLIPPAGE = slippage || COMMANDS_SELL_SLIPPAGE;
     const PERCENT = percent || 1.0;
 
+    if (protection_tip && bundle_tip) throw new Error('[ERROR] Protection tip and bundle tip cannot be used together.');
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
@@ -621,7 +626,7 @@ export async function sell_token(
                 );
                 transactions.push(
                     trader
-                        .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, priority)
+                        .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, priority, protection_tip)
                         .then((signature) =>
                             common.log(
                                 common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`)
@@ -992,11 +997,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         }
