@@ -152,7 +152,7 @@ async function main() {
     program
         .command('balance')
         .alias('b')
-        .description('Get the balance of the accounts')
+        .description('Get the balance of the wallets')
         .action(async () => await commands.balance(wallets));
 
     program
@@ -166,19 +166,19 @@ async function main() {
         .action(async (address) => await commands.wallet_pnl(address));
 
     program
-        .command('spl-balance')
-        .alias('sb')
-        .description('Get the total balance of a token of the accounts')
+        .command('token-balance')
+        .alias('tb')
+        .description('Get the total balance of a token of the wallets')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .action(async (mint) => await commands.spl_balance(wallets, mint));
+        .action(async (mint) => await commands.token_balance(wallets, mint));
 
     program
         .command('warmup')
         .alias('w')
-        .description('Warmup the accounts with the tokens')
+        .description('Warmup the wallets with the tokens')
         .option('-f, --from <number>', 'Warmup starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
@@ -194,14 +194,14 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
-        .option('-m, --min <number>', 'Minimum amount of tokens for each wallet', (value) => {
+        .option('--min <number>', 'Minimum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 1)
                 throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
             return parsed_value;
         })
-        .option('-M, --max <number>', 'Maximum amount of tokens for each wallet', (value) => {
+        .option('--max <number>', 'Maximum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 1 || parsed_value > 50)
@@ -232,7 +232,7 @@ async function main() {
     program
         .command('collect')
         .alias('c')
-        .description('Collect all the SOL from the accounts to the provided address')
+        .description('Collect all the SOL from the wallets to the provided address')
         .argument('<receiver>', 'Public address of the receiver', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
@@ -259,7 +259,7 @@ async function main() {
         });
 
     program
-        .command('spl-buy-once')
+        .command('buy-token-once')
         .alias('bto')
         .description('Buy the token once with the provided amount')
         .argument('<amount>', 'Amount to buy in SOL', (value) => {
@@ -307,7 +307,7 @@ async function main() {
         });
 
     program
-        .command('spl-sell-once')
+        .command('sell-token-once')
         .alias('sto')
         .description('Sell the token once with the provided amount')
         .argument('<mint>', 'Public address of the mint', (value) => {
@@ -357,27 +357,26 @@ async function main() {
         });
 
     program
-        .command('spl-buy')
+        .command('buy-token')
         .alias('bt')
-        .description('Buy the token by the mint from the accounts')
+        .description('Buy the token by the mint from the wallets')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
-        }) //   console.error(`Error on request ${i + 1}:`, error);
-
+        })
         .option('-a --amount <amount>', 'Amount to buy in SOL', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             return parsed_value;
         })
-        .option('-m, --min <number>', 'Minimum amount for random buy in SOL', (value) => {
+        .option('--min <number>', 'Minimum amount for random buy in SOL (cannot be used with "--amount" parameter)', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value <= 0.0)
                 throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
             return parsed_value;
         })
-        .option('-M, --max <number>', 'Maximum amount for random buy in SOL', (value) => {
+        .option('--max <number>', 'Maximum amount for random buy in SOL (cannot be used with "--amount" parameter)', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value <= 0.0)
@@ -412,6 +411,15 @@ async function main() {
             return parseFloat(value);
         })
         .addOption(
+            new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
+                .argParser((value) => {
+                    if (!common.validate_float(value, 0))
+                        throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+                    return parseFloat(value);
+                })
+                .conflicts('bundle')
+        )
+        .addOption(
             new Option('-pr, --priority <level>', 'specify priority level')
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
@@ -423,12 +431,13 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { amount, min, max, slippage, from, to, list, bundle, priority, program } = options;
+            const { amount, min, max, slippage, from, to, list, bundle, mev, priority, program } = options;
             await commands.buy_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
                 program,
+                mev,
                 bundle,
                 amount,
                 min,
@@ -438,9 +447,9 @@ async function main() {
         });
 
     program
-        .command('spl-sell')
+        .command('sell-token')
         .alias('st')
-        .description('Sell all the token by the mint from the accounts')
+        .description('Sell all the token by the mint from the wallets')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
@@ -480,6 +489,15 @@ async function main() {
             return parseFloat(value);
         })
         .addOption(
+            new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
+                .argParser((value) => {
+                    if (!common.validate_float(value, 0))
+                        throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+                    return parseFloat(value);
+                })
+                .conflicts('bundle')
+        )
+        .addOption(
             new Option('-pr, --priority <level>', 'specify priority level')
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
@@ -491,12 +509,13 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { percent, slippage, from, to, list, bundle, priority, program } = options;
+            const { percent, slippage, from, to, list, bundle, mev, priority, program } = options;
             await commands.sell_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
                 program,
+                mev,
                 bundle,
                 percent,
                 slippage
@@ -530,9 +549,9 @@ async function main() {
         });
 
     program
-        .command('spl-collect')
-        .alias('sc')
-        .description('Collect all the token by the mint from the accounts to the provided address')
+        .command('token-collect')
+        .alias('tc')
+        .description('Collect all the token by the mint from the wallets to the provided address')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
@@ -565,7 +584,7 @@ async function main() {
     program
         .command('topup')
         .alias('t')
-        .description('Topup the accounts with SOL using the provided wallet')
+        .description('Topup the wallets with SOL using the provided wallet')
         .argument('<amount>', 'Amount of SOL to topup', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
@@ -696,7 +715,7 @@ async function main() {
     program
         .command('clean')
         .alias('cl')
-        .description('Clean the accounts')
+        .description('Clean the wallets')
         .action(async () => await commands.clean(wallets));
 
     program
