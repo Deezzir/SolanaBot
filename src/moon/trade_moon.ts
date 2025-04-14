@@ -216,11 +216,16 @@ export class Trader {
 
     public static async create_token(
         _creator: Signer,
-        _meta: common.IPFSMetadata,
-        _cid: string,
-        _mint?: Keypair,
-        _sol_amount?: number
+        _token_name: string,
+        _token_symbol: string,
+        _meta_cid: string,
+        _sol_amount: number = 0,
+        _mint?: Keypair
     ): Promise<[String, PublicKey]> {
+        throw new Error('Not implemented');
+    }
+
+    public static async create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
         throw new Error('Not implemented');
     }
 

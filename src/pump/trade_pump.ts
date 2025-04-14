@@ -46,13 +46,16 @@ import {
     PUMP_SELL_DISCRIMINATOR,
     PUMP_SWAP_PERCENTAGE,
     PriorityLevel,
-    PUMP_CREATE_DISCRIMINATOR
+    PUMP_CREATE_DISCRIMINATOR,
+    PUMP_IPFS_API_URL
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
     get_raydium_token_metrics,
     swap_raydium_instructions
 } from '../common/trade_dex.js';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 
 export class PumpMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -259,18 +262,25 @@ export class Trader {
 
     public static async create_token(
         creator: Signer,
-        meta: common.IPFSMetadata,
-        cid: string,
-        mint?: Keypair,
-        sol_amount?: number
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        sol_amount: number = 0.0,
+        mint?: Keypair
     ): Promise<[String, PublicKey]> {
         if (!mint) mint = Keypair.generate();
-        const instructions = await this.get_create_token_instructions(creator, meta, cid, mint);
+        const instructions = await this.get_create_token_instructions(
+            creator,
+            token_name,
+            token_symbol,
+            meta_cid,
+            mint
+        );
 
-        if (sol_amount && sol_amount > 0) {
+        if (sol_amount > 0) {
             const token_meta = await this.default_mint_meta(mint.publicKey);
-            const [buy_instructions, _] = await this.get_buy_instructions(sol_amount, creator, token_meta, 0.05);
-            instructions.unshift(...buy_instructions);
+            const [buy_instructions] = await this.get_buy_instructions(sol_amount, creator, token_meta, 0.05);
+            instructions.push(...buy_instructions);
         }
 
         const sig = await trade.create_and_send_smart_tx(instructions, [creator, mint]);
@@ -561,7 +571,12 @@ export class Trader {
         return [instructions, undefined];
     }
 
-    private static create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
+    private static create_data(
+        token_name: string,
+        token_ticker: string,
+        meta_link: string,
+        creator: PublicKey
+    ): Buffer {
         const instruction_buf = Buffer.from(PUMP_CREATE_DISCRIMINATOR);
 
         const token_name_buf = Buffer.alloc(4 + token_name.length);
@@ -576,17 +591,20 @@ export class Trader {
         meta_link_buf.writeUInt32LE(meta_link.length, 0);
         meta_link_buf.write(meta_link, 4);
 
-        return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf]);
+        const creator_buf = creator.toBuffer();
+
+        return Buffer.concat([instruction_buf, token_name_buf, token_ticker_buf, meta_link_buf, creator_buf]);
     }
 
     private static async get_create_token_instructions(
         creator: Signer,
-        meta: common.IPFSMetadata,
-        cid: string,
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
         mint: Keypair
     ): Promise<TransactionInstruction[]> {
-        const meta_link = `${IPFS}${cid}`;
-        const instruction_data = this.create_data(meta.name, meta.symbol, meta_link);
+        const meta_link = `${IPFS}${meta_cid}`;
+        const instruction_data = this.create_data(token_name, token_symbol, meta_link, creator.publicKey);
         const [bonding] = this.calc_token_bonding_curve(mint.publicKey);
         const [assoc_bonding] = this.calc_token_assoc_bonding_curve(mint.publicKey, bonding);
         const [metaplex] = PublicKey.findProgramAddressSync(
@@ -854,5 +872,36 @@ export class Trader {
         instructions.push(createCloseAccountInstruction(wsol_ata, seller.publicKey, seller.publicKey));
 
         return [instructions, undefined];
+    }
+
+    public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+        let formData = new FormData();
+        const image_file = new File([readFileSync(image_path)], basename(image_path), {
+            type: 'image/png'
+        });
+        formData.append('file', image_file);
+        formData.append('name', meta.name);
+        formData.append('symbol', meta.symbol);
+        formData.append('description', meta.description);
+        formData.append('twitter', meta.twitter || '');
+        formData.append('telegram', meta.telegram || '');
+        formData.append('website', meta.website || '');
+        formData.append('showName', 'true');
+
+        try {
+            const response = await fetch(PUMP_IPFS_API_URL, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json'
+                },
+                body: formData,
+                credentials: 'same-origin'
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            return data.metadataUri.split('/').slice(-1)[0];
+        } catch (error) {
+            throw new Error(`Failed to create token metadata: ${error}`);
+        }
     }
 }
