@@ -91,11 +91,13 @@ export interface IProgramTrader {
     ): Promise<String>;
     create_token(
         creator: Signer,
-        meta: common.IPFSMetadata,
-        cid: string,
-        mint?: Keypair,
-        sol_amount?: number
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        sol_amount?: number,
+        mint?: Keypair
     ): Promise<[String, PublicKey]>;
+    create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string>;
     get_random_mints(count: number): Promise<IMintMeta[]>;
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
     update_mint_meta(mint_meta: IMintMeta, sol_price?: number): Promise<IMintMeta>;
@@ -408,6 +410,7 @@ export async function get_priority_fee(priority_opts: PriorityOptions): Promise<
 
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
+    if (signers.length === 0) throw new Error(`No signers provided.`);
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {
         skipPreflight: true,
         preflightCommitment: COMMITMENT,

@@ -273,7 +273,7 @@ async function main() {
         })
         .argument('<buyer_index>', 'Index of the buyer wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const buyer_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!buyer_wallet) throw new InvalidArgumentError('Invalid index.');
             return buyer_wallet.keypair;
@@ -316,7 +316,7 @@ async function main() {
         })
         .argument('<seller_index>', 'Index of the seller wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const seller_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!seller_wallet) throw new InvalidArgumentError('Invalid index.');
             return seller_wallet.keypair;
@@ -519,7 +519,7 @@ async function main() {
         })
         .argument('<sender_index>', 'Index of the sender wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
@@ -574,7 +574,7 @@ async function main() {
         })
         .argument('<sender_index>', 'Index of the sender wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
@@ -614,9 +614,9 @@ async function main() {
         });
 
     program
-        .command('metadata')
-        .alias('m')
-        .description('Upload the metadata of the token using the provided JSON file')
+        .command('create-metadata')
+        .alias('cm')
+        .description('Upload the metadata of the token using the provided JSON file and image')
         .argument('<json_path>', 'Path to the JSON file', (value) => {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             const json = common.read_json(value);
@@ -627,9 +627,8 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Image file does not exist.');
             return value;
         })
-        .action(async (json_path, image_path) => {
-            console.log('Uploading metadata...');
-            console.log(`CID: ${await common.create_metadata(json_path, image_path)}`);
+        .action(async (json, image_path) => {
+            await commands.create_token_metadata(json, image_path);
         });
 
     program
@@ -642,10 +641,10 @@ async function main() {
             if (parsed_value < 1) throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
             return parsed_value;
         })
-        .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
+        .argument('<cid>', 'CID of the metadata on IPFS')
         .argument('<creator_index>', 'Index of the creator wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
             return creator_wallet.keypair;
@@ -664,10 +663,10 @@ async function main() {
         .command('create-token')
         .alias('ct')
         .description('Create a token')
-        .argument('<cid>', 'CID of the metadata on Quicknode IPFS')
+        .argument('<cid>', 'CID of the metadata on IPFS')
         .argument('<creator_index>', 'Index of the creator wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
             const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
             return creator_wallet;
@@ -710,19 +709,19 @@ async function main() {
         })
         .argument('<drop_index>', 'Index of the drop wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidArgumentError(`Not a valid range (0-${wallet_cnt}).`);
+                throw new InvalidArgumentError(`Not a valid range (0-  ${wallet_cnt}).`);
             const drop_wallet = common.get_wallet(parseInt(value, 10), wallets);
             if (!drop_wallet) throw new InvalidArgumentError('Invalid index.');
             return drop_wallet.keypair;
         })
         .option('-ap, --airdrop <percent>', 'Percent of tokens to be airdroped', (value) => {
-            const parsed_value = parseInt(value);
+            const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             if (parsed_value < 0 || parsed_value > 1.0) throw new InvalidArgumentError('Invalid range (0.0 - 1.0).');
             return parsed_value;
         })
         .option('-pp, --presale <percent>', 'Turn on the presale', (value) => {
-            const parsed_value = parseInt(value);
+            const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 0 || parsed_value > 1.0)
                 throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
@@ -747,8 +746,8 @@ async function main() {
             DROP_PRESALE_CSV
         )
         .action(async (mint, drop, options) => {
-            const { presale, airdrop, airdrop_file, presale_file } = options;
-            await commands.drop(mint, drop, airdrop_file, presale_file, airdrop, presale);
+            const { presale, airdrop, airdropFile, presaleFile } = options;
+            await commands.drop(mint, drop, airdropFile, presaleFile, airdrop, presale);
         });
 
     program

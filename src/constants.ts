@@ -78,6 +78,7 @@ export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL
 
 // PUMP CONSTANTS
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
+export const PUMP_IPFS_API_URL = 'https://pump.fun/api/ipfs';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01;
 export const PUMP_SWAP_PERCENTAGE = 0.0025;

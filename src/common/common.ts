@@ -1,5 +1,4 @@
 import { readFileSync } from 'fs';
-import { basename } from 'path';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
@@ -8,8 +7,6 @@ import {
     COMMANDS_DELAY_MS,
     COMMANDS_MAX_RETRIES,
     IPFS,
-    IPFS_API,
-    IPFS_JWT,
     PUMP_FETCH_API_URL,
     WALLETS_FILE_HEADERS
 } from '../constants.js';
@@ -39,21 +36,6 @@ export type IPFSMetadata = {
     twitter: string | undefined;
     telegram: string | undefined;
     website: string | undefined;
-};
-
-type IPFSResponse = {
-    data: {
-        id: string;
-        name: string;
-        cid: string;
-        created_at: string;
-        size: number;
-        number_of_files: number;
-        mime_type: string;
-        user_id: string;
-        group_id: string;
-        is_duplicate: boolean;
-    };
 };
 
 export enum Program {
@@ -243,60 +225,13 @@ export function read_json(file_path: string): object {
 }
 
 export async function fetch_ipfs_json(cid: string): Promise<IPFSMetadata> {
-    const url = `${IPFS_API}${cid}`;
     try {
-        const response = await fetch(url);
+        const response = await fetch(`${IPFS}${cid}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         return data as IPFSMetadata;
     } catch (error) {
         throw new Error(`[ERROR] Failed to fetch IPFS JSON: ${error}`);
-    }
-}
-
-async function upload_ipfs(file: File): Promise<IPFSResponse> {
-    const form_data = new FormData();
-
-    form_data.append('file', file);
-    form_data.append('network', 'public');
-    form_data.append('name', file.name);
-
-    const request: RequestInit = {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${IPFS_JWT}` },
-        body: form_data
-    };
-
-    try {
-        const response = await fetch(IPFS_API, request);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        return data as IPFSResponse;
-    } catch (error) {
-        throw new Error(`Failed to upload to IPFS: ${error}`);
-    }
-}
-
-export async function create_metadata(meta: IPFSMetadata, image_path: string): Promise<string> {
-    try {
-        const uuid = crypto.randomUUID();
-        const image_file = new File([readFileSync(image_path)], `${uuid}-${basename(image_path)}`, {
-            type: 'image/png'
-        });
-        const image_resp = await upload_ipfs(image_file);
-        meta.image = `${IPFS}${image_resp.data.cid}`;
-
-        const json = JSON.stringify(meta);
-        const json_blob = new Blob([json]);
-        const json_file = new File([json_blob], `${uuid}-metadata.json`, { type: 'application/json' });
-        const meta_resp = await upload_ipfs(json_file);
-        return meta_resp.data.cid;
-    } catch (error) {
-        if (error instanceof Error) {
-            throw new Error(`[ERROR] Failed to create metadata: ${error.message}`);
-        } else {
-            throw new Error(`[ERROR] Failed to create metadata: ${error}`);
-        }
     }
 }
 

@@ -23,10 +23,14 @@ type PresaleUser = {
 
 function read_csv<T>(file_path: string): T[] {
     const content = readFileSync(file_path, 'utf8');
-    return parse(content, {
-        columns: true,
-        skip_empty_lines: true
-    }) as T[];
+    try {
+        return parse(content, {
+            columns: true,
+            skip_empty_lines: true
+        }) as T[];
+    } catch (error) {
+        throw new Error(`Error parsing CSV file: ${error}`);
+    }
 }
 
 function write_csv<T extends Record<string, any>>(file_path: string, data: T[]): void {
@@ -197,15 +201,11 @@ export async function execute(
     airdrop_csv_file: string,
     presale_csv_file: string
 ): Promise<void> {
-    if (airdrop_percent < 0 || presale_percent < 0) {
-        throw new Error('Percentages must be non-negative');
-    }
-    if (airdrop_percent + presale_percent > 1) {
-        throw new Error('Combined percentages cannot exceed 100%');
-    }
-    if (token_balance <= 0) {
-        throw new Error('Token balance must be greater than 0');
-    }
+    if (airdrop_percent < 0 || presale_percent < 0) throw new Error('Percentages must be non-negative');
+    if (airdrop_percent === 0 && presale_percent === 0)
+        throw new Error('At least one percentage must be greater than 0');
+    if (airdrop_percent + presale_percent > 1) throw new Error('Combined percentages cannot exceed 100%');
+    if (token_balance <= 0) throw new Error('Token balance must be greater than 0');
 
     if (presale_percent > 0) await presale_csv(presale_percent, token_balance, mint_meta, drop, presale_csv_file);
     if (airdrop_percent > 0) await airdrop_csv(airdrop_percent, token_balance, mint_meta, drop, airdrop_csv_file);

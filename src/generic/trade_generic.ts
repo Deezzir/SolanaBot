@@ -9,8 +9,23 @@ import {
 } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import { PriorityLevel, SOL_MINT, TRADE_DEFAULT_CURVE_DECIMALS } from '../constants.js';
+import { IPFS, IPFS_API, IPFS_JWT, PriorityLevel, SOL_MINT, TRADE_DEFAULT_CURVE_DECIMALS } from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
+
+type IPFSResponse = {
+    id: string;
+    name: string;
+    cid: string;
+    created_at: string;
+    size: number;
+    number_of_files: number;
+    mime_type: string;
+    user_id: string;
+    group_id: string;
+    is_duplicate: boolean;
+};
 
 class GenericMintMeta implements trade.IMintMeta {
     mint!: PublicKey;
@@ -163,10 +178,11 @@ export class Trader {
 
     public static async create_token(
         _creator: Signer,
-        _meta: common.IPFSMetadata,
-        _cid: string,
-        _mint?: Keypair,
-        _sol_amount?: number
+        _token_name: string,
+        _token_symbol: string,
+        _meta_cid: string,
+        _sol_amount: number = 0,
+        _mint?: Keypair
     ): Promise<[String, PublicKey]> {
         throw new Error('Token creation is not supported by Generic program');
     }
@@ -194,5 +210,51 @@ export class Trader {
             usd_market_cap,
             market_cap
         });
+    }
+
+    public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+        try {
+            const uuid = crypto.randomUUID();
+            const image_file = new File([readFileSync(image_path)], `${uuid}-${basename(image_path)}`, {
+                type: 'image/png'
+            });
+            const image_resp = await this.upload_ipfs(image_file);
+            meta.image = `${IPFS}${image_resp.cid}`;
+
+            const json = JSON.stringify(meta);
+            const json_blob = new Blob([json]);
+            const json_file = new File([json_blob], `${uuid}-metadata.json`, { type: 'application/json' });
+            const meta_resp = await this.upload_ipfs(json_file);
+            return meta_resp.cid;
+        } catch (error) {
+            if (error instanceof Error) {
+                throw new Error(`[ERROR] Failed to create metadata: ${error.message}`);
+            } else {
+                throw new Error(`[ERROR] Failed to create metadata: ${error}`);
+            }
+        }
+    }
+
+    private static async upload_ipfs(file: File): Promise<IPFSResponse> {
+        const form_data = new FormData();
+
+        form_data.append('file', file);
+        form_data.append('network', 'public');
+        form_data.append('name', file.name);
+
+        const request: RequestInit = {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${IPFS_JWT}` },
+            body: form_data
+        };
+
+        try {
+            const response = await fetch(IPFS_API, request);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            return data.data as IPFSResponse;
+        } catch (error) {
+            throw new Error(`Failed to upload to IPFS: ${error}`);
+        }
     }
 }

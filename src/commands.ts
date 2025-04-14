@@ -82,30 +82,45 @@ export async function clean(wallets: common.Wallet[]): Promise<void> {
     }
 }
 
+export async function create_token_metadata(json: common.IPFSMetadata, image_path: string) {
+    const trader = get_trader(common.Program.Pump);
+    common.log(common.yellow('Uploading metadata...'));
+    const cid = await trader.create_token_metadata(json, image_path);
+    common.log(`CID: ${common.bold(cid)}`);
+}
+
 export async function create_token(
-    cid: string,
-    dev: Keypair,
+    meta_cid: string,
+    dev: common.Wallet,
     program: common.Program = common.Program.Pump,
     dev_buy?: number,
     mint?: Keypair
 ): Promise<void> {
     common.log('Creating a token...\n');
+    dev_buy = dev_buy || 0;
 
     const trader = get_trader(program);
-    const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
-    const meta = await common.fetch_ipfs_json(cid);
+    const balance = (await trade.get_balance(dev.keypair.publicKey)) / LAMPORTS_PER_SOL;
+    const meta = await common.fetch_ipfs_json(meta_cid);
 
     if (dev_buy && dev_buy > balance) throw new Error(`[ERROR] Dev balance is not enough to buy for ${dev_buy} SOL`);
 
-    common.log(common.yellow(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
+    common.log(common.yellow(`Dev: ${dev.keypair.publicKey.toString()} | Balance: ${balance.toFixed(2)} SOL`));
+    common.log(common.bold(`Dev Buy: ${dev_buy.toFixed(2)} SOL\n`));
     if (mint) common.log(`Custom Mint address: ${mint.publicKey.toString()}`);
-    common.log(`Token name: ${meta.name} | Symbol: ${meta.symbol}`);
+    common.log(common.yellow(`Token Name: ${meta.name} | Symbol: $${meta.symbol}`));
     common.log(`Token Meta: ${JSON.stringify(meta, null, 2)}`);
-    common.log(`Dev Buy: ${dev_buy || 0}\n`);
 
     try {
-        const [sig, mint_addr] = await trader.create_token(dev, meta, cid, mint, dev_buy);
-        common.log(common.bold(`Token created | Signature: ${sig}`));
+        const [sig, mint_addr] = await trader.create_token(
+            dev.keypair,
+            meta.name,
+            meta.symbol,
+            meta_cid,
+            dev_buy,
+            mint
+        );
+        common.log(common.bold(`\nToken created | Signature: ${sig}`));
         common.log(common.bold(`Mint address: ${mint_addr}`));
     } catch (error) {
         throw new Error(`[ERROR] Failed to create token: ${error}`);
@@ -114,15 +129,15 @@ export async function create_token(
 
 export async function promote(
     times: number,
-    cid: string,
+    meta_cid: string,
     dev: Keypair,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    common.log(common.yellow(`Creating ${times} tokens with CID ${cid}...\n`));
+    common.log(common.yellow(`Creating ${times} tokens with CID ${meta_cid}...\n`));
 
     const trader = get_trader(program);
     const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
-    const meta = await common.fetch_ipfs_json(cid);
+    const meta = await common.fetch_ipfs_json(meta_cid);
 
     common.log(common.bold(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
     common.log(common.bold(`Token name: ${meta.name} | Symbol: ${meta.symbol}\n`));
@@ -132,7 +147,7 @@ export async function promote(
     while (times > 0) {
         transactions.push(
             trader
-                .create_token(dev, meta, cid)
+                .create_token(dev, meta.name, meta.symbol, meta_cid)
                 .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
                 .catch((error) => common.error(`Transaction failed: ${error.message}`))
         );
@@ -1014,7 +1029,9 @@ export async function drop(
     presale_percent: number = 0
 ): Promise<void> {
     common.log(common.yellow(`Dropping the mint ${mint.toString()}...`));
-    common.log(common.yellow(`Airdrop percent: ${airdrop_percent}% | Presale percent: ${presale_percent}%`));
+    common.log(
+        common.yellow(`Airdrop percent: ${airdrop_percent * 100}% | Presale percent: ${presale_percent * 100}%`)
+    );
 
     const mint_meta = await trade.get_token_meta(mint);
     common.log(`Token name: ${mint_meta.token_name} | Symbol: ${mint_meta.token_symbol}\n`);
@@ -1032,5 +1049,13 @@ export async function drop(
         throw new Error('[ERROR] Failed to get dropper balance');
     }
 
-    token_drop.execute(drop, token_balance, mint_meta, airdrop_percent, presale_percent, airdrop_path, presale_path);
+    await token_drop.execute(
+        drop,
+        token_balance,
+        mint_meta,
+        airdrop_percent,
+        presale_percent,
+        airdrop_path,
+        presale_path
+    );
 }
