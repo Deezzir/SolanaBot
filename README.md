@@ -37,36 +37,38 @@ npm run build
 6. Run the project
 
 ```bash
-node dist/bot.js -h
+> node dist/bot.js -h
 
 Usage: bot [options] [command]
 
 Solana Bot CLI
 
 Options:
-  -V, --version                                             output the version number
-  -h, --help                                                display help for command
+  -V, --version                                               output the version number
+  -k, --keys <path>                                           Path to the CSV file with the wallets (default: keys.csv)
+  -h, --help                                                  display help for command
 
 Commands:
-  start|s [options]                                         Start the bot
-  generate|g [options] <count> <name>                       Generate the keypairs. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.
-  balance|b                                                 Get the balance of the accounts
-  spl-balance|sb <mint>                                     Get the total balance of a token of the accounts
-  warmup|w [options]                                        Warmup the accounts with the tokens
-  collect|c [options] <receiver>                            Collect all the SOL from the accounts to the provided address
-  spl-buy-once|bto [options] <amount> <mint> <buyer_index>  Buy the token once with the provided amount
-  spl-sell-once|sto [options] <mint> <seller_index>         Sell the token once with the provided amount
-  spl-buy|bt [options] <amount> <mint>                      Buy the token by the mint from the accounts
-  spl-sell|st [options] <mint>                              Sell all the token by the mint from the accounts
-  transfer|tr <amount> <receiver> <sender_index>            Transfer SOL from the specified keypair to the receiver
-  spl-collect|sc [options] <mint> <receiver>                Collect all the token by the mint from the accounts to the provided address
-  topup|t [options] <amount> <sender_index>                 Topup the accounts with SOL using the provided keypair
-  metadata|m <json_path> <image_path>                       Upload the metadata of the token using the provided JSON file
-  promote|pr [options] <count> <cid> <creator_index>        Create promotion tokens using the provided keypair
-  create-token|ct [options] <cid> <creator_index>           Create a token
-  clean|cl                                                  Clean the accounts
-  drop|dr [options] <airdrop> <mint> <drop_index>           Do the drop
-  clear-drop|cd <airdrop_file_path>                         Clear the drop
-  benchmark [options] <requests>                            Benchmark the RPC node
-  help [command]                                            display help for command
+  snipe|sn [options]                                          Start the snipe bot
+  volume|v [options]                                          Generate the volume for a token
+  generate|g [options] <count> <name>                         Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.
+  balance|b                                                   Get the balance of the wallets
+  wallet-pnl|pnl <address>                                    Get the PNL of the wallet
+  token-balance|tb <mint>                                     Get the total balance of a token of the wallets
+  warmup|w [options]                                          Warmup the wallets with the tokens
+  collect|c [options] <receiver>                              Collect all the SOL from the wallets to the provided address
+  buy-token-once|bto [options] <amount> <mint> <buyer_index>  Buy the token once with the provided amount
+  sell-token-once|sto [options] <mint> <seller_index>         Sell the token once with the provided amount
+  buy-token|bt [options] <mint>                               Buy the token by the mint from the wallets
+  sell-token|st [options] <mint>                              Sell all the token by the mint from the wallets
+  transfer|tr <amount> <receiver> <sender_index>              Transfer SOL from the specified keypair to the receiver
+  token-collect|tc [options] <mint> <receiver>                Collect all the token by the mint from the wallets to the provided address
+  topup|t [options] <amount> <sender_index>                   Topup the wallets with SOL using the provided wallet
+  create-metadata|cm <json_path> <image_path>                 Upload the metadata of the token using the provided JSON file and image
+  promote|pr [options] <count> <cid> <creator_index>          Create promotion tokens using the provided wallet
+  create-token|ct [options] <cid> <creator_index>             Create a token
+  clean|cl                                                    Clean the wallets
+  drop|dr [options] <mint> <drop_index>                       Do the drop
+  benchmark|bh [options] <requests>                           Benchmark the RPC node
+  help [command]                                              display help for command
 ```

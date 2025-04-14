@@ -108,7 +108,7 @@ async function main() {
     program
         .command('volume')
         .alias('v')
-        .description('Generate the volume for the Raydium pool')
+        .description('Generate the volume for a token')
         .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
@@ -163,8 +163,8 @@ async function main() {
     program
         .command('wallet-pnl')
         .alias('pnl')
-        .description('Get the PNL of the account')
-        .argument('<address>', 'Public address of the account', (value) => {
+        .description('Get the PNL of the wallet')
+        .argument('<address>', 'Public address of the wallet', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not a address.');
             return new PublicKey(value);
         })
@@ -637,7 +637,7 @@ async function main() {
                 return parsed_value;
             }
         )
-        .addOption(new Option('-s, --spider', 'Topup the account using the spider').default(false).conflicts('depth'))
+        .addOption(new Option('-s, --spider', 'Topup the wallets using the spider').default(false).conflicts('depth'))
         .option('-r, --random', 'Topup with random values using <amount> argument as a mean value', false)
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {
