@@ -795,7 +795,7 @@ export class Trader {
                 SystemProgram.transfer({
                     fromPubkey: buyer.publicKey,
                     toPubkey: wsol_ata,
-                    lamports: sol_amount_raw
+                    lamports: this.calc_slippage_up(sol_amount_raw, slippage)
                 }),
                 createSyncNativeInstruction(wsol_ata)
             ]
@@ -898,7 +898,7 @@ export class Trader {
         formData.append('twitter', meta.twitter || '');
         formData.append('telegram', meta.telegram || '');
         formData.append('website', meta.website || '');
-        formData.append('showName', 'true');
+        formData.append('showName', meta.showName ? 'true' : 'false');
 
         try {
             const response = await fetch(PUMP_IPFS_API_URL, {

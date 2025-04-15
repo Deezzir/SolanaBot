@@ -71,7 +71,22 @@ export async function bundle_sell(
     bundle_tip: number,
     priority: PriorityLevel
 ): Promise<void> {
-    const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
+    const wallets_with_balance = (
+        await Promise.all(
+            wallets.map(async (wallet) => {
+                const token_amount = await trade.get_token_balance(wallet.keypair.publicKey, mint_meta.mint_pubkey, COMMITMENT);
+                if (token_amount && token_amount.uiAmount && token_amount.uiAmount > 0) {
+                    return {
+                        ...wallet,
+                        token_amount
+                    };
+                }
+                return null;
+            })
+        )
+    ).filter((wallet) => wallet !== null);
+
+    const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     let priority_fee: number | undefined = undefined;
     for (const wallet_bundle of wallet_bundles) {
@@ -79,11 +94,11 @@ export async function bundle_sell(
         const signers: Signer[][] = [];
         for (const wallet of wallet_bundle) {
             const seller = wallet.keypair;
+            const token_amount_to_sell = trade.get_token_amount_by_percent(wallet.token_amount, percent);
             try {
-                const token_amount = await trade.get_token_balance(seller.publicKey, mint_meta.mint_pubkey, COMMITMENT);
-                if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
-                const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
-
+                common.log(
+                    `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                );
                 const [instrs] = await trader.sell_token_instructions(
                     token_amount_to_sell,
                     seller,

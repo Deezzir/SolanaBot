@@ -281,7 +281,7 @@ async function create_and_send_protected_tx(
         await check_transaction_status(jito_tx_signature, ctx);
         return responses[0];
     } else {
-        throw new Error(`Failed to send the bundle, no successfull response from the JITO endpoints`);
+        throw new Error(`Failed to send the protected transaction, no successfull response from the JITO endpoints`);
     }
 }
 
@@ -304,7 +304,7 @@ export async function create_and_send_bundle(
 
     let serialized_txs = [];
     for (let i = 0; i < instructions.length; i++) {
-        if (i === 0) {
+        if (i === instructions.length - 1) {
             instructions[i].push(
                 SystemProgram.transfer({
                     fromPubkey: signers[i][0].publicKey,

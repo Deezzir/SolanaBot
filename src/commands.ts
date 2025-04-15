@@ -433,7 +433,7 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
         );
         transactions.push(
             trade
-                .send_lamports(amount, sender, receiver, PriorityLevel.DEFAULT)
+                .send_lamports(amount, sender, receiver, PriorityLevel.HIGH)
                 .then((signature) =>
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                 )
@@ -620,7 +620,7 @@ export async function snipe(
 
     const sol_price = await common.fetch_sol_price();
     const sniper = get_sniper(program);
-    await sniper.setup_config(wallet_pnl.length, json_config);
+    await sniper.setup_config(wallets.length, json_config);
     await sniper.snipe(wallets, sol_price);
 }
 
@@ -847,11 +847,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         }

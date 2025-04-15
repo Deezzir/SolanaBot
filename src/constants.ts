@@ -105,12 +105,14 @@ export const SNIPE_BUY_SLIPPAGE = 0.85;
 export const SNIPE_SELL_SLIPPAGE = 0.5;
 export const SNIPE_MIN_BUY_THRESHOLD = 0.00001;
 export const SNIPE_MIN_BUY = 0.005;
-export const SNIPE_ITERATIONS = 1;
+export const SNIPE_TRADE_BATCH = 1;
 export const SNIPE_META_UPDATE_INTERVAL_MS = 300;
 export const SNIPE_MIN_MCAP = 5000;
+export const SNIPE_RETRY_ITERATIONS = 5;
+export const SNIPE_RETRY_INTERVAL_MS = 500;
 
 // SPIDER CONSTANTS
-export const SPIDER_RESCUE_DIR_PATH: string = process.env.PROCESS_DIR_PATH || '.rescue';
+export const SPIDER_RESCUE_DIR_PATH: string = '.rescue';
 export const SPIDER_EXTRA_SOL: number = 0.005;
 export const SPIDER_INTERVAL_MS: number = 1000;
 

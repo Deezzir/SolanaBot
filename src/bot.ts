@@ -632,7 +632,7 @@ async function main() {
             (value) => {
                 const parsed_value = parseInt(value);
                 if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-                if (parsed_value < 1 || parsed_value > 5)
+                if (parsed_value < 1 || parsed_value > 20)
                     throw new InvalidOptionArgumentError('Invalid transfers. Must be greater than 0 and less than 5.');
                 return parsed_value;
             }
@@ -785,7 +785,7 @@ async function main() {
     program
         .command('benchmark')
         .alias('bh')
-        .description('Benchmark the RPC node')
+        .description('Benchmark the RPC connection')
         .argument('<requests>', 'Number of requests to send', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');

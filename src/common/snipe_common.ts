@@ -349,7 +349,7 @@ export abstract class SniperBase implements ISniper {
         if (mint !== undefined) {
             if (token_name !== undefined || token_ticker !== undefined)
                 throw new Error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
-            if (!common.is_valid_pubkey(mint) || (await this.trader.get_mint_meta(mint)) === undefined) {
+            if (!common.is_valid_pubkey(mint) || (await this.trader.get_mint_meta(new PublicKey(mint))) === undefined) {
                 throw new Error('[ERROR] Invalid mint public key.');
             }
             json.mint = new PublicKey(json.mint);
@@ -360,8 +360,8 @@ export abstract class SniperBase implements ISniper {
         ) {
             throw new Error('[ERROR] Both token name and token ticker are required.');
         }
-        if (typeof spend_limit !== 'number' || spend_limit <= SNIPE_MIN_MCAP) {
-            throw new Error(`[ERROR] spend_limit must be a number greater than ${SNIPE_MIN_MCAP}.`);
+        if (typeof spend_limit !== 'number' || spend_limit <= SNIPE_MIN_BUY) {
+            throw new Error(`[ERROR] spend_limit must be a number greater than ${SNIPE_MIN_BUY}.`);
         }
         if (typeof start_buy !== 'number' || start_buy <= SNIPE_MIN_BUY || start_buy > spend_limit) {
             throw new Error(

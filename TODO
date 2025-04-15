@@ -1,5 +1,6 @@
 # TODO
 
+- Warmup without bundles
 - Cache for blockhash and priority functions
 - Add Volume and bump bot
 - Remove raydium sdk dependancy
