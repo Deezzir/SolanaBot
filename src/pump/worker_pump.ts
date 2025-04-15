@@ -9,9 +9,11 @@ import {
     COMMITMENT,
     HELIUS_API_KEY,
     HELIUS_RPC,
-    SNIPE_ITERATIONS,
+    SNIPE_TRADE_BATCH,
     SNIPE_MIN_BUY,
-    SNIPE_MIN_BUY_THRESHOLD
+    SNIPE_MIN_BUY_THRESHOLD,
+    SNIPE_RETRY_ITERATIONS,
+    SNIPE_RETRY_INTERVAL_MS
 } from '../constants.js';
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
@@ -62,7 +64,7 @@ async function process_buy(promise: Promise<String>, amount: number) {
     } catch (error) {
         if (error instanceof Error) {
             if (error.message.includes('Simulation failed')) {
-                await common.sleep(0.5 * 1000);
+                await common.sleep(SNIPE_RETRY_INTERVAL_MS);
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Buy simulation failed, retrying...`);
             } else {
                 MESSAGE_BUFFER.push(
@@ -81,7 +83,7 @@ const buy = async () => {
 
     while (!IS_DONE && !bought) {
         let transactions = [];
-        let count = SNIPE_ITERATIONS;
+        let count = SNIPE_TRADE_BATCH;
         while (count > 0) {
             const buy_promise = pump.Trader.buy_token(
                 amount,
@@ -98,7 +100,7 @@ const buy = async () => {
             );
 
             count--;
-            await common.sleep(0.5 * 1000);
+            await common.sleep(SNIPE_RETRY_INTERVAL_MS);
         }
         await Promise.allSettled(transactions);
 
@@ -115,7 +117,7 @@ async function process_sell(promise: Promise<String>, balance: TokenAmount) {
     } catch (error) {
         if (error instanceof Error) {
             if (error.message.includes('Simulation failed')) {
-                await common.sleep(0.5 * 1000);
+                await common.sleep(SNIPE_RETRY_INTERVAL_MS);
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sell simulation failed, retrying...`);
             } else {
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error selling the token, ${error.message} retrying...`);
@@ -132,19 +134,19 @@ const sell = async () => {
         let get_balance_retry = 0;
         let balance: TokenAmount | undefined = undefined;
 
-        while (get_balance_retry < SNIPE_ITERATIONS) {
+        while (get_balance_retry < SNIPE_RETRY_ITERATIONS) {
             try {
                 balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
 
-                if (get_balance_retry < SNIPE_ITERATIONS)
+                if (get_balance_retry < SNIPE_RETRY_ITERATIONS)
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
-                if (get_balance_retry === SNIPE_ITERATIONS) {
+                if (get_balance_retry === SNIPE_RETRY_ITERATIONS) {
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
                     sold = true;
                 }
-                await common.sleep(5 * 1000);
+                await common.sleep(SNIPE_RETRY_INTERVAL_MS * get_balance_retry);
             } catch (e) {
                 MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Error getting the balance, retrying...`);
                 get_balance_retry++;
@@ -154,8 +156,7 @@ const sell = async () => {
         if (sold) break;
 
         let transactions = [];
-        let count = SNIPE_ITERATIONS;
-
+        let count = SNIPE_TRADE_BATCH;
         parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Selling ${balance?.uiAmount} tokens`);
         while (count > 0 && balance !== undefined) {
             const sell_promise = pump.Trader.sell_token(
@@ -173,7 +174,7 @@ const sell = async () => {
             );
 
             count--;
-            await common.sleep(0.5 * 1000);
+            await common.sleep(SNIPE_RETRY_INTERVAL_MS);
         }
         await Promise.allSettled(transactions);
     }
@@ -210,7 +211,7 @@ const control_loop = async () =>
             if (!IS_DONE) {
                 const ms = should_buy()
                     ? common.normal_random(WORKER_CONF.buy_interval, 0.5 * WORKER_CONF.buy_interval) * 1000
-                    : 0.2 * 1000;
+                    : SNIPE_RETRY_INTERVAL_MS;
 
                 if (!WORKER_CONF.is_buy_once && should_buy())
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Sleeping for ${(ms / 1000).toFixed(2)} seconds`);

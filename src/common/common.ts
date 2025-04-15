@@ -31,8 +31,8 @@ export type IPFSMetadata = {
     symbol: string;
     description: string;
     image: string | undefined;
-    showName: boolean;
-    createdOn: string;
+    showName: boolean | undefined;
+    createdOn: string | undefined;
     twitter: string | undefined;
     telegram: string | undefined;
     website: string | undefined;

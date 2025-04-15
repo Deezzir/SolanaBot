@@ -309,7 +309,7 @@ export async function run_spider_transfer(
 
     const target_file = backup_spider_tree(tree);
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
-    const rescue_keys = await common.get_wallets(target_file);
+    const rescue_keys = common.get_wallets(target_file);
 
     common.log(`[Main Worker] Processing inner transfers...\n`);
     const final_entries = await process_inner_transfers(tree);
@@ -370,7 +370,7 @@ export async function run_deep_transfer(
                     topup_amount * LAMPORTS_PER_SOL,
                     sender,
                     receiver.publicKey,
-                    PriorityLevel.DEFAULT
+                    PriorityLevel.HIGH
                 );
                 common.log(
                     common.green(`Transaction completed for ${wallet.name}, signature: ${signature}, depth: ${index}`)
@@ -409,7 +409,7 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
         );
         transactions.push(
             trade
-                .send_lamports(topup_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.DEFAULT)
+                .send_lamports(topup_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.HIGH)
                 .then((signature) =>
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                 )
