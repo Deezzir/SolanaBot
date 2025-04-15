@@ -142,17 +142,17 @@ Set `priority_level` to control transaction fees.
 The `create-metadata` subcommand accepts a JSON config with the following fields:
 
 ```json
-export type IPFSMetadata = {
-    name: string;
-    symbol: string;
-    description: string;
-    image: string | undefined;
-    showName: boolean | undefined;
-    createdOn: string | undefined;
-    twitter: string | undefined;
-    telegram: string | undefined;
-    website: string | undefined;
-};
+{
+    "name": "string",
+    "symbol": "string",
+    "description": "string",
+    "image": "string | undefined",
+    "showName": "boolean | undefined",
+    "createdOn": "string | undefined",
+    "twitter": "string | undefined",
+    "telegram": "string | undefined",
+    "website": "string | undefined",
+}
 ```
 
 ### Required fields
