@@ -624,16 +624,22 @@ export async function snipe(
     await sniper.snipe(wallets, sol_price);
 }
 
-export function generate(count: number, name: string, reserve: boolean, keys_path?: string, index?: number): void {
-    common.log(common.yellow(`Generating ${count} keypairs...\n`));
+export function generate(
+    file_path: string,
+    create_reserve: boolean,
+    count: number = 0,
+    secrets_path?: string,
+    index?: number
+): void {
+    common.log(common.yellow(`Generating ${count + (create_reserve ? 1 : 0)} keypairs...\n`));
 
     const wallets: Partial<common.Wallet>[] = [];
     const starting_index = index || 1;
 
-    if (reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
+    if (create_reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
 
-    if (keys_path && existsSync(keys_path)) {
-        const private_keys = readFileSync(keys_path, 'utf8')
+    if (secrets_path && existsSync(secrets_path)) {
+        const private_keys = readFileSync(secrets_path, 'utf8')
             .split('\n')
             .filter((i) => i);
         private_keys.forEach((wallet, i) => {
@@ -650,13 +656,15 @@ export function generate(count: number, name: string, reserve: boolean, keys_pat
                 throw new Error(`[ERROR] Invalid key at line ${i + 1}`);
             }
         });
-    } else {
+    } else if (count) {
         for (let i = 0; i < count; i++)
             wallets.push({ keypair: Keypair.generate(), name: `wallet[${i + starting_index}]`, is_reserve: false });
     }
 
-    const writeStream = createWriteStream(name, { encoding: 'utf8' });
-    writeStream.write(WALLETS_FILE_HEADERS.join(',') + '\n');
+    const file_exists = existsSync(file_path);
+    const writeStream = createWriteStream(file_path, { encoding: 'utf8', flags: file_exists ? 'a' : 'w' });
+    if (!file_exists) writeStream.write(WALLETS_FILE_HEADERS.join(',') + '\n');
+
     wallets.forEach((wallet) => {
         if (wallet.name && wallet.keypair) {
             const row = [
@@ -847,11 +855,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         }

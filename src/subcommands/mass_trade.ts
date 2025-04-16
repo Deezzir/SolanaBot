@@ -17,6 +17,7 @@ export async function bundle_buy(
     const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     let priority_fee: number | undefined = undefined;
+
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
         const signers: Signer[][] = [];
@@ -74,7 +75,11 @@ export async function bundle_sell(
     const wallets_with_balance = (
         await Promise.all(
             wallets.map(async (wallet) => {
-                const token_amount = await trade.get_token_balance(wallet.keypair.publicKey, mint_meta.mint_pubkey, COMMITMENT);
+                const token_amount = await trade.get_token_balance(
+                    wallet.keypair.publicKey,
+                    mint_meta.mint_pubkey,
+                    COMMITMENT
+                );
                 if (token_amount && token_amount.uiAmount && token_amount.uiAmount > 0) {
                     return {
                         ...wallet,
@@ -89,6 +94,7 @@ export async function bundle_sell(
     const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     let priority_fee: number | undefined = undefined;
+
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
         const signers: Signer[][] = [];
@@ -149,6 +155,7 @@ export async function seq_buy(
     protection_tip?: number
 ): Promise<void> {
     const transactions: Promise<void>[] = [];
+
     for (const wallet of wallets) {
         const buyer = wallet.keypair;
         let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
@@ -165,7 +172,9 @@ export async function seq_buy(
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
                     .catch((error) =>
-                        common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`))
+                        common.error(
+                            common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${error.message}`)
+                        )
                     )
             );
             mint_meta = await trader.update_mint_meta(mint_meta);
@@ -186,6 +195,7 @@ export async function seq_sell(
     protection_tip?: number
 ): Promise<void> {
     const transactions: Promise<void>[] = [];
+
     for (const wallet of wallets) {
         const seller = wallet.keypair;
         try {
@@ -201,7 +211,11 @@ export async function seq_sell(
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
-                    .catch(() => common.error(common.red(`Transaction failed for ${wallet.name}`)))
+                    .catch((error) =>
+                        common.error(
+                            common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${error.message}`)
+                        )
+                    )
             );
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
