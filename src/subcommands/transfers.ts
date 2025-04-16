@@ -330,7 +330,6 @@ export async function run_deep_transfer(
     sender: Keypair,
     depth: number
 ): Promise<common.Wallet[]> {
-    const failed: string[] = [];
     const target_file = setup_rescue_file();
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
 
@@ -353,12 +352,15 @@ export async function run_deep_transfer(
         };
     });
 
+    const failed: { name: string; id: number }[] = [];
     for (const entry of transfer_map) {
         const wallet = entry.wallet;
         const topup_amount = entry.amount;
 
         common.log(
-            `Sending ${topup_amount} SOL to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            common.bold(
+                `Sending ${topup_amount} SOL to ${wallet.keypair.publicKey.toString()} ${wallet.name} (${wallet.id})...`
+            )
         );
 
         for (let index = 1; index < entry.path.length; index++) {
@@ -377,17 +379,17 @@ export async function run_deep_transfer(
                 );
             } catch (error) {
                 common.error(common.red(`Transaction failed for ${wallet.name}: ${error}, depth: ${index}`));
-                failed.push(wallet.name);
+                failed.push({ name: wallet.name, id: wallet.id });
                 break;
             }
             await common.sleep(SPIDER_INTERVAL_MS);
         }
-        common.log('');
+        common.log(common.bold(`Finished sending to ${wallet.name} (${wallet.id})\n`));
     }
 
     if (failed.length > 0) {
         common.error(common.red(`Failed transactions:`));
-        for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item.name} (${item.id})`));
     }
 
     return common.get_wallets(target_file);
@@ -397,7 +399,7 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
     if (amounts.length !== wallets.length) throw new Error('The number of entries does not match the number of keys');
 
     const transactions = [];
-    const failed: string[] = [];
+    const failed: { name: string; id: number }[] = [];
 
     for (const [i, wallet] of wallets.entries()) {
         const receiver = wallet.keypair;
@@ -405,7 +407,7 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
         if (receiver.publicKey.equals(sender.publicKey)) continue;
 
         common.log(
-            `Sending ${topup_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+            `Sending ${topup_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
         transactions.push(
             trade
@@ -415,7 +417,7 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
                 )
                 .catch((error) => {
                     common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`));
-                    failed.push(wallet.name);
+                    failed.push({ name: wallet.name, id: wallet.id });
                 })
         );
 
@@ -425,6 +427,6 @@ export async function run_reg_transfer(wallets: common.Wallet[], amounts: number
 
     if (failed.length > 0) {
         common.error(common.red(`\nFailed transactions:`));
-        for (const item of failed) common.error(common.bold(`Wallet: ${item}`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item.name} (${item.id})`));
     }
 }

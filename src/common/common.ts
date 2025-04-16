@@ -119,15 +119,14 @@ export function get_wallets(keys_csv_path: string): Wallet[] {
 
         records.forEach((record: any) => {
             const is_reserve = record.is_reserve === 'true';
-            const name = record.name;
-            const keypair = Keypair.fromSecretKey(base58.decode(record.private_key));
-            const id = is_reserve ? 0 : index++;
-            rows.push({
-                name: name,
-                id: id,
-                keypair: keypair,
+            const entry = {
+                name: record.name,
+                id: is_reserve ? 0 : index++,
+                keypair: Keypair.fromSecretKey(base58.decode(record.private_key)),
                 is_reserve: is_reserve
-            });
+            };
+            if (is_reserve) rows.unshift(entry);
+            else rows.push(entry);
         });
         return rows;
     } catch (error) {

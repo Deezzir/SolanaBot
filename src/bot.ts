@@ -130,28 +130,31 @@ async function main() {
         .description(
             'Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.'
         )
-        .argument('<count>', 'Number of wallets to generate', (value) => {
+        .argument('<file_path>', 'Path of the file to save the wallets')
+        .option('-s, --secrets <path>', 'Path to the file with secret keys to convert', (value) => {
+            if (!existsSync(value)) throw new InvalidOptionArgumentError('Keys file does not exist.');
+            return value;
+        })
+        .option('-c, --count <number>', 'Number of wallets to generate', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             if (parsed_value < 1) throw new InvalidArgumentError('Invalid count. Must be greater than 0.');
             return parsed_value;
         })
-        .argument('<name>', 'Name of the file to save the wallets', (value) => {
-            if (existsSync(value)) throw new InvalidArgumentError('File with the same name already exists.');
-            return value;
-        })
-        .option('-k, --keys_path <path>', 'Path to the file with secret keys to convert', (value) => {
-            if (!existsSync(value)) throw new InvalidOptionArgumentError('Keys file does not exist.');
-            return value;
-        })
-        .option('-i, --index <index>', 'Starting index of the wallets', (value) => {
-            if (!common.validate_int(value, 0)) throw new InvalidOptionArgumentError(`Index should be greater than 0.`);
-            return parseInt(value, 10);
-        })
+        .option(
+            '-i, --index <index>',
+            'Starting index of the wallets',
+            (value) => {
+                if (!common.validate_int(value, 0))
+                    throw new InvalidOptionArgumentError(`Index should be greater than 0.`);
+                return parseInt(value, 10);
+            },
+            0
+        )
         .option('-r, --reserve', 'Generate the reserve wallet', false)
-        .action(async (count, name, options) => {
-            let { keys_path, index, reserve } = options;
-            commands.generate(count, name, reserve, keys_path, index);
+        .action(async (name, options) => {
+            let { secrets, index, reserve, count } = options;
+            commands.generate(name, reserve, count, secrets, index);
         });
 
     program
