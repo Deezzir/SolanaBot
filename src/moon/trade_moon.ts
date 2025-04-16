@@ -195,6 +195,15 @@ export class Trader {
         }
     }
 
+    public static async buy_sell_instructions(
+        _sol_amount: number,
+        _trader: Signer,
+        _mint_meta: MoonshotMintMeta,
+        _slippage: number = 0.05
+    ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        throw new Error('Not implemented');
+    }
+
     public static async buy_sell_bundle(
         _sol_amount: number,
         _trader: Signer,
@@ -203,6 +212,18 @@ export class Trader {
         _slippage: number = 0.05,
         _priority?: PriorityLevel
     ): Promise<String> {
+        throw new Error('Not implemented');
+    }
+
+    public static async buy_sell(
+        _sol_amount: number,
+        _trader: Signer,
+        _mint_meta: MoonshotMintMeta,
+        _interval_ms: number,
+        _slippage: number = 0.05,
+        _priority?: PriorityLevel,
+        _protection_tip?: number
+    ): Promise<[String, String]> {
         throw new Error('Not implemented');
     }
 

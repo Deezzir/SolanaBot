@@ -16,7 +16,9 @@ import {
     PriorityLevel,
     SOL_MINT,
     TRADE_DEFAULT_CURVE_DECIMALS,
-    TRADE_RAYDIUM_SWAP_TAX
+    TRADE_RAYDIUM_SWAP_TAX,
+    TRADE_RETRY_INTERVAL_MS,
+    TRADE_RETRY_ITERATIONS
 } from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
 import { readFileSync } from 'fs';
@@ -135,14 +137,12 @@ export class Trader {
         return await swap_jupiter_instructions(seller, quote);
     }
 
-    public static async buy_sell_bundle(
+    public static async buy_sell_instructions(
         sol_amount: number,
         trader: Signer,
         mint_meta: GenericMintMeta,
-        tip: number,
-        slippage: number = 0.05,
-        priority?: PriorityLevel
-    ): Promise<String> {
+        slippage: number = 0.05
+    ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
         const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint_meta.mint, slippage);
         let [buy_instructions] = await swap_jupiter_instructions(trader, quote);
@@ -152,6 +152,60 @@ export class Trader {
                 amount: quote.outAmount,
                 decimals: TRADE_DEFAULT_CURVE_DECIMALS
             },
+            trader,
+            mint_meta,
+            slippage
+        );
+
+        return [buy_instructions, sell_instructions, undefined];
+    }
+
+    public static async buy_sell(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: GenericMintMeta,
+        interval_ms: number,
+        slippage: number = 0.05,
+        priority?: PriorityLevel,
+        protection_tip?: number
+    ): Promise<[String, String]> {
+        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+            sol_amount,
+            trader,
+            mint_meta,
+            slippage
+        );
+
+        const buy_signature = await trade.create_and_send_tx(buy_instructions, [trader], priority, protection_tip);
+        let sell_signature;
+
+        if (interval_ms > 0) await common.sleep(interval_ms);
+
+        let retries = 1;
+        while (retries <= TRADE_RETRY_ITERATIONS) {
+            try {
+                sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
+            } catch (error) {
+                common.error(`[ERROR] Failed to send the sell transaction, retrying...`);
+                retries++;
+                await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
+            }
+        }
+
+        if (!sell_signature) throw new Error('Failed to send the sell transaction after retries.');
+        return [buy_signature, sell_signature];
+    }
+
+    public static async buy_sell_bundle(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: GenericMintMeta,
+        tip: number,
+        slippage: number = 0.05,
+        priority?: PriorityLevel
+    ): Promise<String> {
+        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+            sol_amount,
             trader,
             mint_meta,
             slippage

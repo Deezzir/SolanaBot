@@ -48,7 +48,9 @@ import {
     PriorityLevel,
     PUMP_CREATE_DISCRIMINATOR,
     PUMP_IPFS_API_URL,
-    TRADE_RAYDIUM_SWAP_TAX
+    TRADE_RAYDIUM_SWAP_TAX,
+    TRADE_RETRY_ITERATIONS,
+    TRADE_RETRY_INTERVAL_MS
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
@@ -232,6 +234,30 @@ export class Trader {
         return this.get_sell_instructions(token_amount, seller, mint_meta, slippage);
     }
 
+    public static async buy_sell_instructions(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: PumpMintMeta,
+        slippage: number = 0.05
+    ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
+        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
+        let [buy_instructions] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
+        let [sell_instructions] = await this.sell_token_instructions(
+            {
+                uiAmount: Number(token_amount_raw) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
+                amount: token_amount_raw.toString(),
+                decimals: PUMP_CURVE_TOKEN_DECIMALS
+            },
+            trader,
+            mint_meta,
+            slippage
+        );
+
+        return [buy_instructions, sell_instructions, undefined];
+    }
+
     public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta | undefined> {
         try {
             let mint_meta = await this.default_mint_meta(mint, sol_price);
@@ -329,16 +355,8 @@ export class Trader {
         slippage: number = 0.05,
         priority?: PriorityLevel
     ): Promise<String> {
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
-        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
-        let [buy_instructions] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
-        let [sell_instructions] = await this.sell_token_instructions(
-            {
-                uiAmount: Number(token_amount_raw) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
-                amount: token_amount_raw.toString(),
-                decimals: PUMP_CURVE_TOKEN_DECIMALS
-            },
+        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+            sol_amount,
             trader,
             mint_meta,
             slippage
@@ -365,6 +383,42 @@ export class Trader {
         }
 
         return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip);
+    }
+
+    public static async buy_sell(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: PumpMintMeta,
+        slippage: number = 0.05,
+        interval_ms: number = 0,
+        priority?: PriorityLevel,
+        protection_tip?: number
+    ): Promise<[String, String]> {
+        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+            sol_amount,
+            trader,
+            mint_meta,
+            slippage
+        );
+
+        const buy_signature = await trade.create_and_send_tx(buy_instructions, [trader], priority, protection_tip);
+        let sell_signature;
+
+        if (interval_ms > 0) await common.sleep(interval_ms);
+
+        let retries = 1;
+        while (retries <= TRADE_RETRY_ITERATIONS) {
+            try {
+                sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
+            } catch (error) {
+                common.error(`[ERROR] Failed to send the sell transaction, retrying...`);
+                retries++;
+                await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
+            }
+        }
+
+        if (!sell_signature) throw new Error('Failed to send the sell transaction after retries.');
+        return [buy_signature, sell_signature];
     }
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number = 0): Promise<PumpMintMeta> {
