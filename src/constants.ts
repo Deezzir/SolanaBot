@@ -35,6 +35,7 @@ export const IPFS_JWT = get_env_variable('PINATA_IPFS_JWT');
 // TRADE COMMON CONSTANTS
 export const TRADE_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
 export const TRADE_MAX_RETRIES = 0;
+export const TRADE_RETRY_ITERATIONS = 5;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
 export const TRADE_MAX_SLIPPAGE = 5.0;
 export const TRADE_DEFAULT_CURVE_DECIMALS = 6;

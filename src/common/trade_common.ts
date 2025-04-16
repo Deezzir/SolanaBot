@@ -83,6 +83,12 @@ export interface IProgramTrader {
         mint_meta: IMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]>;
+    buy_sell_instructions(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: IMintMeta,
+        slippage: number
+    ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]>;
     buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
@@ -91,6 +97,15 @@ export interface IProgramTrader {
         slippage: number,
         priority?: PriorityLevel
     ): Promise<String>;
+    buy_sell(
+        sol_amount: number,
+        trader: Signer,
+        mint_meta: IMintMeta,
+        slippage: number,
+        interval_ms?: number,
+        priority?: PriorityLevel,
+        protection_tip?: number
+    ): Promise<[String, String]>;
     create_token(
         creator: Signer,
         token_name: string,
@@ -429,32 +444,33 @@ export async function create_and_send_tx(
 ): Promise<String> {
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
+    const tx_instructions = instructions.filter(Boolean);
 
     if (priority) {
         const fee = await get_priority_fee({
             priority_level: priority,
-            transaction: { instructions, signers }
+            transaction: { instructions: tx_instructions, signers }
         });
-        instructions.unshift(
+        tx_instructions.unshift(
             ComputeBudgetProgram.setComputeUnitPrice({
                 microLamports: fee
             })
         );
-        instructions.unshift(
+        tx_instructions.unshift(
             ComputeBudgetProgram.setComputeUnitLimit({
                 units: 1_600_000
             })
         );
     }
 
-    if (protection_tip) return await create_and_send_protected_tx(instructions, signers, protection_tip);
+    if (protection_tip) return await create_and_send_protected_tx(tx_instructions, signers, protection_tip);
 
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     const versioned_tx = new VersionedTransaction(
         new TransactionMessage({
             payerKey: signers[0].publicKey,
             recentBlockhash: ctx.value.blockhash,
-            instructions: instructions.filter(Boolean)
+            instructions: tx_instructions
         }).compileToV0Message(address_lt_accounts)
     );
     versioned_tx.sign(signers);

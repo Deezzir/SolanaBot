@@ -61,12 +61,10 @@ export async function clean(wallets: common.Wallet[]): Promise<void> {
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     common.log(common.yellow('Cleaning all the accounts...\n'));
-
     let unsold_set: string[] = [];
 
     for (const wallet of wallets) {
         const closer = wallet.keypair;
-
         const balance = await trade.get_balance(closer.publicKey);
         if (balance === 0) {
             common.error(
@@ -291,11 +289,11 @@ export async function sell_token_once(
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    const SLIPPAGE = slippage || COMMANDS_SELL_SLIPPAGE;
-    const PERCENT = percent || 1.0;
+    slippage = slippage || COMMANDS_SELL_SLIPPAGE;
+    percent = percent || 1.0;
 
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
-    common.log(common.yellow(`Selling ${PERCENT * 100}% of the tokens...`));
+    common.log(common.yellow(`Selling ${percent * 100}% of the tokens...`));
 
     const token_amount = await trade.get_token_balance(seller.publicKey, mint);
     common.log(
@@ -308,7 +306,7 @@ export async function sell_token_once(
         throw new Error('[ERROR] No tokens to sell');
     }
 
-    const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, PERCENT);
+    const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
 
     common.log(
         `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`
@@ -321,7 +319,7 @@ export async function sell_token_once(
         throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
     }
     trader
-        .sell_token(token_amount_to_sell, seller, mint_meta, SLIPPAGE, priority, protection_tip)
+        .sell_token(token_amount_to_sell, seller, mint_meta, slippage, priority, protection_tip)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -335,7 +333,7 @@ export async function buy_token_once(
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump
 ): Promise<void> {
-    const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
+    slippage = slippage || COMMANDS_BUY_SLIPPAGE;
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
@@ -353,29 +351,32 @@ export async function buy_token_once(
     }
 
     trader
-        .buy_token(amount, buyer, mint_meta, SLIPPAGE, priority, protection_tip)
+        .buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
 
 export async function warmup(
     wallets: common.Wallet[],
-    bundle_tip: number = 0.0005,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
     program: common.Program = common.Program.Pump,
+    bundle_tip?: number,
+    interval?: number,
     min?: number,
     max?: number
 ): Promise<void> {
-    const MIN = min || 1;
-    const MAX = max || 5;
-    const SLIPPAGE = 0.5;
+    min = min || 1;
+    max = max || 5;
+    const slippage = COMMANDS_BUY_SLIPPAGE;
 
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
-    if (MAX < MIN) throw new Error('[ERROR] Invalid min and max values.');
+    if (max < min) throw new Error('[ERROR] Invalid min and max values.');
+    if (interval && bundle_tip) throw new Error('[ERROR] Interval and bundle tip cannot be used together.');
+    if (!interval && !bundle_tip) throw new Error('[ERROR] Interval or bundle tip should be provided.');
 
     common.log(common.yellow(`Warming up ${wallets.length} accounts...`));
 
-    const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (MAX - MIN) + MIN));
+    const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (max - min) + min));
     if (token_cnts.length !== wallets.length) throw new Error();
     const trader = get_trader(program);
 
@@ -395,7 +396,7 @@ export async function warmup(
         const mints: trade.IMintMeta[] = await trade.get_random_mints(trader, token_cnts[i]);
         common.log(
             common.yellow(
-                `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens (${wallet.name})...`
+                `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens ${wallet.name} (${wallet.id})...`
             )
         );
         for (const mint of mints) {
@@ -404,11 +405,29 @@ export async function warmup(
                 `Warming up with ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`
             );
             try {
-                const bundle_id = await trader.buy_sell_bundle(amount, buyer, mint, bundle_tip, SLIPPAGE, priority);
-                common.log(common.green(`Bundle completed for ${wallet.name}, bundle ID: ${bundle_id}`));
+                if (interval) {
+                    const [buy_sig, sell_sig] = await trader.buy_sell(
+                        amount,
+                        buyer,
+                        mint,
+                        slippage,
+                        interval * 1000,
+                        priority
+                    );
+                    common.log(
+                        common.green(
+                            `Trade completed for ${wallet.name}, Buy signature: ${buy_sig}, Sell signature: ${sell_sig}`
+                        )
+                    );
+                } else if (bundle_tip) {
+                    const bundle_id = await trader.buy_sell_bundle(amount, buyer, mint, bundle_tip, 0.5, priority);
+                    common.log(common.green(`Bundle completed for ${wallet.name}, bundle ID: ${bundle_id}`));
+                }
             } catch (error) {
                 common.log(
-                    common.red(`Failed to bundle the token '${mint.token_name}' for ${wallet.name}, continuing...`)
+                    common.red(
+                        `Failed to trade token '${mint.token_name}' for ${wallet.name} (${wallet.id}), continuing...`
+                    )
                 );
             }
         }
@@ -545,25 +564,25 @@ export async function sell_token(
     percent?: number,
     slippage?: number
 ): Promise<void> {
-    const SLIPPAGE = slippage || COMMANDS_SELL_SLIPPAGE;
-    const PERCENT = percent || 1.0;
+    slippage = slippage || COMMANDS_SELL_SLIPPAGE;
+    percent = percent || 1.0;
 
     if (protection_tip && bundle_tip) throw new Error('[ERROR] Protection tip and bundle tip cannot be used together.');
     if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
 
     common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
-    common.log(common.yellow(`Selling ${PERCENT * 100}% of the tokens...\n`));
+    common.log(common.yellow(`Selling ${percent * 100}% of the tokens...\n`));
 
     const trader = get_trader(program);
     let mint_meta = await trader.get_mint_meta(mint);
     if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
 
     if (!bundle_tip)
-        return await mass_trade.seq_sell(mint_meta, wallets, trader, PERCENT, SLIPPAGE, priority, protection_tip);
-    return await mass_trade.bundle_sell(mint_meta, wallets, trader, PERCENT, SLIPPAGE, bundle_tip, priority);
+        return await mass_trade.seq_sell(mint_meta, wallets, trader, percent, slippage, priority, protection_tip);
+    return await mass_trade.bundle_sell(mint_meta, wallets, trader, percent, slippage, bundle_tip, priority);
 }
 
-export async function topup(
+export async function fund(
     wallets: common.Wallet[],
     amount: number,
     sender: Keypair,

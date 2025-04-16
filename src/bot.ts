@@ -89,7 +89,7 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
         })
-        .option('-f, --from <number>', 'Warmup starting from the provided index', (value) => {
+        .option('-f, --from <number>', 'Snipe using wallets starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
@@ -222,6 +222,17 @@ async function main() {
             return parseFloat(value);
         })
         .addOption(
+            new Option('-i, --interval <number>', 'Interval between each buy/sell in seconds')
+                .argParser((value) => {
+                    const parsed_value = parseFloat(value);
+                    if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+                    if (parsed_value < 0.0)
+                        throw new InvalidOptionArgumentError('Invalid interval. Must be greater than 0.');
+                    return parsed_value;
+                })
+                .conflicts('bundle')
+        )
+        .addOption(
             new Option('-pr, --priority <level>', 'specify priority level')
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
@@ -233,8 +244,16 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
-            const { from, to, list, bundle, priority, min, max, program } = options;
-            await commands.warmup(common.filter_wallets(wallets, from, to, list), bundle, priority, program, min, max);
+            const { from, to, list, bundle, priority, min, max, program, interval } = options;
+            await commands.warmup(
+                common.filter_wallets(wallets, from, to, list),
+                priority,
+                program,
+                bundle,
+                interval,
+                min,
+                max
+            );
         });
 
     program
@@ -598,10 +617,10 @@ async function main() {
         });
 
     program
-        .command('topup')
-        .alias('t')
-        .description('Topup the wallets with SOL using the provided wallet')
-        .argument('<amount>', 'Amount of SOL to topup', (value) => {
+        .command('fund')
+        .alias('f')
+        .description('Fund the wallets with SOL using the provided wallet')
+        .argument('<amount>', 'Amount of SOL to fund', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             if (parsed_value < 0) throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
@@ -614,12 +633,12 @@ async function main() {
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
         })
-        .option('-f, --from <number>', 'Topup starting from the provided index', (value) => {
+        .option('-f, --from <number>', 'Fund starting from the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
-        .option('-t, --to <number>', 'Topup ending at the provided index', (value) => {
+        .option('-t, --to <number>', 'Fund ending at the provided index', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
@@ -645,7 +664,7 @@ async function main() {
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {
             const { from, to, list, depth, spider, random } = options;
-            await commands.topup(common.filter_wallets(wallets, from, to, list), amount, sender, spider, random, depth);
+            await commands.fund(common.filter_wallets(wallets, from, to, list), amount, sender, spider, random, depth);
         });
 
     program
