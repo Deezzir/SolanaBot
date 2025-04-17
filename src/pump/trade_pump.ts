@@ -517,12 +517,12 @@ export class Trader {
 
     private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0 || slippage >= 1) throw new RangeError('Slippage must be between 0 and 1');
-        return sol_amount + (sol_amount * BigInt(slippage * 10000)) / BigInt(10000);
+        return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
     private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0 || slippage >= 1) throw new RangeError('Slippage must be between 0 and 1');
-        return sol_amount - (sol_amount * BigInt(slippage * 10000)) / BigInt(10000);
+        return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
     private static buy_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
