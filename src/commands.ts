@@ -228,7 +228,9 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
 }
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
-    common.log(common.yellow(`Transferring ${amount} SOL from ${sender} to ${receiver.toString()}...`));
+    common.log(
+        common.yellow(`Transferring ${amount} SOL from ${sender.publicKey.toString()} to ${receiver.toString()}...`)
+    );
     const balance = await trade.get_balance(sender.publicKey);
 
     if (sender.publicKey.equals(receiver)) {
