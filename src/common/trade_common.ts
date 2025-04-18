@@ -764,7 +764,7 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
     if (percent === 1.0) return token_amount;
     return {
         uiAmount: Math.floor(token_amount.uiAmount * percent),
-        amount: (BigInt(token_amount.amount) * BigInt(percent)).toString(),
+        amount: ((BigInt(token_amount.amount) * BigInt(Math.floor(percent * 10000))) / BigInt(10000)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
 }
