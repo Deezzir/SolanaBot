@@ -551,9 +551,8 @@ export async function send_lamports(
     });
 
     if (priority) {
-        let fees = 0;
-        let units = 500;
-        fees = await get_priority_fee({
+        const units = 500;
+        const fees = await get_priority_fee({
             priority_level: priority,
             transaction: {
                 instructions: [send_instruction],
