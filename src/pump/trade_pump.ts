@@ -112,7 +112,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 }
 
-const PUMP_AMM_STATE_SIZE = 0xd3;
+const PUMP_AMM_STATE_SIZE = 0x12c;
 const PUMP_AMM_STATE_OFFSETS = {
     MINT: 0x2b,
     BASE_VAULT: 0x8b,
