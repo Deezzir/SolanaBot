@@ -28,7 +28,7 @@ import {
     PUMP_AMM_GLOBAL_ACCOUNT,
     PUMP_AMM_PROGRAM_ID,
     PUMP_BONDING_ADDR,
-    PUMP_CURVE_STATE_SIGNATURE,
+    PUMP_CURVE_STATE_SIGNATURE as PUMP_CURVE_STATE_HEADER,
     PUMP_CURVE_TOKEN_DECIMALS,
     PUMP_EVENT_AUTHORITUY_ACCOUNT,
     PUMP_FEE_PERCENTAGE,
@@ -50,7 +50,8 @@ import {
     PUMP_IPFS_API_URL,
     TRADE_RAYDIUM_SWAP_TAX,
     TRADE_RETRY_ITERATIONS,
-    TRADE_RETRY_INTERVAL_MS
+    TRADE_RETRY_INTERVAL_MS,
+    PUMP_AMM_HEADER as PUMP_AMM_STATE_HEADER
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
@@ -59,6 +60,7 @@ import {
 } from '../common/trade_dex.js';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
+import base58 from 'bs58';
 
 export class PumpMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -112,7 +114,6 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 }
 
-const PUMP_AMM_STATE_SIZE = 0x12c;
 const PUMP_AMM_STATE_OFFSETS = {
     MINT: 0x2b,
     BASE_VAULT: 0x8b,
@@ -433,9 +434,7 @@ export class Trader {
             const hasPool = ray_amm || pump_amm;
             if (!hasPool && !mint_meta.complete) {
                 const curve_state = await this.get_curve_state(new PublicKey(mint_meta.base_vault));
-                if (!curve_state) throw new Error('Curve state not found.');
                 const metrics = this.get_pump_token_metrics(curve_state);
-
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -449,9 +448,7 @@ export class Trader {
 
             if (pump_amm) {
                 const amm_state = await this.get_amm_state(pump_amm);
-                if (!amm_state) throw new Error('Pump AMM state not found.');
                 const metrics = await this.get_pump_amm_token_metrics(amm_state);
-
                 return new PumpMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -480,9 +477,6 @@ export class Trader {
 
             return mint_meta;
         } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(`Failed to update mint meta reserves: ${error.message}`);
-            }
             throw new Error(`Failed to update mint meta reserves: ${error}`);
         }
     }
@@ -737,39 +731,37 @@ export class Trader {
     }
 
     private static async get_curve_state(bond_curve_addr: PublicKey): Promise<PumpState> {
-        const acc_info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
-        if (
-            !acc_info ||
-            !acc_info.data ||
-            acc_info.data.byteLength < PUMP_CURVE_STATE_SIGNATURE.byteLength + PUMP_STATE_SIZE
-        ) {
-            throw new Error('unexpected curve state');
-        }
+        const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
+        if (!info || !info.data || info.data.byteLength < PUMP_CURVE_STATE_HEADER.byteLength + PUMP_STATE_SIZE)
+            throw new Error('Unexpected curve state');
 
-        const idl_signature = common.read_bytes(acc_info.data, 0, PUMP_CURVE_STATE_SIGNATURE.byteLength);
-        if (idl_signature.compare(PUMP_CURVE_STATE_SIGNATURE) !== 0) {
-            throw new Error('unexpected curve state IDL signature');
-        }
+        const header = common.read_bytes(info.data, 0, PUMP_CURVE_STATE_HEADER.byteLength);
+        if (header.compare(PUMP_CURVE_STATE_HEADER) !== 0) throw new Error('Unexpected curve state IDL signature');
 
         return {
-            virtual_token_reserves: common.read_biguint_le(acc_info.data, PUMP_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
-            virtual_sol_reserves: common.read_biguint_le(acc_info.data, PUMP_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
-            real_token_reserves: common.read_biguint_le(acc_info.data, PUMP_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
-            real_sol_reserves: common.read_biguint_le(acc_info.data, PUMP_STATE_OFFSETS.REAL_SOL_RESERVES, 8),
-            supply: common.read_biguint_le(acc_info.data, PUMP_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
-            complete: common.read_bool(acc_info.data, PUMP_STATE_OFFSETS.COMPLETE, 1)
+            virtual_token_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
+            virtual_sol_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
+            real_token_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
+            real_sol_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.REAL_SOL_RESERVES, 8),
+            supply: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
+            complete: common.read_bool(info.data, PUMP_STATE_OFFSETS.COMPLETE, 1)
         };
     }
 
     private static async get_pump_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
         try {
-            const [amm] = await HELIUS_CONNECTION.connection.getProgramAccounts(PUMP_AMM_PROGRAM_ID, {
+            const [amm] = await global.CONNECTION.getProgramAccounts(PUMP_AMM_PROGRAM_ID, {
                 filters: [
-                    { dataSize: PUMP_AMM_STATE_SIZE },
                     {
                         memcmp: {
                             offset: PUMP_AMM_STATE_OFFSETS.MINT,
                             bytes: mint.toBase58()
+                        }
+                    },
+                    {
+                        memcmp: {
+                            offset: 0,
+                            bytes: base58.encode(PUMP_AMM_STATE_HEADER)
                         }
                     }
                 ],
@@ -781,27 +773,26 @@ export class Trader {
         }
     }
 
-    static async get_amm_state(pump_amm: PublicKey): Promise<PumpAmmState | null> {
-        try {
-            const info = await HELIUS_CONNECTION.connection.getAccountInfo(pump_amm);
-            if (!info) return null;
+    static async get_amm_state(pump_amm: PublicKey): Promise<PumpAmmState> {
+        const info = await global.CONNECTION.getAccountInfo(pump_amm);
+        if (!info || !info.data) throw new Error('Unexpected amm state');
 
-            const quote_mint = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.MINT, 32));
-            const quote_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
-            const base_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_VAULT, 32));
-            const base_vault_balance = await trade.get_vault_balance(base_vault);
-            const quote_vault_balance = await trade.get_vault_balance(quote_vault);
+        const header = common.read_bytes(info.data, 0, PUMP_AMM_STATE_HEADER.byteLength);
+        if (header.compare(PUMP_AMM_STATE_HEADER) !== 0) throw new Error('Unexpected amm state IDL signature');
 
-            return {
-                quote_mint,
-                base_vault,
-                quote_vault,
-                base_vault_balance: base_vault_balance.balance,
-                quote_vault_balance: quote_vault_balance.balance
-            };
-        } catch (error) {
-            return null;
-        }
+        const quote_mint = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.MINT, 32));
+        const quote_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
+        const base_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_VAULT, 32));
+        const base_vault_balance = await trade.get_vault_balance(base_vault);
+        const quote_vault_balance = await trade.get_vault_balance(quote_vault);
+
+        return {
+            quote_mint,
+            base_vault,
+            quote_vault,
+            base_vault_balance: base_vault_balance.balance,
+            quote_vault_balance: quote_vault_balance.balance
+        };
     }
 
     static async get_pump_amm_token_metrics(amm_state: PumpAmmState): Promise<trade.TokenMetrics> {
