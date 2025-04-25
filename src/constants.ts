@@ -84,10 +84,7 @@ export const PUMP_IPFS_API_URL = 'https://pump.fun/api/ipfs';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
 export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%
-export const PUMP_BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
-export const PUMP_META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-export const PUMP_CURVE_STATE_SIGNATURE = Uint8Array.from([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
 export const PUMP_GLOBAL_ACCOUNT = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
 export const PUMP_FEE_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
 export const PUMP_EVENT_AUTHORITUY_ACCOUNT = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1');
@@ -97,9 +94,13 @@ export const PUMP_AMM_GLOBAL_ACCOUNT = new PublicKey('ADyA8hdefvWN2dbGGWFotbzWxr
 export const PUMP_AMM_EVENT_AUTHORITY_ACCOUNT = new PublicKey('GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR');
 export const PUMP_AMM_FEE_ACCOUNT = new PublicKey('62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV');
 export const PUMP_AMM_FEE_TOKEN_ACCOUNT = new PublicKey('94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb');
-export const PUMP_BUY_DISCRIMINATOR: Uint8Array = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
-export const PUMP_SELL_DISCRIMINATOR: Uint8Array = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
-export const PUMP_CREATE_DISCRIMINATOR: Uint8Array = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
+export const PUMP_CURVE_STATE_SIGNATURE = new Uint8Array([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
+export const PUMP_BONDING_ADDR = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
+export const PUMP_META_ADDR = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
+export const PUMP_BUY_DISCRIMINATOR = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
+export const PUMP_SELL_DISCRIMINATOR = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
+export const PUMP_CREATE_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
+export const PUMP_AMM_HEADER = new Uint8Array([241, 154, 109, 4, 17, 177, 109, 188]);
 
 // SNIPE CONSTANTS
 export const SNIPE_BUY_SLIPPAGE = 0.85;

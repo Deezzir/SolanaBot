@@ -279,7 +279,6 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
         })
-        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (receiver, options) => {
             const { from, to, list } = options;
             await commands.collect(common.filter_wallets(wallets, from, to, list), receiver);
