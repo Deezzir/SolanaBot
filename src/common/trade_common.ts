@@ -781,8 +781,8 @@ export async function get_all_signatures(public_key: PublicKey): Promise<Confirm
         );
 
         all_signatures.push(...signatures);
-        last_signature = signatures[signatures.length - 1].signature;
         if (signatures.length < 50 || signatures.length === 0) break;
+        last_signature = signatures[signatures.length - 1].signature;
 
         await common.sleep(TRADE_RETRY_INTERVAL_MS);
     }
