@@ -142,7 +142,7 @@ export function get_wallet(index: number, wallets: Wallet[]): Wallet | undefined
     return wallets.find((wallet) => wallet.id == index);
 }
 
-export function chunks<T>(array: T[], chunkSize = 10): T[][] {
+export function chunks<T>(array: readonly T[], chunkSize = 10): T[][] {
     let res: T[][] = [];
     for (let currentChunk = 0; currentChunk < array.length; currentChunk += chunkSize) {
         res.push(array.slice(currentChunk, currentChunk + chunkSize));
@@ -289,9 +289,7 @@ export function read_biguint_le(buf: Buffer, offset: number, length: number): bi
 
 export function read_bool(buf: Buffer, offset: number, length: number): boolean {
     const data = read_bytes(buf, offset, length);
-    for (const b of data) {
-        if (b) return true;
-    }
+    for (const b of data) if (b) return true;
     return false;
 }
 
@@ -377,4 +375,18 @@ export async function retry_with_backoff<T>(
         }
         return retry_with_backoff(operation, retries - 1, delay * 3);
     }
+}
+
+export function pick_random<T>(arr: readonly T[], count: number): T[] {
+    const result: T[] = [];
+    const used = new Set<number>();
+
+    while (result.length < count && result.length < arr.length) {
+        const idx = Math.floor(Math.random() * arr.length);
+        if (!used.has(idx)) {
+            used.add(idx);
+            result.push(arr[idx]);
+        }
+    }
+    return result;
 }

@@ -114,10 +114,17 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 }
 
+const PUMP_AMM_STATE_SIZE = 0xd3;
 const PUMP_AMM_STATE_OFFSETS = {
-    MINT: 0x2b,
+    POOL_BUMP: 0x08,
+    INDEX: 0x09,
+    CREATOR: 0x0b,
+    BASE_MINT: 0x2b,
+    QOTE_MINT: 0x4b,
+    LP_MINT: 0x6b,
     BASE_VAULT: 0x8b,
-    QUOTE_VAULT: 0xab
+    QUOTE_VAULT: 0xab,
+    LP_SUPPLY: 0xcb
 };
 
 type PumpAmmState = {
@@ -242,7 +249,7 @@ export class Trader {
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
-        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
+        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(mint_meta.fee * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         let [buy_instructions] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
@@ -271,30 +278,14 @@ export class Trader {
     }
 
     public static async get_random_mints(count: number): Promise<PumpMintMeta[]> {
-        const limit = 50;
-        const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
-        return fetch(
-            `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
-        )
-            .then((response) => response.json())
-            .then((data: any) => {
-                if (!data || data.statusCode !== undefined) return [];
-                const shuffled = data.sort(() => 0.5 - Math.random());
-                return shuffled.slice(0, count).map((item: any) => {
-                    const mapped = {
-                        ...item,
-                        base_vault: item.bonding_curve,
-                        quote_vault: item.associated_bonding_curve,
-                        sol_reserves: BigInt(item.virtual_sol_reserves),
-                        token_reserves: BigInt(item.virtual_token_reserves)
-                    };
-                    return new PumpMintMeta(mapped);
-                });
-            })
-            .catch((err) => {
-                common.error(`[ERROR] Failed fetching the mints: ${err}`);
-                return [];
-            });
+        const graduated_length = Math.floor(count * Math.random());
+        const ungraduated_length = count - graduated_length;
+        return (
+            await Promise.all([
+                this.get_random_graduated_mints(graduated_length),
+                this.get_random_ungraduated_mints(ungraduated_length)
+            ])
+        ).flat();
     }
 
     public static async create_token(
@@ -754,7 +745,7 @@ export class Trader {
                 filters: [
                     {
                         memcmp: {
-                            offset: PUMP_AMM_STATE_OFFSETS.MINT,
+                            offset: PUMP_AMM_STATE_OFFSETS.BASE_MINT,
                             bytes: mint.toBase58()
                         }
                     },
@@ -780,7 +771,7 @@ export class Trader {
         const header = common.read_bytes(info.data, 0, PUMP_AMM_STATE_HEADER.byteLength);
         if (header.compare(PUMP_AMM_STATE_HEADER) !== 0) throw new Error('Unexpected amm state IDL signature');
 
-        const quote_mint = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.MINT, 32));
+        const quote_mint = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_MINT, 32));
         const quote_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
         const base_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_VAULT, 32));
         const base_vault_balance = await trade.get_vault_balance(base_vault);
@@ -960,5 +951,83 @@ export class Trader {
         } catch (error) {
             throw new Error(`Failed to create token metadata: ${error}`);
         }
+    }
+
+    private static async get_random_ungraduated_mints(count: number): Promise<PumpMintMeta[]> {
+        if (count <= 0) return [];
+        const limit = 50;
+        count = Math.min(count, limit);
+        const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
+
+        return fetch(
+            `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
+        )
+            .then((response) => response.json())
+            .then((data: any) => {
+                if (!data || data.statusCode !== undefined) return [];
+                return common.pick_random(data, count).map((item: any) => {
+                    const mapped = {
+                        ...item,
+                        base_vault: item.bonding_curve,
+                        quote_vault: item.associated_bonding_curve,
+                        sol_reserves: BigInt(item.virtual_sol_reserves),
+                        token_reserves: BigInt(item.virtual_token_reserves)
+                    };
+                    return new PumpMintMeta(mapped);
+                });
+            })
+            .catch((err) => {
+                common.error(`[ERROR] Failed fetching the mints: ${err}`);
+                return [];
+            });
+    }
+
+    private static graduated_mints_cache: PublicKey[] | null = null;
+    private static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
+        if (count <= 0) return [];
+        if (!this.graduated_mints_cache) {
+            this.graduated_mints_cache = [];
+            try {
+                const amms = await global.CONNECTION.getProgramAccounts(PUMP_AMM_PROGRAM_ID, {
+                    filters: [
+                        {
+                            memcmp: {
+                                offset: 0,
+                                bytes: base58.encode(PUMP_AMM_STATE_HEADER)
+                            }
+                        }
+                    ],
+                    dataSlice: {
+                        offset: PUMP_AMM_STATE_OFFSETS.BASE_MINT,
+                        length: PUMP_AMM_STATE_SIZE - PUMP_AMM_STATE_OFFSETS.BASE_MINT
+                    },
+                    commitment: COMMITMENT
+                });
+                if (amms) {
+                    for (const chunk of common.chunks(amms, 100)) {
+                        for (const acc of chunk) {
+                            if (!acc) continue;
+                            if (
+                                common.read_biguint_le(
+                                    acc.account.data,
+                                    PUMP_AMM_STATE_OFFSETS.LP_SUPPLY - PUMP_AMM_STATE_OFFSETS.BASE_MINT,
+                                    8
+                                ) < 4000000000000n
+                            )
+                                continue;
+                            this.graduated_mints_cache.push(new PublicKey(common.read_bytes(acc.account.data, 0, 32)));
+                        }
+                    }
+                }
+            } catch (error) {
+                return [];
+            }
+        }
+
+        return (
+            await Promise.all(
+                common.pick_random(this.graduated_mints_cache, count).map((mint) => this.get_mint_meta(mint))
+            )
+        ).filter((meta) => meta !== undefined);
     }
 }

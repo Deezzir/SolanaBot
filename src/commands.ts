@@ -395,7 +395,7 @@ export async function warmup(
             continue;
         }
 
-        const mints: trade.IMintMeta[] = await trade.get_random_mints(trader, token_cnts[i]);
+        const mints = await trade.get_random_mints(trader, token_cnts[i]);
         common.log(
             common.yellow(
                 `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens ${wallet.name} (${wallet.id})...`
