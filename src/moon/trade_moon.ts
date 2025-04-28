@@ -234,8 +234,7 @@ export class Trader {
                 if (!data || data.statusCode !== undefined || data.error || !isMoonMeta(data)) return;
                 return new MoonshotMintMeta(data);
             })
-            .catch((err) => {
-                common.error(`[ERROR] Failed fetching the mint: ${err}`);
+            .catch(() => {
                 return undefined;
             });
     }

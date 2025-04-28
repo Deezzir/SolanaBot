@@ -186,7 +186,7 @@ export class Trader {
             try {
                 sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
             } catch (error) {
-                common.error(`[ERROR] Failed to send the sell transaction, retrying...`);
+                common.error(common.red(`Failed to send the sell transaction, retrying...`));
                 retries++;
                 await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
             }
@@ -238,7 +238,6 @@ export class Trader {
         try {
             return await this.default_mint_meta(mint, sol_price);
         } catch (error) {
-            common.error(`[ERROR] Failed to get the mint metadata: ${error}`);
             return undefined;
         }
     }
@@ -298,11 +297,7 @@ export class Trader {
             const meta_resp = await this.upload_ipfs(json_file);
             return meta_resp.cid;
         } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(`[ERROR] Failed to create metadata: ${error.message}`);
-            } else {
-                throw new Error(`[ERROR] Failed to create metadata: ${error}`);
-            }
+            throw new Error(`Failed to create metadata: ${error}`);
         }
     }
 

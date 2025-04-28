@@ -43,7 +43,7 @@ export class Runner extends snipe.SniperBase {
             if (this._logs_stop_func) this._logs_stop_func();
             global.CONNECTION.removeOnLogsListener(this._subscription_id)
                 .then(() => (this._subscription_id = undefined))
-                .catch((err) => common.error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
+                .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
         }
     }
 
@@ -87,7 +87,7 @@ export class Runner extends snipe.SniperBase {
                                 }
                             }
                         } catch (err) {
-                            common.error(`[ERROR] Failed fetching the parsed transaction: ${err}`);
+                            common.error(common.red(`Failed fetching the parsed transaction: ${err}`));
                         }
                     }
                 },

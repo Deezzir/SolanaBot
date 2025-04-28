@@ -184,34 +184,28 @@ async function buy_sell_bundle(
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
+    await Promise.all(buy_bundles);
 }
 
 export async function execute_fast(
     funder: Signer,
     volume_config: VolumeConfig,
     trader: trade.IProgramTrader
-): Promise<common.Wallet[] | undefined> {
-    if (volume_config.bundle_tip === 0) throw new Error('Jito tip must be greater than 0 for fast volume bot');
+): Promise<common.Wallet[]> {
     const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
-
-    const exec_cnt = volume_config.executions;
-    const wallet_cnt = volume_config.wallet_cnt;
-    const all_keypairs = [];
     const mint_meta = await trader.get_mint_meta(volume_config.mint);
-    if (!mint_meta) throw new Error('[ERROR] Failed to fetch mint metadata.');
+    if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
 
-    for (let exec = 0; exec < exec_cnt; exec++) {
-        const keypairs = Array.from({ length: wallet_cnt }, (_v, i) => {
+    for (let exec = 0; exec < volume_config.executions; exec++) {
+        const keypairs = Array.from({ length: volume_config.wallet_cnt }, (_v, i) => {
             const pair = new Keypair();
-            common.save_rescue_key(pair, target_file, 0, i);
+            common.save_rescue_key(pair, target_file, exec, i);
             return pair;
         });
-        all_keypairs.push(...keypairs);
-        const amounts = [...new Array(wallet_cnt)].map(() =>
+        const amounts = Array.from({ length: volume_config.wallet_cnt }, () =>
             common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount)
         );
-
         common.log(common.blue(`\nRunning execution: ${exec + 1}`));
 
         common.log('Topping up the wallets...');
@@ -219,28 +213,28 @@ export async function execute_fast(
             const bundle_ids = await fund_bundle(keypairs, amounts, funder, volume_config.bundle_tip);
             common.log(common.green(`Fund completed, signatures:\n${bundle_ids.join('\n')}\n`));
         } catch (error) {
-            common.log(common.red(`Fund failed: ${error}`));
-            return;
+            common.log(common.red(`Fund failed: ${error} for execution ${exec + 1}, skipping...`));
+            continue;
         }
 
         common.log(`Buying and selling the tokens...`);
         await buy_sell_bundle(keypairs, amounts, trader, mint_meta, volume_config.bundle_tip);
+
+        common.log('\nCollecting the funds from the wallets...');
+        try {
+            const bundle_ids = await collect_bundle(keypairs, funder, volume_config.bundle_tip);
+            common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}`));
+        } catch (error) {
+            common.log(common.red(`Collect failed: ${error}`));
+        }
 
         const delay_seconds = common.normal_random(volume_config.delay, volume_config.delay * 0.1);
         common.log(common.blue(`Sleeping for ${delay_seconds.toFixed(1)} seconds`));
         await common.sleep(delay_seconds * 1000);
     }
 
-    common.log('\nCollecting the funds from the wallets...');
-    try {
-        const bundle_ids = await collect_bundle(all_keypairs, funder, volume_config.bundle_tip);
-        common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}`));
-    } catch (error) {
-        common.log(common.red(`Collect failed: ${error}`));
-        return common.get_wallets(target_file);
-    }
-
     common.log(common.green('\nThe Fast Volume Bot completed\n'));
+    return common.get_wallets(target_file);
 }
 
 export async function execute_natural(_volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
@@ -381,11 +375,11 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
         } catch (error) {
             if (error instanceof Error) {
                 if (error.message.includes('prompt')) {
-                    throw new Error('[ERROR] You cancelled the volume bot setup.');
+                    throw new Error('You cancelled the volume bot setup.');
                 }
                 throw new Error(`${error.message}`);
             } else {
-                throw new Error('[ERROR] Failed to setup the volume bot.');
+                throw new Error('Failed to setup the volume bot.');
             }
         }
     }
@@ -393,7 +387,7 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
 
 export async function simulate(sol_price: number, volume_config: VolumeConfig, trader: trade.IProgramTrader) {
     const mint_meta = await trader.get_mint_meta(volume_config.mint);
-    if (!mint_meta) throw new Error('[ERROR] Failed to fetch mint metadata.');
+    if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
 
     switch (volume_config.type) {
         case VolumeType.Fast: {
@@ -431,32 +425,32 @@ export async function simulate(sol_price: number, volume_config: VolumeConfig, t
 async function validate_json_config(json: any): Promise<VolumeConfig> {
     const required_fields = ['mint', 'executions', 'bundle_tip', 'min_sol_amount', 'max_sol_amount'];
     for (const field of required_fields) {
-        if (!json[field]) throw new Error(`[ERROR] Missing required field: ${field}`);
+        if (!json[field]) throw new Error(`Missing required field: ${field}`);
     }
     const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, bundle_tip, type } = json;
     if (type !== undefined) {
         if (typeof type !== 'string' || !Object.values(VolumeType).includes(type as VolumeType)) {
-            throw new Error(`[ERROR] type must be a valid string, values: ${Object.values(VolumeType)}`);
+            throw new Error(`Type must be a valid string, values: ${Object.values(VolumeType)}`);
         }
         json.type = type as VolumeType;
     }
     if (!common.is_valid_pubkey(mint)) {
-        throw new Error('[ERROR] Invalid Raydium Pair ID (AMM) public key.');
+        throw new Error('Invalid Raydium Pair ID (AMM) public key.');
     }
     if (typeof min_sol_amount !== 'number' || min_sol_amount <= 0) {
-        throw new Error('[ERROR] Invalid min_sol_amount number. Must be greater than 0.');
+        throw new Error('Invalid min_sol_amount number. Must be greater than 0.');
     }
     if (typeof max_sol_amount !== 'number' || max_sol_amount <= 0 || max_sol_amount < min_sol_amount) {
-        throw new Error('[ERROR] Invalid max_sol_amount number. Must be greater than 0 and min_sol_amount.');
+        throw new Error('Invalid max_sol_amount number. Must be greater than 0 and min_sol_amount.');
     }
     if (typeof executions !== 'number' || !Number.isInteger(executions) || executions <= 0) {
-        throw new Error('[ERROR] Invalid executions number. Must be greater than 0.');
+        throw new Error('Invalid executions number. Must be greater than 0.');
     }
-    if (typeof bundle_tip !== 'number' || bundle_tip < 0.0) {
-        throw new Error('[ERROR] Invalid bundle_tip number. Must be greater than or equal to 0.');
+    if (typeof bundle_tip !== 'number' || bundle_tip <= 0.0) {
+        throw new Error('Invalid bundle_tip number. Must be greater than 0.0.');
     }
     if (typeof delay !== 'number' || delay <= 0) {
-        throw new Error('[ERROR] Invalid delay number. Must be greater than 0.');
+        throw new Error('Invalid delay number. Must be greater than 0.');
     }
     if (type) {
         if (
@@ -467,12 +461,12 @@ async function validate_json_config(json: any): Promise<VolumeConfig> {
                 wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC)
         ) {
             throw new Error(
-                `[ERROR] Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
+                `Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
             );
         }
 
         if (type === VolumeType.Natural && wallet_cnt) {
-            throw new Error('[ERROR] Invalid wallet_cnt number. Must be undefined for Natural type.');
+            throw new Error('Invalid wallet_cnt number. Must be undefined for Natural type.');
         }
     }
     if (!('type' in json)) json.type = VolumeType.Fast;

@@ -57,7 +57,7 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
 function display_spider_tree(tree: SpiderTree) {
     if (!tree.head) return;
 
-    common.log(`[Main Worker] Spider tree depth: ${tree.depth}`);
+    common.log(`Spider tree depth: ${tree.depth}`);
 
     const _display_spider_tree = (
         node: SpiderTreeNode | null,
@@ -120,10 +120,10 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
     const ok = _backup_spider_tree(tree.head);
     if (!ok) {
         common.error(
-            `[ERROR] Something went wrong during the spider transfer, check the rescue file for wallet backups`
+            common.red('Something went wrong during the spider transfer, check the rescue file for wallet backups')
         );
     } else {
-        common.log(`[Main Worker] Successfully backed the keys up for the spider transfer`);
+        common.log(`Successfully backed the keys up for the spider transfer`);
     }
     return target_file;
 }
@@ -160,7 +160,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 );
                 common.log(`Transaction completed for ${layer_name}, signature: ${sig}`);
             } catch (error) {
-                common.error(`[ERROR] Failed to send lamports: ${error}`);
+                common.error(common.red(`Failed to send lamports: ${error}`));
                 return false;
             }
 
@@ -189,7 +189,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 );
                 common.log(`Transaction completed for ${layer_name}, signature: ${sig}`);
             } catch (error) {
-                common.error(`[ERROR] Failed to send lamports: ${error}`);
+                common.error(common.red(`Failed to send lamports: ${error}`));
                 return false;
             }
 
@@ -204,7 +204,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
 
     const ok = await _process_inner_transfers(tree.head);
     if (!ok) {
-        common.error(`[ERROR] Something went wrong during the spider transfer, check the logs for details`);
+        common.error(common.red('Something went wrong during the spider transfer, check the logs for details'));
         return;
     }
 
@@ -214,7 +214,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
 async function process_final_transfers(wallets: common.Wallet[], entries: Keypair[]): Promise<void> {
     if (entries.length === 0) return;
     if (entries.length !== wallets.length) {
-        common.error(`[ERROR] The number of entries doesn't match the number of keys`);
+        common.error(common.red("The number of entries doesn't match the number of keys"));
         return;
     }
 
@@ -236,9 +236,9 @@ async function process_final_transfers(wallets: common.Wallet[], entries: Keypai
 
     const results = await Promise.all(transactions);
     if (results.every((result) => result)) {
-        common.log(`[Main Worker] All transactions completed successfully`);
+        common.log(`All transactions completed successfully`);
     } else {
-        common.error(`[Main Worker] Some transactions failed, check the logs for details`);
+        common.error(common.red('Some transactions failed, check the logs for details'));
     }
 }
 
@@ -261,14 +261,13 @@ export async function run_spider_transfer(
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
     const rescue_keys = common.get_wallets(target_file);
 
-    common.log(`[Main Worker] Processing inner transfers...\n`);
+    common.log(`Processing inner transfers...\n`);
     const final_entries = await process_inner_transfers(tree);
     await common.sleep(SPIDER_INTERVAL_MS * 2);
 
     if (final_entries) {
-        common.log(`\n[Main Worker] Processing final transfers...\n`);
+        common.log(`\nProcessing final transfers...\n`);
         await process_final_transfers(keys, final_entries);
-        await common.sleep(SPIDER_INTERVAL_MS * 2);
     }
 
     return rescue_keys;
