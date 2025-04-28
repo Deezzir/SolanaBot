@@ -20,7 +20,7 @@ export class Runner extends snipe.SniperBase {
             if (this._fetch_stop_func) this._fetch_stop_func();
             global.CONNECTION.removeOnLogsListener(this._subscription_id)
                 .then(() => (this._subscription_id = undefined))
-                .catch((err) => common.error(`[ERROR] Failed to unsubscribe from logs: ${err}`));
+                .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
         }
     }
 

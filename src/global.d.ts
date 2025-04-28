@@ -10,4 +10,4 @@ declare global {
     var MOONSHOT: Moonshot;
 }
 
-export { };
+export {};

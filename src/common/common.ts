@@ -110,7 +110,7 @@ export async function to_confirm(message: string) {
     rl.close();
 }
 
-export function setup_rescue_file(): string | undefined {
+export function setup_rescue_file(): string {
     const file_name = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
     const target_file = `${file_name}.csv`;
     const target_file_path = path.join(WALLETS_RESCUE_DIR_PATH, target_file);
@@ -122,10 +122,10 @@ export function setup_rescue_file(): string | undefined {
             writeFileSync(target_file_path, WALLETS_FILE_HEADERS.join(',') + '\n', 'utf-8');
             return target_file_path;
         } catch (err) {
-            error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${err}`);
+            throw new Error(`Failed to process target rescue entry '${target_file_path}': ${err}`);
         }
     } catch (err) {
-        error(`[ERROR] Failed to process '${WALLETS_RESCUE_DIR_PATH}': ${err}`);
+        throw new Error(`Failed to process '${WALLETS_RESCUE_DIR_PATH}': ${err}`);
     }
 }
 
@@ -141,7 +141,7 @@ export function save_rescue_key(keypair: Keypair, target_file_path: string, pref
             appendFileSync(target_file_path, row + '\n', 'utf8');
             return true;
         } catch (err) {
-            error(`[ERROR] Failed to write a wallet to a rescue file: ${err}`);
+            error(red(`Failed to write a wallet to a rescue file: ${err}`));
         }
     }
     return false;
@@ -173,11 +173,7 @@ export function get_wallets(keys_csv_path: string): Wallet[] {
         });
         return rows;
     } catch (error) {
-        if (error instanceof Error) {
-            throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error.message}`);
-        } else {
-            throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error}`);
-        }
+        throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error}`);
     }
 }
 
@@ -262,7 +258,7 @@ export function read_json(file_path: string): object {
         const content = readFileSync(file_path, 'utf8');
         return JSON.parse(content);
     } catch (err) {
-        throw new Error(`[ERROR] failed to read JSON file: ${err}`);
+        throw new Error(`Failed to read JSON file: ${err}`);
     }
 }
 
@@ -273,7 +269,7 @@ export async function fetch_ipfs_json(cid: string): Promise<IPFSMetadata> {
         const data = await response.json();
         return data as IPFSMetadata;
     } catch (error) {
-        throw new Error(`[ERROR] Failed to fetch IPFS JSON: ${error}`);
+        throw new Error(`Failed to fetch IPFS JSON: ${error}`);
     }
 }
 
@@ -305,7 +301,7 @@ export const fetch_sol_price = async (): Promise<number> => {
             return data.solPrice;
         })
         .catch((err) => {
-            error(`[ERROR] Failed fetching the SOL price: ${err}`);
+            error(red(`Failed fetching the SOL price: ${err}`));
             return 0.0;
         });
 };

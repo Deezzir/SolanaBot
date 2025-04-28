@@ -403,7 +403,7 @@ export class Trader {
             try {
                 sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
             } catch (error) {
-                common.error(`[ERROR] Failed to send the sell transaction, retrying...`);
+                common.error(common.red(`Failed to send the sell transaction, retrying...`));
                 retries++;
                 await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
             }
@@ -977,7 +977,7 @@ export class Trader {
                 });
             })
             .catch((err) => {
-                common.error(`[ERROR] Failed fetching the mints: ${err}`);
+                common.error(common.red(`Failed fetching the mints: ${err}`));
                 return [];
             });
     }

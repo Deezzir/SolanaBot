@@ -112,7 +112,7 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
     let pending = records.filter((r) => !r.tx).slice(0, DROP_RECORDS_PER_ITERATION);
 
     if (pending.length === 0) {
-        common.error(common.red('No records to process'));
+        common.error(common.yellow('No records to process'));
         return;
     }
 
@@ -133,7 +133,7 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
                         common.log(common.green(`Sent ${record.tokensToSend} to ${receiver.toBase58()} | tx: ${sig}`));
                     });
             } catch (error: any) {
-                common.error(common.red(`Error for ${receiver.toBase58()}: ${error.message}`));
+                common.error(common.red(`Failed to send tokens to ${receiver.toBase58()}: ${error.message}`));
                 if (error.message.includes('Provided owner is not allowed')) {
                     record.tx = 'Provided owner is not allowed';
                 }
@@ -157,7 +157,7 @@ async function airdrop_csv(
 ): Promise<void> {
     const count = count_airdrop_records(airdrop_path);
     if (count === 0) {
-        common.error(common.red('No airdrop records found.'));
+        common.error(common.yellow('No airdrop records found.'));
         return;
     }
 
@@ -179,7 +179,7 @@ async function presale_csv(
 ): Promise<void> {
     const count = count_presale_records(presale_path);
     if (count === 0) {
-        common.error(common.red('No presale records found.'));
+        common.error(common.yellow('No presale records found.'));
         return;
     }
 

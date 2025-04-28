@@ -181,7 +181,6 @@ export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigin
         const mint_data = await getMint(global.CONNECTION, mint, COMMITMENT);
         return { supply: mint_data.supply, decimals: mint_data.decimals };
     } catch (err) {
-        common.error(`[ERROR] Failed to get the token supply: ${err}`);
         return {
             supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_CURVE_DECIMALS),
             decimals: TRADE_DEFAULT_CURVE_DECIMALS
@@ -513,32 +512,24 @@ export async function get_balance_change(signature: string, address: PublicKey):
 export async function check_has_balances(wallets: common.Wallet[], min_balance: number = 0): Promise<boolean> {
     let ok = true;
 
-    try {
-        const balance_checks = wallets.map(async (wallet) => {
-            const holder = wallet.keypair;
-            try {
-                const lamports = await get_balance(holder.publicKey);
-                const sol_balance = lamports / LAMPORTS_PER_SOL;
-                if (sol_balance <= min_balance) {
-                    common.error(
-                        `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
-                    );
-                    ok = false;
-                }
-            } catch (err) {
-                common.error(`Failed to get the balance: ${err} for 'wallet ${wallet.id}'`);
+    const balance_checks = wallets.map(async (wallet) => {
+        const holder = wallet.keypair;
+        try {
+            const lamports = await get_balance(holder.publicKey);
+            const sol_balance = lamports / LAMPORTS_PER_SOL;
+            if (sol_balance <= min_balance) {
+                common.error(
+                    `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
+                );
                 ok = false;
             }
-        });
-
-        await Promise.all(balance_checks);
-
-        if (!ok) common.error('[ERROR] Some accounts are empty.');
-        return ok;
-    } catch (err) {
-        common.error(`[ERROR] failed to process keys: ${err} `);
-        return false;
-    }
+        } catch (err) {
+            common.error(common.red(`Failed to get the balance: ${err} for 'wallet ${wallet.id}'`));
+            ok = false;
+        }
+    });
+    await Promise.all(balance_checks);
+    return ok;
 }
 
 export async function send_lamports(
@@ -594,12 +585,14 @@ export async function send_lamports_with_retries(
             return await send_lamports(amount, sender, receiver, priority);
         } catch (error) {
             if (attempt < max_retries) {
-                common.error(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`);
+                common.error(
+                    common.red(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`)
+                );
                 const balance = await get_balance(sender.publicKey);
                 if (balance === 0) throw new Error(`Sender has no balance.`);
                 if (balance < amount) amount = balance;
             } else {
-                common.error(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`);
+                common.error(common.red(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`));
             }
         }
         await common.sleep(TRADE_RETRY_INTERVAL_MS * attempt);
@@ -704,48 +697,48 @@ export async function create_assoc_token_account(payer: Signer, owner: PublicKey
     }
 }
 
-export async function close_accounts(owner: Keypair): Promise<PublicKey[]> {
-    const token_accounts = await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
-        programId: TOKEN_PROGRAM_ID
-    });
-    const deserialized = token_accounts.value.map((acc) => {
+export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; unsold: PublicKey[] }> {
+    const token_accounts = (
+        await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
+            programId: TOKEN_PROGRAM_ID
+        })
+    ).value.map((acc) => {
         return {
             pubkey: acc.pubkey,
             data: AccountLayout.decode(acc.account.data)
         };
     });
-    const unsold = deserialized
-        .filter((acc) => acc.data.amount !== BigInt(0))
-        .map(async (acc) => {
-            const mint = acc.data.mint;
-            const { decimals } = await get_token_supply(mint);
-            const balance = Number(acc.data.amount) / 10 ** decimals;
-            common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()} `);
-            return acc.data.mint;
-        });
+    const unsold_mints = await Promise.all(
+        token_accounts
+            .filter((acc) => acc.data.amount !== BigInt(0))
+            .map(async (acc) => {
+                const mint = acc.data.mint;
+                const balance = Number(acc.data.amount) / 10 ** (await get_token_supply(mint)).decimals;
+                common.log(`Unsold mint: ${mint.toString()} | Balance: ${balance.toString()} `);
+                return acc.data.mint;
+            })
+    );
+    const accounts_to_close = token_accounts.filter((acc) => acc.data.amount === BigInt(0));
 
-    const accounts = deserialized.filter((acc) => acc.data.amount === BigInt(0));
-
-    for (const chunk of common.chunks(accounts, 15)) {
+    if ((await get_balance(owner.publicKey)) === 0) {
+        common.error(common.red(`Owner has no balance to close the accounts, skipping...`));
+        return { ok: false, unsold: unsold_mints };
+    }
+    for (const chunk of common.chunks(accounts_to_close, 15)) {
         while (true) {
-            const intructions: TransactionInstruction[] = [];
-            for (const account of chunk) {
-                intructions.push(createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey));
-            }
-
+            const intructions = chunk.map((account) => {
+                return createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey);
+            });
             try {
                 const signature = await create_and_send_tx(intructions, [owner], PriorityLevel.HIGH);
                 common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {
-                if (err instanceof Error) {
-                    common.error(`Failed to close accounts: ${err.message}, retrying...`);
-                }
-                common.error(`Failed to close accounts, retrying...`);
+                common.error(common.red(`Failed to close accounts, retrying...`));
             }
         }
     }
-    return await Promise.all(unsold);
+    return { ok: true, unsold: unsold_mints };
 }
 
 export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {

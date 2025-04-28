@@ -34,7 +34,7 @@ function get_trader(program: common.Program): trade.IProgramTrader {
             return GenericTrader;
         }
         default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
+            throw new Error(`Invalid program received: ${program}`);
         }
     }
 }
@@ -49,43 +49,31 @@ function get_sniper(program: common.Program): snipe_common.ISniper {
             return new MoonRunner(trader);
         }
         case common.Program.Generic: {
-            throw new Error('[ERROR] Generic program is not supported for sniping.');
+            throw new Error('Generic program is not supported for sniping.');
         }
         default: {
-            throw new Error(`[ERROR] Invalid program received: ${program}`);
+            throw new Error(`Invalid program received: ${program}`);
         }
     }
 }
 
 export async function clean(wallets: common.Wallet[]): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
-    common.log(common.yellow('Cleaning all the accounts...\n'));
-    let unsold_set: string[] = [];
+    common.log(common.yellow('Closing all the token accounts for the wallets...'));
+    let unsold_mints: string[] = [];
 
     for (const wallet of wallets) {
         const closer = wallet.keypair;
-        const balance = await trade.get_balance(closer.publicKey);
-        if (balance === 0) {
-            common.error(
-                common.red(
-                    `No balance for ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name}), skipping...`
-                )
-            );
-            continue;
-        }
-
-        common.log(`Cleaning ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
-        const unsold = await trade.close_accounts(closer);
-        if (unsold) unsold_set = [...new Set([...unsold_set, ...unsold.map((i) => i.toString())])];
-        common.log(common.green(`Cleaned`));
+        common.log(`\nCleaning ${closer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`);
+        const { ok, unsold } = await trade.close_accounts(closer);
+        unsold_mints = [...new Set([...unsold_mints, ...unsold.map((i) => i.toString())])];
+        if (ok) common.log(common.green(`Cleaned`));
     }
 
-    if (unsold_set.length > 0) {
+    if (unsold_mints.length > 0) {
         common.log(common.red(`\nUnsold Tokens:`));
-        for (const item of unsold_set) {
-            common.log(common.bold(`Mint: ${item}`));
-        }
+        unsold_mints.forEach((mint) => common.log(common.bold(mint)));
     }
 }
 
@@ -110,7 +98,7 @@ export async function create_token(
     const balance = (await trade.get_balance(dev.keypair.publicKey)) / LAMPORTS_PER_SOL;
     const meta = await common.fetch_ipfs_json(meta_cid);
 
-    if (dev_buy && dev_buy > balance) throw new Error(`[ERROR] Dev balance is not enough to buy for ${dev_buy} SOL`);
+    if (dev_buy && dev_buy > balance) throw new Error(`Dev balance is not enough to buy for ${dev_buy} SOL`);
 
     common.log(common.yellow(`Dev: ${dev.keypair.publicKey.toString()} | Balance: ${balance.toFixed(2)} SOL`));
     common.log(common.bold(`Dev Buy: ${dev_buy.toFixed(2)} SOL\n`));
@@ -130,7 +118,7 @@ export async function create_token(
         common.log(common.bold(`\nToken created | Signature: ${sig}`));
         common.log(common.bold(`Mint address: ${mint_addr}`));
     } catch (error) {
-        throw new Error(`[ERROR] Failed to create token: ${error}`);
+        throw new Error(`Failed to create token: ${error}`);
     }
 }
 
@@ -155,8 +143,10 @@ export async function promote(
         transactions.push(
             trader
                 .create_token(dev, meta.name, meta.symbol, meta_cid)
-                .then(([sig, mint]) => common.log(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
-                .catch((error) => common.error(`Transaction failed: ${error.message}`))
+                .then(([sig, mint]) =>
+                    common.log(common.green(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
+                )
+                .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)))
         );
 
         times--;
@@ -167,7 +157,7 @@ export async function promote(
 }
 
 export async function token_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
     common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
 
@@ -180,7 +170,7 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         supply = Number(supply_raw);
         common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}\n`));
     } catch (error) {
-        throw new Error(`[ERROR] Failed to get the token information: ${error}`);
+        throw new Error(`Failed to get the token information: ${error}`);
     }
 
     common.print_header([
@@ -228,18 +218,12 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
 }
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
+    if (sender.publicKey.equals(receiver)) throw new Error('Sender and receiver addresses are the same.');
     common.log(
         common.yellow(`Transferring ${amount} SOL from ${sender.publicKey.toString()} to ${receiver.toString()}...`)
     );
     const balance = await trade.get_balance(sender.publicKey);
-
-    if (sender.publicKey.equals(receiver)) {
-        throw new Error('[ERROR] Sender and receiver addresses are the same.');
-    }
-
-    if (balance < amount * LAMPORTS_PER_SOL) {
-        throw new Error(`[ERROR] Sender balance is not enough to transfer ${amount} SOL`);
-    }
+    if (balance < amount * LAMPORTS_PER_SOL) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
     trade
         .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.DEFAULT)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
@@ -247,7 +231,7 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
 }
 
 export async function balance(wallets: common.Wallet[]): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
     let total = 0;
     common.log(common.yellow('Getting the balance of the wallets...'));
@@ -293,33 +277,25 @@ export async function sell_token_once(
 ): Promise<void> {
     slippage = slippage || COMMANDS_SELL_SLIPPAGE;
     percent = percent || 1.0;
+    const trader = get_trader(program);
+    const mint_meta = await trader.get_mint_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...`));
-
     const token_amount = await trade.get_token_balance(seller.publicKey, mint);
     common.log(
         common.bold(
             `\nSeller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
         )
     );
-
-    if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) {
-        throw new Error('[ERROR] No tokens to sell');
-    }
+    if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) throw new Error('No tokens to sell');
 
     const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
-
     common.log(
         `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')}...`
     );
 
-    const trader = get_trader(program);
-    let mint_meta = await trader.get_mint_meta(mint);
-
-    if (!mint_meta) {
-        throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
-    }
     trader
         .sell_token(token_amount_to_sell, seller, mint_meta, slippage, priority, protection_tip)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
@@ -336,21 +312,15 @@ export async function buy_token_once(
     program: common.Program = common.Program.Pump
 ): Promise<void> {
     slippage = slippage || COMMANDS_BUY_SLIPPAGE;
+    const trader = get_trader(program);
+    const mint_meta = await trader.get_mint_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
     const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
     common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
-    if (balance < amount) {
-        throw new Error(`[ERROR] Buyer balance is not enough to buy ${amount} SOL`);
-    }
-
-    const trader = get_trader(program);
-    let mint_meta: trade.IMintMeta | undefined = await trader.get_mint_meta(mint);
-
-    if (!mint_meta) {
-        throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
-    }
+    if (balance < amount) throw new Error(`Buyer balance is not enough to buy ${amount} SOL`);
 
     trader
         .buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip)
@@ -371,10 +341,10 @@ export async function warmup(
     max = max || 5;
     const slippage = COMMANDS_BUY_SLIPPAGE;
 
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
-    if (max < min) throw new Error('[ERROR] Invalid min and max values.');
-    if (interval && bundle_tip) throw new Error('[ERROR] Interval and bundle tip cannot be used together.');
-    if (!interval && !bundle_tip) throw new Error('[ERROR] Interval or bundle tip should be provided.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
+    if (max < min) throw new Error('Invalid min and max values.');
+    if (interval && bundle_tip) throw new Error('Interval and bundle tip cannot be used together.');
+    if (!interval && !bundle_tip) throw new Error('Interval or bundle tip should be provided.');
 
     common.log(common.yellow(`Warming up ${wallets.length} accounts...`));
 
@@ -437,13 +407,12 @@ export async function warmup(
 }
 
 export async function collect(wallets: common.Wallet[], receiver: PublicKey): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
     common.log(common.yellow(`Collecting all the SOL from the accounts...`));
     common.log(common.yellow(`Receiver address: ${receiver.toString()}\n`));
 
     const transactions = [];
-
     for (const wallet of wallets) {
         const sender = wallet.keypair;
         const amount = await trade.get_balance(sender.publicKey);
@@ -460,15 +429,13 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
                 )
                 .catch((error) => common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`)))
         );
-
         await common.sleep(COMMANDS_INTERVAL_MS);
     }
-
     await Promise.allSettled(transactions);
 }
 
 export async function collect_token(wallets: common.Wallet[], mint: PublicKey, receiver: PublicKey): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
     common.log(common.yellow(`Collecting all the tokens from the accounts to ${receiver}...`));
 
@@ -504,14 +471,10 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
                     )
             );
         } catch (error) {
-            if (error instanceof Error) {
-                common.error(common.red(`Failed to collect the token from ${wallet.name}: ${error.message}`));
-            }
+            common.error(common.red(`Failed to collect the token from ${wallet.name}: ${error}`));
         }
-
         await common.sleep(COMMANDS_INTERVAL_MS);
     }
-
     await Promise.allSettled(transactions);
 }
 
@@ -529,17 +492,16 @@ export async function buy_token(
 ): Promise<void> {
     const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
 
-    if (protection_tip && bundle_tip) throw new Error('[ERROR] Protection tip and bundle tip cannot be used together.');
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
-    if (!amount && (!min || !max)) throw new Error('[ERROR] Either amount or min and max should be provided.');
-    if ((min && !max) || (!min && max)) throw new Error('[ERROR] Both min and max should be provided.');
-    if (max && min && max < min) throw new Error('[ERROR] Invalid min and max values.');
-
-    common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
+    if (protection_tip && bundle_tip) throw new Error('Protection tip and bundle tip cannot be used together.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
+    if (!amount && (!min || !max)) throw new Error('Either amount or min and max should be provided.');
+    if ((min && !max) || (!min && max)) throw new Error('Both min and max should be provided.');
+    if (max && min && max < min) throw new Error('Invalid min and max values.');
 
     const trader = get_trader(program);
     let mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
+    common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
 
     if (!bundle_tip)
         return await mass_trade.seq_buy(
@@ -569,15 +531,14 @@ export async function sell_token(
     slippage = slippage || COMMANDS_SELL_SLIPPAGE;
     percent = percent || 1.0;
 
-    if (protection_tip && bundle_tip) throw new Error('[ERROR] Protection tip and bundle tip cannot be used together.');
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (protection_tip && bundle_tip) throw new Error(' Protection tip and bundle tip cannot be used together.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
+    const trader = get_trader(program);
+    let mint_meta = await trader.get_mint_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...\n`));
-
-    const trader = get_trader(program);
-    let mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`[ERROR] Mint metadata not found for program: ${program}.`);
 
     if (!bundle_tip)
         return await mass_trade.seq_sell(mint_meta, wallets, trader, percent, slippage, priority, protection_tip);
@@ -592,8 +553,8 @@ export async function fund(
     is_random: boolean,
     depth?: number
 ): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
-    if (depth && is_spider) throw new Error('[ERROR] Transfers and spider cannot be used together.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
+    if (depth && is_spider) throw new Error('Transfers and spider cannot be used together.');
     const total_amount = wallets.length * amount;
     let amounts: number[] = [];
 
@@ -608,9 +569,7 @@ export async function fund(
     const balance = (await trade.get_balance(funder.publicKey)) / LAMPORTS_PER_SOL;
     common.log(common.yellow(`Payer address: ${funder.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < total_amount) {
-        throw new Error(
-            `[ERROR] Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`
-        );
+        throw new Error(`Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`);
     }
 
     if (is_spider) {
@@ -637,7 +596,7 @@ export async function snipe(
     program: common.Program = common.Program.Pump,
     json_config?: object
 ): Promise<void> {
-    if (wallets.length === 0) throw new Error('[ERROR] No wallets available.');
+    if (wallets.length === 0) throw new Error('No wallets available.');
 
     const sol_price = await common.fetch_sol_price();
     const sniper = get_sniper(program);
@@ -674,7 +633,7 @@ export function generate(
                     is_reserve: false
                 });
             } catch {
-                throw new Error(`[ERROR] Invalid key at line ${i + 1}`);
+                throw new Error(`Invalid key at line ${i + 1}`);
             }
         });
     } else if (count) {
@@ -825,7 +784,7 @@ export async function start_volume(
 
     common.log(common.yellow(`Starting the ${volume_type_name} Volume Bot...`));
 
-    let rescue_wallets: common.Wallet[] | undefined;
+    let rescue_wallets: common.Wallet[] = [];
     switch (volume_config.type) {
         case volume.VolumeType.Fast: {
             rescue_wallets = await volume.execute_fast(funder, volume_config, trader);
@@ -840,12 +799,10 @@ export async function start_volume(
             break;
         }
         default:
-            throw new Error('[ERROR] Invalid Volume Bot type.');
+            throw new Error('Invalid Volume Bot type.');
     }
-    if (rescue_wallets) {
-        common.log(`\nPerforming cleanup of the temporary wallets...\n`);
-        await collect(rescue_wallets, funder.publicKey);
-    }
+    common.log(`\nPerforming cleanup of the temporary wallets...\n`);
+    await collect(rescue_wallets, funder.publicKey);
 }
 
 export async function benchmark(
@@ -935,6 +892,7 @@ export async function drop(
     );
 
     const mint_meta = await trade.get_token_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${common.Program.Pump}.`);
     common.log(`Token name: ${mint_meta.token_name} | Symbol: ${mint_meta.token_symbol}\n`);
 
     let token_balance: number = 0;
@@ -947,7 +905,7 @@ export async function drop(
             )
         );
     } catch (err) {
-        throw new Error('[ERROR] Failed to get dropper balance');
+        throw new Error('Failed to get dropper balance');
     }
 
     await token_drop.execute(

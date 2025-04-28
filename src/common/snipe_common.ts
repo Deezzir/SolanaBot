@@ -94,18 +94,18 @@ export abstract class SniperBase implements ISniper {
             } catch (error) {
                 if (error instanceof Error) {
                     if (error.message.includes('prompt')) {
-                        throw new Error('[ERROR] You cancelled the bot setup.');
+                        throw new Error('The bot setup was cancelled.');
                     }
                     throw new Error(`${error.message}`);
                 } else {
-                    throw new Error('[ERROR] Failed to setup the bot.');
+                    throw new Error('Failed to setup the bot.');
                 }
             }
         }
     }
 
     public async snipe(wallets: common.Wallet[], sol_price: number): Promise<void> {
-        if (!this.bot_config) throw new Error('[ERROR] The bot configuration is not set.');
+        if (!this.bot_config) throw new Error('The bot configuration is not set.');
 
         if (this.bot_config.mint) {
             common.log(common.yellow('Sniping existing mint...'));
@@ -116,12 +116,12 @@ export abstract class SniperBase implements ISniper {
         this.setup_cmd_interface();
 
         common.log('[Main Worker] Starting the bot...');
-        const ok = await this.workers_start(wallets);
-        if (!ok) {
+        try {
+            await this.workers_start(wallets);
+        } catch (error) {
             common.close_readline();
-            throw new Error('[ERROR] Failed to start the workers. Exiting...');
+            throw new Error(`Failed to start the workers: ${error} Exiting...`);
         }
-
         common.log('[Main Worker] Bot started successfully, waiting for the token...');
 
         try {
@@ -149,7 +149,7 @@ export abstract class SniperBase implements ISniper {
                     if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
                     this.workers_post_message('mint', mint_meta);
                 } catch (err) {
-                    common.error(`[ERROR] Failed to update token metadata`);
+                    common.error(common.red(`Failed to update token metadata`));
                 }
             }, SNIPE_META_UPDATE_INTERVAL_MS);
 
@@ -157,7 +157,7 @@ export abstract class SniperBase implements ISniper {
             await this.workers_wait();
             clearInterval(interval);
         } catch (error) {
-            throw new Error(`[ERROR] ${error}`);
+            throw new Error(`Failed to snipe the token: ${error}`);
         } finally {
             common.close_readline();
         }
@@ -191,19 +191,14 @@ export abstract class SniperBase implements ISniper {
         this.workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
     }
 
-    private async workers_start(wallets: common.Wallet[]): Promise<boolean> {
+    private async workers_start(wallets: common.Wallet[]): Promise<void> {
         wallets = wallets.filter((wallet) => !wallet.is_reserve).slice(0, this.bot_config!.thread_cnt);
 
-        if (wallets.length < this.bot_config!.thread_cnt) {
-            common.error(`[ERROR] The number of keys doesn't match the number of threads`);
-            return false;
-        }
+        if (wallets.length < this.bot_config!.thread_cnt)
+            throw new Error(`The number of keys doesn't match the number of threads`);
 
         const all_has_balances = await trade.check_has_balances(wallets);
-        if (!all_has_balances) {
-            common.error('[ERROR] Topup the specified accounts, exiting...');
-            return false;
-        }
+        if (!all_has_balances) throw new Error('Topup the specified accounts, exiting...');
 
         common.log('[Main Worker] Starting the workers...');
         const started_promises: Promise<void>[] = [];
@@ -240,7 +235,7 @@ export abstract class SniperBase implements ISniper {
                     common.log(msg);
                 });
                 worker.on('error', (err) => {
-                    common.error(`[Worker ${wallet.id}] Encountered error: ${err}`);
+                    common.error(common.red(`[Worker ${wallet.id}] Encountered error: ${err}`));
                     reject();
                 });
                 worker.on('exit', (code) => {
@@ -255,8 +250,6 @@ export abstract class SniperBase implements ISniper {
 
         await Promise.all(started_promises);
         common.log('[Main Worker] All workers have started');
-
-        return true;
     }
 
     private setup_cmd_interface() {
@@ -325,7 +318,7 @@ export abstract class SniperBase implements ISniper {
     private async validate_json_config(json: any, keys_cnt: number): Promise<BotConfig> {
         const required_fields = ['thread_cnt', 'spend_limit', 'start_buy'];
         for (const field of required_fields) {
-            if (!(field in json)) throw new Error(`[ERROR] Missing required field: ${field}`);
+            if (!(field in json)) throw new Error(`Missing required field: ${field}`);
         }
         const {
             token_name,
@@ -344,13 +337,13 @@ export abstract class SniperBase implements ISniper {
             protection_tip
         } = json;
         if (mint === undefined && token_name === undefined && token_ticker === undefined) {
-            throw new Error('[ERROR] Missing mint or token name and token ticker.');
+            throw new Error('Missing mint or token name and token ticker.');
         }
         if (mint !== undefined) {
             if (token_name !== undefined || token_ticker !== undefined)
-                throw new Error('[ERROR] Mint and token name/token ticker are mutually exclusive. Choose one.');
+                throw new Error('Mint and token name/token ticker are mutually exclusive. Choose one.');
             if (!common.is_valid_pubkey(mint) || (await this.trader.get_mint_meta(new PublicKey(mint))) === undefined) {
-                throw new Error('[ERROR] Invalid mint public key.');
+                throw new Error('Invalid mint public key.');
             }
             json.mint = new PublicKey(json.mint);
         }
@@ -358,46 +351,44 @@ export abstract class SniperBase implements ISniper {
             (token_name === undefined && token_ticker !== undefined) ||
             (token_name !== undefined && token_ticker === undefined)
         ) {
-            throw new Error('[ERROR] Both token name and token ticker are required.');
+            throw new Error('Both token name and token ticker are required.');
         }
         if (typeof spend_limit !== 'number' || spend_limit <= SNIPE_MIN_BUY) {
-            throw new Error(`[ERROR] spend_limit must be a number greater than ${SNIPE_MIN_BUY}.`);
+            throw new Error(`spend_limit must be a number greater than ${SNIPE_MIN_BUY}.`);
         }
         if (typeof start_buy !== 'number' || start_buy <= SNIPE_MIN_BUY || start_buy > spend_limit) {
-            throw new Error(
-                `[ERROR] start_buy must be a number greater than ${SNIPE_MIN_BUY} and less than spend_limit.`
-            );
+            throw new Error(`start_buy must be a number greater than ${SNIPE_MIN_BUY} and less than spend_limit.`);
         }
         if (typeof thread_cnt !== 'number' || thread_cnt > keys_cnt) {
-            throw new Error('[ERROR] thread_cnt must be a number and less than or equal to keys_cnt.');
+            throw new Error('thread_cnt must be a number and less than or equal to keys_cnt.');
         }
         if (mcap_threshold && (typeof mcap_threshold !== 'number' || mcap_threshold < SNIPE_MIN_MCAP)) {
-            throw new Error(`[ERROR] mcap_threshold must be a number greater than or equal to ${SNIPE_MIN_MCAP}.`);
+            throw new Error(`mcap_threshold must be a number greater than or equal to ${SNIPE_MIN_MCAP}.`);
         }
         if (start_interval && (typeof start_interval !== 'number' || start_interval < 0)) {
-            throw new Error('[ERROR] start_interval must be a number greater than or equal to 0.');
+            throw new Error('start_interval must be a number greater than or equal to 0.');
         }
         if (is_buy_once && typeof is_buy_once !== 'boolean') {
-            throw new Error('[ERROR] is_buy_once must be a boolean');
+            throw new Error('is_buy_once must be a boolean');
         }
         if (buy_interval && (typeof buy_interval !== 'number' || buy_interval <= 0)) {
-            throw new Error('[ERROR] buy_interval must be a number greater than 0.');
+            throw new Error('buy_interval must be a number greater than 0.');
         }
         if (!is_buy_once && buy_interval === undefined) {
-            throw new Error('[ERROR] buy_interval is required when is_buy_once is false.');
+            throw new Error('buy_interval is required when is_buy_once is false.');
         }
         if (is_buy_once && buy_interval !== undefined) {
-            throw new Error('[ERROR] buy_interval is not required when is_buy_once is true.');
+            throw new Error('buy_interval is not required when is_buy_once is true.');
         }
         if (sell_slippage !== undefined) {
             if (typeof sell_slippage !== 'number' || sell_slippage < 0.0 || sell_slippage > TRADE_MAX_SLIPPAGE) {
-                throw new Error(`[ERROR] sell_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
+                throw new Error(`sell_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
             }
             json.sell_slippage = sell_slippage;
         }
         if (buy_slippage !== undefined) {
             if (typeof buy_slippage !== 'number' || buy_slippage < 0.0 || buy_slippage > TRADE_MAX_SLIPPAGE) {
-                throw new Error(`[ERROR] buy_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
+                throw new Error(`buy_slippage must be a number between 0.0 and ${TRADE_MAX_SLIPPAGE}.`);
             }
             json.buy_slippage = buy_slippage;
         }
@@ -406,15 +397,13 @@ export abstract class SniperBase implements ISniper {
                 typeof priority_level !== 'string' ||
                 !Object.values(PriorityLevel).includes(priority_level as PriorityLevel)
             ) {
-                throw new Error(
-                    `[ERROR] priority_level must be a valid string, values: ${Object.values(PriorityLevel)}`
-                );
+                throw new Error(`priority_level must be a valid string, values: ${Object.values(PriorityLevel)}`);
             }
             json.priority_level = priority_level as PriorityLevel;
         }
         if (protection_tip !== undefined) {
             if (typeof protection_tip !== 'number' || protection_tip < 0.0) {
-                throw new Error('[ERROR] protection_tip must be a number greater than 0.0.');
+                throw new Error('protection_tip must be a number greater than 0.0.');
             }
             json.protection_tip = protection_tip;
         }
@@ -663,23 +652,23 @@ export abstract class SniperBase implements ISniper {
         switch (key) {
             case 'buy_interval':
                 if (common.validate_float(value, 0)) this.bot_config!.buy_interval = parseFloat(value);
-                else common.error('Invalid buy interval.');
+                else common.error(common.red('Invalid buy interval.'));
                 break;
             case 'spend_limit':
                 if (common.validate_float(value, SNIPE_MIN_BUY)) this.bot_config!.spend_limit = parseFloat(value);
-                else common.error('Invalid spend limit.');
+                else common.error(common.red('Invalid spend limit.'));
                 break;
             case 'is_buy_once':
                 if (value !== 'true' && value !== 'false')
-                    common.error('Invalid value for is_buy_once. Use true or false.');
+                    common.error(common.red('Invalid value for is_buy_once. Use true or false.'));
                 else this.bot_config!.is_buy_once = value === 'true';
                 break;
             case 'mcap_threshold':
                 if (common.validate_int(value, SNIPE_MIN_MCAP)) this.bot_config!.mcap_threshold = parseInt(value, 10);
-                else common.error('Invalid market cap threshold.');
+                else common.error(common.red('Invalid market cap threshold.'));
                 break;
             default:
-                common.error('Invalid key.');
+                common.error(common.red('Invalid key.'));
                 break;
         }
     }

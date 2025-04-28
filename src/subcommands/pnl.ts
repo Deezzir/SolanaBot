@@ -288,7 +288,7 @@ export async function get_wallet_pnl(public_key: PublicKey, sol_price: number): 
             total_unrealized_pnl
         };
     } catch (error) {
-        common.error(`Error fetching connected wallets and transactions: ${error}`);
+        common.error(common.red(`Error proccessing the wallet: ${error}`));
         throw error;
     }
 }

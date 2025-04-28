@@ -25,7 +25,7 @@ import base58 from 'bs58';
 
 function reserve_wallet_check(wallets: common.Wallet[]) {
     if (!common.check_reserve_exists(wallets)) {
-        common.error('[ERROR] Reserve wallet not found.');
+        common.error(common.red('Reserve wallet not found.'));
         exit(1);
     }
 }
@@ -33,12 +33,10 @@ function reserve_wallet_check(wallets: common.Wallet[]) {
 function get_wallets_from_file(file: string): common.Wallet[] {
     try {
         const wallets = common.get_wallets(file);
-        if (wallets.length === 0) common.error(common.yellow('[WARNING] The file does not containt any wallets.'));
+        if (wallets.length === 0) common.error(common.yellow('The file does not containt any wallets.'));
         return wallets;
     } catch (error) {
-        if (error instanceof Error) {
-            common.error(common.yellow(`[WARNING] ${error.message}`));
-        }
+        common.error(common.yellow(`${error}`));
     }
     return [];
 }
