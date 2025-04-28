@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
@@ -8,9 +8,11 @@ import {
     COMMANDS_MAX_RETRIES,
     IPFS,
     PUMP_FETCH_API_URL,
-    WALLETS_FILE_HEADERS
+    WALLETS_FILE_HEADERS,
+    WALLETS_RESCUE_DIR_PATH
 } from '../constants.js';
 import base58 from 'bs58';
+import path from 'path';
 
 export function staticImplements<T>() {
     return <U extends T>(constructor: U) => {
@@ -89,6 +91,10 @@ export function check_reserve_exists(keys: Wallet[]): boolean {
     return reserveCount === 1;
 }
 
+export function get_reserve_wallet(keys: Wallet[]): Wallet | undefined {
+    return keys.find((wallet) => wallet.is_reserve);
+}
+
 export function filter_wallets(wallet: Wallet[], from?: number, to?: number, list?: number[]): Wallet[] {
     return list ? wallet.filter((wallet) => list.includes(wallet.id)) : wallet.slice(from, to);
 }
@@ -102,6 +108,43 @@ export async function to_confirm(message: string) {
     await new Promise<void>((resolve) => rl.question(green(message), () => resolve()));
 
     rl.close();
+}
+
+export function setup_rescue_file(): string | undefined {
+    const file_name = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
+    const target_file = `${file_name}.csv`;
+    const target_file_path = path.join(WALLETS_RESCUE_DIR_PATH, target_file);
+
+    try {
+        if (!existsSync(WALLETS_RESCUE_DIR_PATH)) mkdirSync(WALLETS_RESCUE_DIR_PATH);
+        try {
+            if (existsSync(target_file_path)) throw 'Target already exists';
+            writeFileSync(target_file_path, WALLETS_FILE_HEADERS.join(',') + '\n', 'utf-8');
+            return target_file_path;
+        } catch (err) {
+            error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${err}`);
+        }
+    } catch (err) {
+        error(`[ERROR] Failed to process '${WALLETS_RESCUE_DIR_PATH}': ${err}`);
+    }
+}
+
+export function save_rescue_key(keypair: Keypair, target_file_path: string, prefix: number, index: number): boolean {
+    const key_name = `wallet${prefix}_${index}`;
+    const private_key = base58.encode(keypair.secretKey);
+    const public_key = keypair.publicKey.toString();
+    const date = new Date().toLocaleDateString();
+
+    if (existsSync(target_file_path)) {
+        try {
+            const row = [key_name, private_key, false, public_key, date].join(',');
+            appendFileSync(target_file_path, row + '\n', 'utf8');
+            return true;
+        } catch (err) {
+            error(`[ERROR] Failed to write a wallet to a rescue file: ${err}`);
+        }
+    }
+    return false;
 }
 
 export function get_wallets(keys_csv_path: string): Wallet[] {

@@ -1,7 +1,15 @@
 import inquirer from 'inquirer';
 import * as common from '../common/common.js';
-import { PublicKey } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import * as trade from '../common/trade_common.js';
+import {
+    JITO_BUNDLE_SIZE,
+    VOLUME_MAX_WALLETS_PER_EXEC,
+    TRADE_RETRY_ITERATIONS,
+    VOLUME_TRADE_SLIPPAGE,
+    JITO_BUNDLE_INTERVAL_MS
+} from '../constants.js';
+import { createCloseAccountInstruction } from '@solana/spl-token';
 
 type VolumeConfig = {
     type: VolumeType;
@@ -11,8 +19,7 @@ type VolumeConfig = {
     max_sol_amount: number;
     executions: number;
     delay: number;
-    jito_tip: number;
-    simulate: boolean;
+    bundle_tip: number;
 };
 
 export enum VolumeType {
@@ -21,16 +28,219 @@ export enum VolumeType {
     Bump = 'Bump'
 }
 
-export async function execute_fast(volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
-    for (let exec = 1; exec <= volume_config.executions; exec++) {
-        common.log(common.blue(`Running execution: ${exec}`));
+function calc_buy_amount(amount_sol: number, slippage: number, platform_fee: number, bundle_tip: number = 0): number {
+    return (
+        amount_sol / (slippage + 1.0) -
+        amount_sol * platform_fee * 2 -
+        5000 / LAMPORTS_PER_SOL -
+        bundle_tip -
+        0.0021 * 3
+    );
+}
+
+async function fund_bundle(
+    wallets: Keypair[],
+    amounts: number[],
+    funder: Signer,
+    bundle_tip: number
+): Promise<String[]> {
+    if (wallets.length !== amounts.length) throw new Error('Wallets and amounts length mismatch');
+    if (wallets.length === 0) throw new Error('No wallets to fund');
+
+    let instructions: TransactionInstruction[] = [];
+    wallets.forEach((keypair, i) => {
+        const receiver = keypair.publicKey;
+        const amount = amounts[i];
+
+        instructions.push(
+            SystemProgram.transfer({
+                fromPubkey: funder.publicKey,
+                toPubkey: receiver,
+                lamports: Math.floor(amount * LAMPORTS_PER_SOL)
+            })
+        );
+    });
+
+    const chunks = common.chunks(common.chunks(instructions, 20), JITO_BUNDLE_SIZE);
+    const bundle_ids: String[] = [];
+    for (const chunk of chunks) {
+        let retries = TRADE_RETRY_ITERATIONS;
+        while (retries > 0) {
+            const signers = Array.from({ length: chunk.length }, () => [funder]);
+            try {
+                const bundle_id = await trade.create_and_send_bundle(chunk, signers, bundle_tip);
+                bundle_ids.push(bundle_id);
+                break;
+            } catch (error) {
+                common.log(common.red(`Failed to send fund bundle: ${error}`));
+                retries--;
+                if (retries === 0) throw new Error('Failed to send bundle after multiple attempts');
+            }
+            await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        }
+    }
+    return bundle_ids;
+}
+
+async function collect_bundle(wallets: Keypair[], receiver: Signer, bundle_tip: number): Promise<String[]> {
+    if (wallets.length === 0) throw new Error('No wallets to collect from');
+
+    let filtered_keypairs = (
+        await Promise.all(
+            wallets.map(async (keypair) => {
+                const balance = await trade.get_balance(keypair.publicKey);
+                if (balance === 0) return;
+                return { keypair, balance };
+            })
+        )
+    ).filter((pair) => pair !== undefined);
+    const wallet_bundles = common.chunks(filtered_keypairs, JITO_BUNDLE_SIZE);
+
+    const bundle_ids: String[] = [];
+    for (const wallet_bundle of wallet_bundles) {
+        const instructions: TransactionInstruction[][] = [];
+        const signers: Signer[][] = [];
+        for (const [i, wallet] of wallet_bundle.entries()) {
+            const is_tipper = i === wallet_bundle.length - 1;
+            instructions.push([
+                SystemProgram.transfer({
+                    fromPubkey: wallet.keypair.publicKey,
+                    toPubkey: receiver.publicKey,
+                    lamports: Math.floor(wallet.balance - 5000 - (is_tipper ? bundle_tip * LAMPORTS_PER_SOL : 0))
+                })
+            ]);
+            signers.push([wallet.keypair]);
+        }
+        if (instructions.length === 0) continue;
+        let retries = TRADE_RETRY_ITERATIONS;
+        while (retries > 0) {
+            try {
+                const bundle_id = await trade.create_and_send_bundle(instructions, signers, bundle_tip);
+                bundle_ids.push(bundle_id);
+                break;
+            } catch (error) {
+                common.log(common.red(`Failed to send collect bundle: ${error}`));
+                retries--;
+                if (retries === 0) throw new Error('Failed to send bundle after multiple attempts');
+            }
+            await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        }
+    }
+    return bundle_ids;
+}
+
+async function buy_sell_bundle(
+    wallets: Keypair[],
+    amounts: number[],
+    trader: trade.IProgramTrader,
+    mint_meta: trade.IMintMeta,
+    bundle_tip: number
+): Promise<void> {
+    if (wallets.length !== amounts.length) throw new Error('Wallets and amounts length mismatch');
+    if (wallets.length === 0) throw new Error('No wallets to buy/sell');
+    const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
+    const amount_bundles = common.chunks(amounts, JITO_BUNDLE_SIZE);
+    const buy_bundles: Promise<boolean>[] = [];
+
+    for (const [bundle_idx, wallet_bundle] of wallet_bundles.entries()) {
+        const instructions: TransactionInstruction[][] = [];
+        const signers: Signer[][] = [];
+        const amount_bundle = amount_bundles[bundle_idx];
+        for (const [wallet_idx, wallet] of wallet_bundle.entries()) {
+            const is_tipper = wallet_idx === wallet_bundle.length - 1;
+            const token_ata = await trade.calc_assoc_token_addr(wallet.publicKey, mint_meta.mint_pubkey);
+            const amount = calc_buy_amount(
+                amount_bundle[wallet_idx],
+                VOLUME_TRADE_SLIPPAGE,
+                mint_meta.platform_fee,
+                is_tipper ? bundle_tip : 0
+            );
+            const [buy_instrs, sell_instrs] = await trader.buy_sell_instructions(
+                amount,
+                wallet,
+                mint_meta,
+                VOLUME_TRADE_SLIPPAGE
+            );
+            const close_account_instruction = createCloseAccountInstruction(
+                token_ata,
+                wallet.publicKey,
+                wallet.publicKey
+            );
+            instructions.push([...buy_instrs, ...sell_instrs, close_account_instruction]);
+            signers.push([wallet]);
+        }
+        buy_bundles.push(
+            trade
+                .create_and_send_bundle(instructions, signers, bundle_tip)
+                .then((signature) => {
+                    common.log(common.green(`Buy Bundle completed, signature: ${signature}`));
+                    return true;
+                })
+                .catch((error) => {
+                    common.error(common.red(`Buy Bundle failed: ${error}`));
+                    return false;
+                })
+        );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
+    }
+}
+
+export async function execute_fast(
+    funder: Signer,
+    volume_config: VolumeConfig,
+    trader: trade.IProgramTrader
+): Promise<common.Wallet[] | undefined> {
+    if (volume_config.bundle_tip === 0) throw new Error('Jito tip must be greater than 0 for fast volume bot');
+    const target_file = common.setup_rescue_file();
+    if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
+
+    const exec_cnt = volume_config.executions;
+    const wallet_cnt = volume_config.wallet_cnt;
+    const all_keypairs = [];
+    const mint_meta = await trader.get_mint_meta(volume_config.mint);
+    if (!mint_meta) throw new Error('[ERROR] Failed to fetch mint metadata.');
+
+    for (let exec = 0; exec < exec_cnt; exec++) {
+        const keypairs = Array.from({ length: wallet_cnt }, (_v, i) => {
+            const pair = new Keypair();
+            common.save_rescue_key(pair, target_file, 0, i);
+            return pair;
+        });
+        all_keypairs.push(...keypairs);
+        const amounts = [...new Array(wallet_cnt)].map(() =>
+            common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount)
+        );
+
+        common.log(common.blue(`\nRunning execution: ${exec + 1}`));
+
+        common.log('Topping up the wallets...');
+        try {
+            const bundle_ids = await fund_bundle(keypairs, amounts, funder, volume_config.bundle_tip);
+            common.log(common.green(`Fund completed, signatures:\n${bundle_ids.join('\n')}\n`));
+        } catch (error) {
+            common.log(common.red(`Fund failed: ${error}`));
+            return;
+        }
+
+        common.log(`Buying and selling the tokens...`);
+        await buy_sell_bundle(keypairs, amounts, trader, mint_meta, volume_config.bundle_tip);
 
         const delay_seconds = common.normal_random(volume_config.delay, volume_config.delay * 0.1);
         common.log(common.blue(`Sleeping for ${delay_seconds.toFixed(1)} seconds`));
         await common.sleep(delay_seconds * 1000);
     }
 
-    common.log('The Fast Volume Bot completed');
+    common.log('\nCollecting the funds from the wallets...');
+    try {
+        const bundle_ids = await collect_bundle(all_keypairs, funder, volume_config.bundle_tip);
+        common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}`));
+    } catch (error) {
+        common.log(common.red(`Collect failed: ${error}`));
+        return common.get_wallets(target_file);
+    }
+
+    common.log(common.green('\nThe Fast Volume Bot completed\n'));
 }
 
 export async function execute_natural(_volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
@@ -45,12 +255,7 @@ async function get_config() {
     let answers: VolumeConfig;
     do {
         let min_sol_amount: number;
-        const { simulate, type } = await inquirer.prompt<{ simulate: boolean; type: VolumeType }>([
-            {
-                type: 'confirm',
-                name: 'simulate',
-                message: 'Do you want to simulate the bot without making any trades?'
-            },
+        const { type } = await inquirer.prompt<{ type: VolumeType }>([
             {
                 type: 'list',
                 name: 'type',
@@ -67,9 +272,9 @@ async function get_config() {
                       {
                           type: 'number',
                           name: 'wallet_cnt',
-                          message: 'Enter the number of wallets to use, max 5 (eg. 2):',
+                          message: `Enter the number of wallets to use, max ${VOLUME_MAX_WALLETS_PER_EXEC} (eg. 2):`,
                           validate: (value: number | undefined) =>
-                              value && value > 0 && value <= 5
+                              value && value > 0 && value <= VOLUME_MAX_WALLETS_PER_EXEC
                                   ? true
                                   : 'Please enter a valid number greater than 0 and less than or equal to 5.'
                       }
@@ -113,13 +318,13 @@ async function get_config() {
             {
                 type: 'number',
                 name: 'executions',
-                message: 'Enter the number of executions (bundles) to perform (eg. 30):',
+                message: 'Enter the number of executions to perform (eg. 30):',
                 validate: (value: number | undefined) =>
                     value && value > 0 ? true : 'Please enter a valid number greater than 0.'
             },
             {
                 type: 'input',
-                name: 'jito_tip',
+                name: 'bundle_tip',
                 message: 'Enter the JITO tip amount in SOL (eg. 0.0001):',
                 validate: (value: string) => {
                     if (!common.validate_float(value, 0.00001))
@@ -127,27 +332,20 @@ async function get_config() {
                     return true;
                 },
                 filter: (value: string) => parseFloat(value)
+            },
+            {
+                type: 'input',
+                name: 'delay',
+                message: 'Enter the delay in seconds between the executions (eg. 2.5):',
+                validate: (value: string) => {
+                    if (!common.validate_float(value, 0.0)) return 'Please enter a valid number greater than 0.0.';
+                    return true;
+                },
+                filter: (value: string) => parseFloat(value)
             }
         ]);
 
-        answers = { ...answers, type, simulate, wallet_cnt };
-
-        if (!simulate) {
-            const delay = await inquirer.prompt<{ delay: number }>([
-                {
-                    type: 'input',
-                    name: 'delay',
-                    message: 'Enter the delay in seconds between the executions (eg. 2.5):',
-                    validate: (value: string) => {
-                        if (!common.validate_float(value, 0.01))
-                            return 'Please enter a valid number greater than 0.01.';
-                        return true;
-                    },
-                    filter: (value: string) => parseFloat(value)
-                }
-            ]);
-            answers = { ...answers, ...delay };
-        }
+        answers = { ...answers, type, wallet_cnt };
 
         await common.clear_lines_up(1);
         log_volume_config(answers);
@@ -168,7 +366,7 @@ async function get_config() {
 
 export async function setup_config(json_config?: object): Promise<VolumeConfig> {
     if (json_config) {
-        const volume_config = await validate_volume_config(json_config);
+        const volume_config = await validate_json_config(json_config);
 
         log_volume_config(volume_config);
         await common.to_confirm('Press ENTER to start the volume bot...');
@@ -193,42 +391,49 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
     }
 }
 
-export async function simulate(volume_config: VolumeConfig, trader: trade.IProgramTrader) {
-    const sol_price = await common.fetch_sol_price();
+export async function simulate(sol_price: number, volume_config: VolumeConfig, trader: trade.IProgramTrader) {
     const mint_meta = await trader.get_mint_meta(volume_config.mint);
     if (!mint_meta) throw new Error('[ERROR] Failed to fetch mint metadata.');
 
-    let total_tax_sol = 0;
-    let total_volume_sol = 0;
-    let total_sol = volume_config.max_sol_amount * volume_config.wallet_cnt;
+    switch (volume_config.type) {
+        case VolumeType.Fast: {
+            const total_wallet_cnt = volume_config.wallet_cnt * volume_config.executions;
+            let total_fee_sol = 0;
+            let total_volume_sol = 0;
+            let total_sol_utilization = volume_config.max_sol_amount * volume_config.wallet_cnt;
 
-    for (let i = 0; i < volume_config.executions; i++) {
-        for (let j = 0; j < volume_config.wallet_cnt; j++) {
-            const sol_amount = common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount);
+            total_fee_sol += Math.ceil(total_wallet_cnt / VOLUME_MAX_WALLETS_PER_EXEC) * volume_config.bundle_tip;
+            for (let i = 0; i < volume_config.executions; i++) {
+                for (let j = 0; j < volume_config.wallet_cnt; j++) {
+                    const sol_amount = common.uniform_random(
+                        volume_config.min_sol_amount,
+                        volume_config.max_sol_amount
+                    );
+                    total_fee_sol += sol_amount * mint_meta.platform_fee * 2 + volume_config.bundle_tip;
+                    total_volume_sol += sol_amount;
+                }
+            }
+            total_fee_sol += Math.ceil(total_wallet_cnt / JITO_BUNDLE_SIZE) * volume_config.bundle_tip;
 
-            total_tax_sol += sol_amount * mint_meta.platform_fee * 2;
-            total_volume_sol += sol_amount;
+            return {
+                total_sol_utilization,
+                total_fee_sol: total_fee_sol,
+                total_fee_usd: total_fee_sol * sol_price,
+                total_volume_sol,
+                total_volume_usd: total_volume_sol * sol_price
+            };
         }
-        total_tax_sol += volume_config.jito_tip;
+        default:
+            throw new Error('[ERROR] Not implemented.');
     }
-
-    return {
-        total_sol,
-        total_tax_sol,
-        total_sol_after_tax: total_sol - total_tax_sol,
-        total_tax_usd: total_tax_sol * sol_price,
-        total_volume_sol,
-        total_volume_usd: total_volume_sol * sol_price,
-        sol_price
-    };
 }
 
-async function validate_volume_config(json: any): Promise<VolumeConfig> {
-    const required_fields = ['mint', 'executions', 'jito_tip', 'min_sol_amount', 'max_sol_amount'];
+async function validate_json_config(json: any): Promise<VolumeConfig> {
+    const required_fields = ['mint', 'executions', 'bundle_tip', 'min_sol_amount', 'max_sol_amount'];
     for (const field of required_fields) {
         if (!json[field]) throw new Error(`[ERROR] Missing required field: ${field}`);
     }
-    const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, jito_tip, simulate, type } = json;
+    const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, bundle_tip, type } = json;
     if (type !== undefined) {
         if (typeof type !== 'string' || !Object.values(VolumeType).includes(type as VolumeType)) {
             throw new Error(`[ERROR] type must be a valid string, values: ${Object.values(VolumeType)}`);
@@ -247,31 +452,32 @@ async function validate_volume_config(json: any): Promise<VolumeConfig> {
     if (typeof executions !== 'number' || !Number.isInteger(executions) || executions <= 0) {
         throw new Error('[ERROR] Invalid executions number. Must be greater than 0.');
     }
-    if (typeof jito_tip !== 'number' || jito_tip < 0.0) {
-        throw new Error('[ERROR] Invalid jito_tip number. Must be greater than or equal to 0.');
+    if (typeof bundle_tip !== 'number' || bundle_tip < 0.0) {
+        throw new Error('[ERROR] Invalid bundle_tip number. Must be greater than or equal to 0.');
     }
-    if (simulate && typeof simulate !== 'boolean') {
-        throw new Error('[ERROR] Invalid simulate.');
-    }
-    if (delay && simulate === false && (typeof delay !== 'number' || delay <= 0)) {
+    if (typeof delay !== 'number' || delay <= 0) {
         throw new Error('[ERROR] Invalid delay number. Must be greater than 0.');
     }
     if (type) {
         if (
             type === VolumeType.Fast &&
-            (!wallet_cnt || typeof wallet_cnt !== 'number' || wallet_cnt <= 0 || wallet_cnt > 5)
+            (!wallet_cnt ||
+                typeof wallet_cnt !== 'number' ||
+                wallet_cnt <= 0 ||
+                wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC)
         ) {
-            throw new Error('[ERROR] Invalid wallet_cnt number. Must be greater than 0 and less than or equal to 5.');
+            throw new Error(
+                `[ERROR] Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
+            );
         }
 
         if (type === VolumeType.Natural && wallet_cnt) {
             throw new Error('[ERROR] Invalid wallet_cnt number. Must be undefined for Natural type.');
         }
     }
-    if (!('simulate' in json)) json.simulate = false;
     if (!('type' in json)) json.type = VolumeType.Fast;
     if (!('wallet_cnt' in json)) json.wallet_cnt = 1;
-    if (!('mint' in json)) json.mint = new PublicKey(mint);
+    json.mint = new PublicKey(mint);
 
     return json as VolumeConfig;
 }
@@ -281,9 +487,10 @@ function log_volume_config(volume_config: VolumeConfig) {
         ...volume_config,
         type: VolumeType[volume_config.type],
         mint: volume_config.mint.toString(),
-        simulate: volume_config.simulate ? 'Yes' : 'No',
-        min_sol_amount: volume_config.min_sol_amount.toFixed(5),
-        max_sol_amount: volume_config.max_sol_amount.toFixed(5)
+        min_sol_amount: `${volume_config.min_sol_amount} SOL`,
+        max_sol_amount: `${volume_config.max_sol_amount} SOL`,
+        bundle_tip: `${volume_config.bundle_tip} SOL`,
+        delay: volume_config.delay ? `${volume_config.delay} secs` : 'N/A'
     };
 
     const max_length = Math.max(...Object.values(to_print).map((value) => value.toString().length));

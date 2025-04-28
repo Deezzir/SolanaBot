@@ -1,17 +1,7 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
-import {
-    COMMANDS_INTERVAL_MS,
-    PriorityLevel,
-    SPIDER_EXTRA_SOL,
-    SPIDER_INTERVAL_MS,
-    SPIDER_RESCUE_DIR_PATH,
-    WALLETS_FILE_HEADERS
-} from '../constants.js';
-import path from 'path';
+import { COMMANDS_INTERVAL_MS, PriorityLevel, SPIDER_EXTRA_SOL, SPIDER_INTERVAL_MS } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import bs58 from 'bs58';
 
 type SpiderTreeNode = {
     amount: number;
@@ -99,50 +89,10 @@ function display_spider_tree(tree: SpiderTree) {
     common.log('');
 }
 
-function setup_rescue_file(): string | undefined {
-    const file_name = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '').replace(' ', '_');
-    const target_file = `${file_name}.csv`;
-    const target_file_path = path.join(SPIDER_RESCUE_DIR_PATH, target_file);
-
-    try {
-        if (!existsSync(SPIDER_RESCUE_DIR_PATH)) mkdirSync(SPIDER_RESCUE_DIR_PATH);
-        try {
-            if (existsSync(target_file_path)) throw 'Target already exists';
-            writeFileSync(target_file_path, WALLETS_FILE_HEADERS.join(',') + '\n', 'utf-8');
-            return target_file_path;
-        } catch (error) {
-            common.error(`[ERROR] Failed to process target rescue entry '${target_file_path}': ${error}`);
-            return;
-        }
-    } catch (error) {
-        common.error(`[ERROR] Failed to process '${SPIDER_RESCUE_DIR_PATH}': ${error}`);
-        return;
-    }
-}
-
-function save_rescue_key(keypair: Keypair, target_file_path: string, layer_cnt: number, index: number): boolean {
-    const key_name = `wallet${layer_cnt}_${index}`;
-    const private_key = bs58.encode(keypair.secretKey);
-    const public_key = keypair.publicKey.toString();
-    const date = new Date().toLocaleDateString();
-
-    if (existsSync(target_file_path)) {
-        try {
-            const row = [key_name, private_key, false, public_key, date].join(',');
-            appendFileSync(target_file_path, row + '\n', 'utf8');
-            return true;
-        } catch (error) {
-            common.error(`[ERROR] Failed to write a wallet to a rescue file: ${error}`);
-            return false;
-        }
-    }
-    return false;
-}
-
 function backup_spider_tree(tree: SpiderTree): string | undefined {
     if (!tree.head) return;
 
-    const target_file = setup_rescue_file();
+    const target_file = common.setup_rescue_file();
     if (!target_file) return;
 
     let postfixes: Map<number, number> = new Map();
@@ -151,7 +101,7 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
         if (node === null) return true;
 
         postfixes.set(layer_cnt, (postfixes.get(layer_cnt) ?? 0) + 1);
-        const ok = save_rescue_key(node.keypair, target_file, layer_cnt, postfixes.get(layer_cnt) || 0);
+        const ok = common.save_rescue_key(node.keypair, target_file, layer_cnt, postfixes.get(layer_cnt) || 0);
         if (!ok) return false;
 
         if (node.left) {
@@ -330,16 +280,16 @@ export async function run_deep_transfer(
     sender: Keypair,
     depth: number
 ): Promise<common.Wallet[]> {
-    const target_file = setup_rescue_file();
+    const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
 
     const transfer_map = wallets.map((wallet, index) => {
         const amount = amounts[index];
         const path = [
             sender,
-            ...Array.from({ length: depth }, () => {
+            ...Array.from({ length: depth }, (_v, i) => {
                 const pair = new Keypair();
-                save_rescue_key(pair, target_file, 0, index);
+                common.save_rescue_key(pair, target_file, index, i);
                 return pair;
             }),
             wallet.keypair

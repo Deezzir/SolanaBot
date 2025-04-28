@@ -25,6 +25,7 @@ export const COMMANDS_DELAY_MS = 100;
 
 // WALLET CONSTANTS
 export const WALLETS_FILE = 'keys.csv';
+export const WALLETS_RESCUE_DIR_PATH = '.rescue';
 export const WALLETS_FILE_HEADERS = ['name', 'private_key', 'is_reserve', 'public_key', 'created_at'];
 
 // IPFS CONSTANTS
@@ -48,6 +49,7 @@ export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 export const JITO_BUNDLE_SIZE = 5;
+export const JITO_BUNDLE_INTERVAL_MS = 1000;
 export const JITO_TIP_ACCOUNTS = [
     '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
     'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
@@ -113,8 +115,7 @@ export const SNIPE_MIN_MCAP = 5000;
 export const SNIPE_RETRY_ITERATIONS = 5;
 export const SNIPE_RETRY_INTERVAL_MS = 500;
 
-// SPIDER CONSTANTS
-export const SPIDER_RESCUE_DIR_PATH: string = '.rescue';
+// TRANSFER CONSTANTS
 export const SPIDER_EXTRA_SOL: number = 0.005;
 export const SPIDER_INTERVAL_MS: number = 1000;
 
@@ -124,6 +125,8 @@ export const DROP_AIRDROP_CSV = 'airdropusers.csv';
 export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
+export const VOLUME_MAX_WALLETS_PER_EXEC = 20;
+export const VOLUME_TRADE_SLIPPAGE = 0.9;
 
 // WALLET PNL CONSTANTS
 export const PNL_BATCH_SIZE = 50;

@@ -113,6 +113,7 @@ async function main() {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
             return common.read_json(value);
         })
+        .option('-s, --simulate', 'Simulate the volume', false)
         .addOption(
             new Option('-g, --program <type>', 'specify program')
                 .choices(Object.values(common.Program) as string[])
@@ -120,8 +121,9 @@ async function main() {
         )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            const { config, program } = options;
-            await commands.start_volume(program, config);
+            const { config, program, simulate } = options;
+            const funder = common.get_reserve_wallet(wallets);
+            await commands.start_volume(funder!.keypair, program, simulate, config);
         });
 
     program
