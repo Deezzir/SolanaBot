@@ -265,6 +265,7 @@ async function create_and_send_protected_tx(
     signers: Signer[],
     tip: number
 ): Promise<String> {
+    instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
     const payer = signers.at(0)!;
@@ -284,7 +285,7 @@ async function create_and_send_protected_tx(
         new TransactionMessage({
             payerKey: payer.publicKey,
             recentBlockhash: ctx.value.blockhash,
-            instructions: instructions.filter(Boolean)
+            instructions: instructions
         }).compileToV0Message()
     );
     versioned_tx.sign(signers);
@@ -305,12 +306,14 @@ export async function create_and_send_bundle(
     signers: Signer[][],
     tip: number
 ): Promise<String> {
+    instructions = instructions.filter(Boolean);
     if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
         throw new Error(`Bundle size exceeded or size is 0.`);
     if (instructions.length !== signers.length) throw new Error(`Instructions and signers length mismatch.`);
     for (let i = 0; i < instructions.length; i++) {
         if (instructions[i].length === 0) throw new Error(`No instructions provided for tx ${i}.`);
         if (signers[i].length === 0) throw new Error(`No signers provided for tx ${i}.`);
+        instructions[i] = instructions[i].filter(Boolean);
     }
 
     const jito_tip_account = get_random_jito_tip_account();
@@ -332,7 +335,7 @@ export async function create_and_send_bundle(
             new TransactionMessage({
                 payerKey: signers[i][0].publicKey,
                 recentBlockhash: ctx.value.blockhash,
-                instructions: instructions[i].filter(Boolean)
+                instructions: instructions[i]
             }).compileToV0Message()
         );
         versioned_tx.sign(signers[i]);
@@ -426,6 +429,7 @@ export async function get_priority_fee(priority_opts: PriorityOptions): Promise<
 }
 
 export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
+    instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
     return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {

@@ -587,7 +587,7 @@ export async function sell_token(
 export async function fund(
     wallets: common.Wallet[],
     amount: number,
-    sender: Keypair,
+    funder: Keypair,
     is_spider: boolean,
     is_random: boolean,
     depth?: number
@@ -605,8 +605,8 @@ export async function fund(
         amounts = Array.from({ length: wallets.length }, () => amount);
     }
 
-    const balance = (await trade.get_balance(sender.publicKey)) / LAMPORTS_PER_SOL;
-    common.log(common.yellow(`Payer address: ${sender.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
+    const balance = (await trade.get_balance(funder.publicKey)) / LAMPORTS_PER_SOL;
+    common.log(common.yellow(`Payer address: ${funder.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < total_amount) {
         throw new Error(
             `[ERROR] Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`
@@ -615,21 +615,21 @@ export async function fund(
 
     if (is_spider) {
         common.log('Running spider:\n');
-        const rescue_keys = await transfers.run_spider_transfer(wallets, amount, sender);
+        const rescue_wallets = await transfers.run_spider_transfer(wallets, amount, funder);
         common.log(`\nPerforming cleanup of the temporary wallets...\n`);
-        await collect(rescue_keys, sender.publicKey);
+        await collect(rescue_wallets, funder.publicKey);
         return;
     }
 
     if (depth) {
         common.log(`Running transfers with depth ${depth}:\n`);
-        const rescue_keys = await transfers.run_deep_transfer(wallets, amounts, sender, depth);
+        const rescue_wallets = await transfers.run_deep_transfer(wallets, amounts, funder, depth);
         common.log(`\nPerforming cleanup of the temporary wallets...\n`);
-        await collect(rescue_keys, sender.publicKey);
+        await collect(rescue_wallets, funder.publicKey);
         return;
     }
 
-    await transfers.run_reg_transfer(wallets, amounts, sender);
+    await transfers.run_reg_transfer(wallets, amounts, funder);
 }
 
 export async function snipe(
@@ -789,33 +789,46 @@ export async function wallet_pnl(public_key: PublicKey): Promise<void> {
     common.log(`Total PnL: ${accent(total_pnl.toFixed(2) + '%')}\n`);
 }
 
-export async function start_volume(program: common.Program = common.Program.Pump, json_config?: object): Promise<void> {
+export async function start_volume(
+    funder: Keypair,
+    program: common.Program = common.Program.Pump,
+    simulate: boolean = false,
+    json_config?: object
+): Promise<void> {
     const trader = get_trader(program);
     const volume_config = await volume.setup_config(json_config);
     const volume_type_name = volume.VolumeType[volume_config.type];
 
-    if (volume_config.simulate) {
+    if (simulate) {
+        const sol_price = await common.fetch_sol_price();
+        const funder_balance = (await trade.get_balance(funder.publicKey)) / LAMPORTS_PER_SOL;
         common.log(common.yellow(`Simulating the ${volume_type_name} Volume Bot...\n`));
-        const results = await volume.simulate(volume_config, trader);
+        const results = await volume.simulate(sol_price, volume_config, trader);
 
         if (volume_config.type === volume.VolumeType.Natural)
             common.log(common.red('Natural Volume simulation results may differ from the actual results\n'));
 
         common.log(common.bold('Simulation Results:'));
-        common.log(`Current SOL price: $${common.format_currency(results.sol_price)}`);
-        common.log(`Total SOL used: ${common.format_currency(results.total_sol)}`);
-        common.log(`\nTotal SOL spent on fees: ${common.format_currency(results.total_tax_sol)}`);
-        common.log(`Total USD spent on fees: $${common.format_currency(results.total_tax_usd)}`);
-        common.log(`\nTotal volume in SOL: ${common.format_currency(results.total_volume_sol)}`);
-        common.log(`Total volume in USD: ${common.bold('$' + common.format_currency(results.total_volume_usd))}`);
+        common.log(`SOL price: $${common.format_currency(sol_price)}`);
+        common.log(`Total SOL utilization: ${common.format_currency(results.total_sol_utilization)}`);
+        common.log(`Post Funder balance: ${common.format_currency(funder_balance - results.total_fee_sol)}`);
+        let accent = common.red;
+        common.log(
+            `\nTotal spent on fees: ${accent('$' + common.format_currency(results.total_fee_usd))} | ${accent(common.format_currency(results.total_fee_sol) + 'SOL')}`
+        );
+        accent = common.green;
+        common.log(
+            `Total volume: ${accent('$' + common.format_currency(results.total_volume_usd))} | ${accent(common.format_currency(results.total_volume_sol) + 'SOL')}\n`
+        );
         return;
     }
 
     common.log(common.yellow(`Starting the ${volume_type_name} Volume Bot...`));
 
+    let rescue_wallets: common.Wallet[] | undefined;
     switch (volume_config.type) {
         case volume.VolumeType.Fast: {
-            await volume.execute_fast(volume_config, trader);
+            rescue_wallets = await volume.execute_fast(funder, volume_config, trader);
             break;
         }
         case volume.VolumeType.Natural: {
@@ -828,6 +841,10 @@ export async function start_volume(program: common.Program = common.Program.Pump
         }
         default:
             throw new Error('[ERROR] Invalid Volume Bot type.');
+    }
+    if (rescue_wallets) {
+        common.log(`\nPerforming cleanup of the temporary wallets...\n`);
+        await collect(rescue_wallets, funder.publicKey);
     }
 }
 

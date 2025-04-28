@@ -1,7 +1,7 @@
 import { ComputeBudgetProgram, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import { COMMITMENT, JITO_BUNDLE_SIZE, PriorityLevel } from '../constants.js';
+import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel } from '../constants.js';
 
 export async function bundle_buy(
     mint_meta: trade.IMintMeta,
@@ -58,6 +58,7 @@ export async function bundle_buy(
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
@@ -138,6 +139,7 @@ export async function bundle_sell(
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);

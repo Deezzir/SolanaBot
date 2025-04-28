@@ -106,7 +106,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 
     public get platform_fee(): number {
-        return this.platform_fee;
+        return this.fee;
     }
 
     public get mint_pubkey(): PublicKey {
