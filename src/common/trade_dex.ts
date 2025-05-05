@@ -28,11 +28,10 @@ import {
     COMMITMENT
 } from '../constants.js';
 import {
-    calc_assoc_token_addr,
+    calc_ata,
     check_ata_exists,
     create_and_send_smart_tx,
     create_and_send_tx,
-    get_address_lt_accounts,
     get_token_supply,
     get_vault_balance,
     TokenMetrics
@@ -119,6 +118,17 @@ export async function swap_jupiter_instructions(
     seller: Signer,
     quote: JupiterQuote
 ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]]> {
+    const get_alts = async (keys: string[]) => {
+        const alts = await Promise.all(
+            keys.map(async (key) => {
+                const account = await global.CONNECTION.getAddressLookupTable(new PublicKey(key));
+                if (account) return account.value;
+                throw new Error(`Failed to get address lookup table account for ${key}`);
+            })
+        );
+        return alts.filter((acc) => acc !== null);
+    };
+
     const deserialize_instruction = (instruction: any) => {
         return new TransactionInstruction({
             programId: new PublicKey(instruction.programId),
@@ -148,8 +158,7 @@ export async function swap_jupiter_instructions(
     const { addressLookupTableAddresses, swapInstructionPayload, cleanupInstruction, setupInstructions } =
         instructions_raw;
 
-    const lta_accounts: AddressLookupTableAccount[] = [];
-    lta_accounts.push(...(await get_address_lt_accounts(addressLookupTableAddresses)));
+    const lta_accounts = await get_alts(addressLookupTableAddresses);
     const instructions: TransactionInstruction[] = [
         ...setupInstructions.map(deserialize_instruction),
         deserialize_instruction(swapInstructionPayload),
@@ -204,7 +213,7 @@ export async function swap_raydium_instructions(
     let instructions: TransactionInstruction[] = [];
 
     if (token_in.equals(SOL_MINT)) {
-        token_out_acc = await calc_assoc_token_addr(seller.publicKey, token_out);
+        token_out_acc = await calc_ata(seller.publicKey, token_out);
         if (!(await check_ata_exists(token_out_acc))) {
             instructions.push(
                 createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
@@ -215,7 +224,7 @@ export async function swap_raydium_instructions(
     } else {
         token_out_acc = await PublicKey.createWithSeed(seller.publicKey, TRADE_SWAP_SEED, TOKEN_PROGRAM_ID);
         instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_out_acc));
-        token_in_acc = await calc_assoc_token_addr(seller.publicKey, token_in);
+        token_in_acc = await calc_ata(seller.publicKey, token_in);
     }
     instructions.push(
         new TransactionInstruction({

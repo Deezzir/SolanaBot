@@ -148,7 +148,7 @@ async function buy_sell_bundle(
         const amount_bundle = amount_bundles[bundle_idx];
         for (const [wallet_idx, wallet] of wallet_bundle.entries()) {
             const is_tipper = wallet_idx === wallet_bundle.length - 1;
-            const token_ata = await trade.calc_assoc_token_addr(wallet.publicKey, mint_meta.mint_pubkey);
+            const token_ata = await trade.calc_ata(wallet.publicKey, mint_meta.mint_pubkey);
             const amount = calc_buy_amount(
                 amount_bundle[wallet_idx],
                 VOLUME_TRADE_SLIPPAGE,
@@ -223,7 +223,7 @@ export async function execute_fast(
         common.log('\nCollecting the funds from the wallets...');
         try {
             const bundle_ids = await collect_bundle(keypairs, funder, volume_config.bundle_tip);
-            common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}`));
+            common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}\n`));
         } catch (error) {
             common.log(common.red(`Collect failed: ${error}`));
         }

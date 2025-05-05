@@ -1,7 +1,7 @@
-import { PublicKey, ParsedTransactionWithMeta, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, ConfirmedSignatureInfo } from '@solana/web3.js';
 import * as common from '../common/common.js';
-import { PNL_BATCH_DELAY_MS, PNL_BATCH_SIZE, SOL_MINT } from '../constants.js';
-import { get_all_signatures, get_token_meta } from '../common/trade_common.js';
+import { PNL_BATCH_DELAY_MS, PNL_BATCH_SIZE, SOL_MINT, TRADE_RETRY_INTERVAL_MS } from '../constants.js';
+import { get_token_meta } from '../common/trade_common.js';
 
 interface TransactionBalanceChanges {
     pre_sol_balance: number;
@@ -46,6 +46,28 @@ interface WalletPNL {
 
 function lamports_to_sol(lamports: number): number {
     return lamports / LAMPORTS_PER_SOL;
+}
+
+async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSignatureInfo[]> {
+    const all_signatures: ConfirmedSignatureInfo[] = [];
+    let last_signature: string | undefined;
+
+    while (true) {
+        const options: any = { limit: 50 };
+        if (last_signature) options.before = last_signature;
+
+        const signatures = await common.retry_with_backoff(() =>
+            global.CONNECTION.getSignaturesForAddress(public_key, options)
+        );
+
+        all_signatures.push(...signatures);
+        if (signatures.length < 50 || signatures.length === 0) break;
+        last_signature = signatures[signatures.length - 1].signature;
+
+        await common.sleep(TRADE_RETRY_INTERVAL_MS);
+    }
+
+    return all_signatures;
 }
 
 function get_default_transaction_balance_changes(): TransactionBalanceChanges {
