@@ -546,7 +546,7 @@ export class Trader {
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
-        const token_ata = await trade.calc_assoc_token_addr(buyer.publicKey, mint);
+        const token_ata = await trade.calc_ata(buyer.publicKey, mint);
         const token_ata_exists = await trade.check_ata_exists(token_ata);
 
         let instructions: TransactionInstruction[] = [];
@@ -595,7 +595,7 @@ export class Trader {
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.get_solana_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
-        const token_ata = await trade.calc_assoc_token_addr(seller.publicKey, mint);
+        const token_ata = await trade.calc_ata(seller.publicKey, mint);
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(
@@ -815,8 +815,8 @@ export class Trader {
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_SWAP_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
-        const token_ata = await trade.calc_assoc_token_addr(buyer.publicKey, mint);
-        const wsol_ata = await trade.calc_assoc_token_addr(buyer.publicKey, SOL_MINT);
+        const token_ata = await trade.calc_ata(buyer.publicKey, mint);
+        const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
         const token_ata_created = await trade.check_ata_exists(token_ata);
 
         let instructions: TransactionInstruction[] = [];
@@ -885,8 +885,8 @@ export class Trader {
 
         const sol_amount_raw = this.get_solana_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
-        const token_ata = await trade.calc_assoc_token_addr(seller.publicKey, mint);
-        const wsol_ata = await trade.calc_assoc_token_addr(seller.publicKey, SOL_MINT);
+        const token_ata = await trade.calc_ata(seller.publicKey, mint);
+        const wsol_ata = await trade.calc_ata(seller.publicKey, SOL_MINT);
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(

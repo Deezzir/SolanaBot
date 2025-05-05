@@ -14,8 +14,7 @@ import {
     VersionedTransactionResponse,
     Finality,
     AddressLookupTableAccount,
-    Transaction,
-    ConfirmedSignatureInfo
+    Transaction
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -176,6 +175,10 @@ export async function check_ata_exists(account: PublicKey): Promise<boolean | un
     }
 }
 
+export async function calc_ata(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
+    return await getAssociatedTokenAddress(mint, owner, true);
+}
+
 export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint; decimals: number }> {
     try {
         const mint_data = await getMint(global.CONNECTION, mint, COMMITMENT);
@@ -188,8 +191,47 @@ export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigin
     }
 }
 
+export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {
+    const balance = await global.CONNECTION.getTokenAccountBalance(vault);
+    return { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
+}
+
 export async function get_balance(pubkey: PublicKey): Promise<number> {
     return await global.CONNECTION.getBalance(pubkey);
+}
+
+export async function get_token_balance(
+    owner: PublicKey,
+    mint: PublicKey,
+    commitment: Commitment = 'finalized'
+): Promise<TokenAmount> {
+    try {
+        const assoc_addres = await calc_ata(owner, mint);
+        const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
+        return account_info.value;
+    } catch (err) {
+        throw new Error(`Failed to get the token balance: ${err} `);
+    }
+}
+
+export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
+    try {
+        const result = await global.HELIUS_CONNECTION.rpc.getAsset({ id: mint.toString() });
+
+        if (result.token_info && result.content) {
+            return {
+                token_name: result.content.metadata.name,
+                token_symbol: result.content.metadata.symbol,
+                token_decimals: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
+                token_supply: result.token_info.supply || 10 ** 16,
+                price_per_token: result.token_info.price_info?.price_per_token || 0.0,
+                mint: mint
+            };
+        }
+        throw new Error(`Failed to get the token metadata`);
+    } catch (err) {
+        throw new Error(`Failed to get the token metadata: ${err} `);
+    }
 }
 
 function get_random_jito_tip_account(): PublicKey {
@@ -262,7 +304,8 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
 async function create_and_send_protected_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
-    tip: number
+    tip: number,
+    alts?: AddressLookupTableAccount[]
 ): Promise<String> {
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
@@ -285,7 +328,7 @@ async function create_and_send_protected_tx(
             payerKey: payer.publicKey,
             recentBlockhash: ctx.value.blockhash,
             instructions: instructions
-        }).compileToV0Message()
+        }).compileToV0Message(alts)
     );
     versioned_tx.sign(signers);
     const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
@@ -303,7 +346,8 @@ async function create_and_send_protected_tx(
 export async function create_and_send_bundle(
     instructions: TransactionInstruction[][],
     signers: Signer[][],
-    tip: number
+    tip: number,
+    alts?: AddressLookupTableAccount[][]
 ): Promise<String> {
     instructions = instructions.filter(Boolean);
     if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
@@ -314,6 +358,7 @@ export async function create_and_send_bundle(
         if (signers[i].length === 0) throw new Error(`No signers provided for tx ${i}.`);
         instructions[i] = instructions[i].filter(Boolean);
     }
+    if (alts && alts.length !== instructions.length) throw new Error(`Address lookup tables length mismatch.`);
 
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
@@ -335,7 +380,7 @@ export async function create_and_send_bundle(
                 payerKey: signers[i][0].publicKey,
                 recentBlockhash: ctx.value.blockhash,
                 instructions: instructions[i]
-            }).compileToV0Message()
+            }).compileToV0Message(alts ? alts[i] : undefined)
         );
         versioned_tx.sign(signers[i]);
         if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
@@ -349,25 +394,6 @@ export async function create_and_send_bundle(
     } else {
         throw new Error(`Failed to send the bundle, no successfull response from the JITO endpoints`);
     }
-}
-
-export async function get_address_lt_accounts(keys: string[]): Promise<AddressLookupTableAccount[]> {
-    const addressLookupTableAccountInfos = await global.CONNECTION.getMultipleAccountsInfo(
-        keys.map((key) => new PublicKey(key))
-    );
-
-    return addressLookupTableAccountInfos.reduce((acc, accountInfo, index) => {
-        const addressLookupTableAddress = keys[index];
-        if (accountInfo) {
-            const addressLookupTableAccount = new AddressLookupTableAccount({
-                key: new PublicKey(addressLookupTableAddress),
-                state: AddressLookupTableAccount.deserialize(accountInfo.data)
-            });
-            acc.push(addressLookupTableAccount);
-        }
-
-        return acc;
-    }, new Array<AddressLookupTableAccount>());
 }
 
 async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
@@ -443,7 +469,7 @@ export async function create_and_send_tx(
     signers: Signer[],
     priority?: PriorityLevel,
     protection_tip?: number,
-    address_lt_accounts?: AddressLookupTableAccount[]
+    alts?: AddressLookupTableAccount[]
 ): Promise<String> {
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
@@ -474,7 +500,7 @@ export async function create_and_send_tx(
             payerKey: signers[0].publicKey,
             recentBlockhash: ctx.value.blockhash,
             instructions: tx_instructions
-        }).compileToV0Message(address_lt_accounts)
+        }).compileToV0Message(alts)
     );
     versioned_tx.sign(signers);
 
@@ -507,29 +533,6 @@ export async function get_balance_change(signature: string, address: PublicKey):
     } catch (err) {
         throw new Error(`Failed to get the balance change: ${err} `);
     }
-}
-
-export async function check_has_balances(wallets: common.Wallet[], min_balance: number = 0): Promise<boolean> {
-    let ok = true;
-
-    const balance_checks = wallets.map(async (wallet) => {
-        const holder = wallet.keypair;
-        try {
-            const lamports = await get_balance(holder.publicKey);
-            const sol_balance = lamports / LAMPORTS_PER_SOL;
-            if (sol_balance <= min_balance) {
-                common.error(
-                    `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
-                );
-                ok = false;
-            }
-        } catch (err) {
-            common.error(common.red(`Failed to get the balance: ${err} for 'wallet ${wallet.id}'`));
-            ok = false;
-        }
-    });
-    await Promise.all(balance_checks);
-    return ok;
 }
 
 export async function send_lamports(
@@ -600,101 +603,26 @@ export async function send_lamports_with_retries(
     throw new Error('Max retries reached, transaction failed');
 }
 
-export async function calc_assoc_token_addr(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
-    let ata = await getAssociatedTokenAddress(mint, owner, true);
-    return ata;
-}
-
-export async function get_random_mints(trader: IProgramTrader, count: number): Promise<IMintMeta[]> {
-    let mints: IMintMeta[] = [];
-    while (true) {
-        mints = await trader.get_random_mints(count);
-        if (mints.length === count) break;
-        await common.sleep(2000);
-    }
-    return mints;
-}
-
-export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
-    try {
-        const result = await global.HELIUS_CONNECTION.rpc.getAsset({ id: mint.toString() });
-
-        if (result.token_info && result.content) {
-            return {
-                token_name: result.content.metadata.name,
-                token_symbol: result.content.metadata.symbol,
-                token_decimals: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
-                token_supply: result.token_info.supply || 10 ** 16,
-                price_per_token: result.token_info.price_info?.price_per_token || 0.0,
-                mint: mint
-            };
-        }
-        throw new Error(`Failed to get the token metadata`);
-    } catch (err) {
-        throw new Error(`Failed to get the token metadata: ${err} `);
-    }
-}
-
-export async function get_token_balance(
-    pubkey: PublicKey,
-    mint: PublicKey,
-    commitment: Commitment = 'finalized'
-): Promise<TokenAmount> {
-    try {
-        const assoc_addres = await calc_assoc_token_addr(pubkey, mint);
-        const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
-        return account_info.value;
-    } catch (err) {
-        return {
-            uiAmount: null,
-            amount: '0',
-            decimals: 0
-        };
-    }
-}
-
 export async function send_tokens(
-    token_amount: number,
-    sender: PublicKey,
-    receiver: PublicKey,
-    owner: Signer
-): Promise<String> {
-    let instructions: TransactionInstruction[] = [];
-    instructions.push(createTransferInstruction(sender, receiver, owner.publicKey, token_amount));
-
-    return await create_and_send_smart_tx(instructions, [owner]);
-}
-
-export async function send_tokens_with_account_create(
-    token_amount: number,
+    token_amount: TokenAmount,
     mint: PublicKey,
-    sender: PublicKey,
+    sender: Signer,
     receiver: PublicKey,
-    payer: Signer
+    create_receiver_ata: boolean = false
 ): Promise<String> {
+    if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
+    const token_amount_raw = BigInt(token_amount.amount);
+
     let instructions: TransactionInstruction[] = [];
+    const receiver_ata = await calc_ata(receiver, mint);
+    const sender_ata = await calc_ata(sender.publicKey, mint);
 
-    const ata = await calc_assoc_token_addr(receiver, mint);
-    if (!(await check_ata_exists(ata))) {
-        instructions.push(createAssociatedTokenAccountInstruction(payer.publicKey, ata, receiver, mint));
+    if (!(await check_ata_exists(receiver_ata)) && create_receiver_ata) {
+        instructions.push(createAssociatedTokenAccountInstruction(sender.publicKey, receiver_ata, receiver, mint));
     }
+    instructions.push(createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw));
 
-    instructions.push(createTransferInstruction(sender, ata, payer.publicKey, token_amount));
-    return await create_and_send_smart_tx(instructions, [payer]);
-}
-
-export async function create_assoc_token_account(payer: Signer, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
-    try {
-        const assoc_address = await calc_assoc_token_addr(owner, mint);
-        if (!(await check_ata_exists(assoc_address))) {
-            let instructions: TransactionInstruction[] = [];
-            instructions.push(createAssociatedTokenAccountInstruction(payer.publicKey, assoc_address, owner, mint));
-            await create_and_send_smart_tx(instructions, [payer]);
-        }
-        return assoc_address;
-    } catch (err) {
-        throw new Error(`Max retries reached, failed to get associated token account.Last error: ${err} `);
-    }
+    return await create_and_send_smart_tx(instructions, [sender]);
 }
 
 export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; unsold: PublicKey[] }> {
@@ -741,16 +669,20 @@ export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; uns
     return { ok: true, unsold: unsold_mints };
 }
 
-export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {
-    const balance = await global.CONNECTION.getTokenAccountBalance(vault);
-    return { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
-}
-
 export function get_sol_token_amount(amount: number): TokenAmount {
     return {
         uiAmount: amount,
         amount: (amount * LAMPORTS_PER_SOL).toString(),
-        decimals: 9
+        decimals: Math.log10(LAMPORTS_PER_SOL)
+    } as TokenAmount;
+}
+
+export function get_token_amount(amount: number, decimals: number): TokenAmount {
+    if (decimals < 0 || decimals > 18) throw new Error(`Invalid decimals: ${decimals} `);
+    return {
+        uiAmount: amount,
+        amount: (amount * 10 ** decimals).toString(),
+        decimals: decimals
     } as TokenAmount;
 }
 
@@ -763,26 +695,4 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
         amount: ((BigInt(token_amount.amount) * BigInt(Math.floor(percent * 10000))) / BigInt(10000)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
-}
-
-export async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSignatureInfo[]> {
-    const all_signatures: ConfirmedSignatureInfo[] = [];
-    let last_signature: string | undefined;
-
-    while (true) {
-        const options: any = { limit: 50 };
-        if (last_signature) options.before = last_signature;
-
-        const signatures = await common.retry_with_backoff(() =>
-            global.CONNECTION.getSignaturesForAddress(public_key, options)
-        );
-
-        all_signatures.push(...signatures);
-        if (signatures.length < 50 || signatures.length === 0) break;
-        last_signature = signatures[signatures.length - 1].signature;
-
-        await common.sleep(TRADE_RETRY_INTERVAL_MS);
-    }
-
-    return all_signatures;
 }

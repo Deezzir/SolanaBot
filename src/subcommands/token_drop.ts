@@ -116,22 +116,17 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
         return;
     }
 
-    const drop_assoc_addr = await trade.calc_assoc_token_addr(drop.publicKey, mint_meta.mint);
-
     while (pending.length > 0) {
         common.log(common.yellow(`Processing ${pending.length} records...`));
-
         const promises = pending.map(async (record: any) => {
             const receiver = new PublicKey(record.wallet);
-            const tokenAmountRaw = record.tokensToSend * 10 ** mint_meta.token_decimals;
+            const token_amount = trade.get_token_amount(record.tokensToSend, mint_meta.token_decimals);
 
             try {
-                await trade
-                    .send_tokens_with_account_create(tokenAmountRaw, mint_meta.mint, drop_assoc_addr, receiver, drop)
-                    .then((sig) => {
-                        record.tx = sig;
-                        common.log(common.green(`Sent ${record.tokensToSend} to ${receiver.toBase58()} | tx: ${sig}`));
-                    });
+                await trade.send_tokens(token_amount, mint_meta.mint, drop, receiver, true).then((sig) => {
+                    record.tx = sig;
+                    common.log(common.green(`Sent ${record.tokensToSend} to ${receiver.toBase58()} | tx: ${sig}`));
+                });
             } catch (error: any) {
                 common.error(common.red(`Failed to send tokens to ${receiver.toBase58()}: ${error.message}`));
                 if (error.message.includes('Provided owner is not allowed')) {
@@ -139,7 +134,6 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
                 }
             }
         });
-
         await Promise.allSettled(promises);
 
         write_csv<T>(csv_file, records);

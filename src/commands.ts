@@ -337,6 +337,15 @@ export async function warmup(
     min?: number,
     max?: number
 ): Promise<void> {
+    const get_random_mints = async (trader: trade.IProgramTrader, count: number) => {
+        let mints = [];
+        do {
+            mints = await trader.get_random_mints(count);
+            if (mints.length < count) await common.sleep(2000);
+        } while (mints.length < count);
+        return mints;
+    };
+
     min = min || 1;
     max = max || 5;
     const slippage = COMMANDS_BUY_SLIPPAGE;
@@ -365,7 +374,7 @@ export async function warmup(
             continue;
         }
 
-        const mints = await trade.get_random_mints(trader, token_cnts[i]);
+        const mints = await get_random_mints(trader, token_cnts[i]);
         common.log(
             common.yellow(
                 `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} with ${token_cnts[i]} tokens ${wallet.name} (${wallet.id})...`
@@ -438,31 +447,21 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
     if (wallets.length === 0) throw new Error('No wallets available.');
 
     common.log(common.yellow(`Collecting all the tokens from the accounts to ${receiver}...`));
-
-    const receiver_assoc_addr = await trade.create_assoc_token_account(wallets[0].keypair, receiver, mint);
     const transactions = [];
 
-    for (const wallet of wallets) {
+    for (const [i, wallet] of wallets.entries()) {
         try {
             const sender = wallet.keypair;
+            if (sender.publicKey.equals(receiver)) continue;
             const token_amount = await trade.get_token_balance(sender.publicKey, mint);
-            const token_amount_raw = parseInt(token_amount.amount);
-
-            if (
-                !token_amount ||
-                token_amount.uiAmount === 0 ||
-                !token_amount.uiAmount ||
-                sender.publicKey.equals(receiver)
-            )
-                continue;
-            const sender_assoc_addr = await trade.calc_assoc_token_addr(sender.publicKey, mint);
+            const create_receiver_ata = i === 0;
 
             common.log(
                 `Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
             transactions.push(
                 trade
-                    .send_tokens(token_amount_raw, sender_assoc_addr, receiver_assoc_addr, sender)
+                    .send_tokens(token_amount, mint, sender, receiver, create_receiver_ata)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )

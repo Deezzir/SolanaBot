@@ -1,7 +1,7 @@
 import { Worker } from 'worker_threads';
 import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
-import { PublicKey } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import {
     PriorityLevel,
     SNIPE_BUY_SLIPPAGE,
@@ -173,6 +173,27 @@ export abstract class SniperBase implements ISniper {
         }
     }
 
+    private async check_balances(wallets: common.Wallet[], min_balance: number = 0): Promise<boolean> {
+        let ok = true;
+        const balance_checks = wallets.map(async (wallet) => {
+            const holder = wallet.keypair;
+            try {
+                const sol_balance = (await trade.get_balance(holder.publicKey)) / LAMPORTS_PER_SOL;
+                if (sol_balance <= min_balance) {
+                    common.error(
+                        `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
+                    );
+                    ok = false;
+                }
+            } catch (err) {
+                common.error(common.red(`Failed to get the balance: ${err} for 'wallet ${wallet.id}'`));
+                ok = false;
+            }
+        });
+        await Promise.all(balance_checks);
+        return ok;
+    }
+
     private async workers_post_message(message: WorkerMessage, data: any = {}): Promise<void> {
         if (message === 'stop') await this.wait_drop_unsub();
         if (message === 'buy') {
@@ -197,7 +218,7 @@ export abstract class SniperBase implements ISniper {
         if (wallets.length < this.bot_config!.thread_cnt)
             throw new Error(`The number of keys doesn't match the number of threads`);
 
-        const all_has_balances = await trade.check_has_balances(wallets);
+        const all_has_balances = await this.check_balances(wallets);
         if (!all_has_balances) throw new Error('Topup the specified accounts, exiting...');
 
         common.log('[Main Worker] Starting the workers...');
