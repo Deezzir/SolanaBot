@@ -122,10 +122,10 @@ export function setup_rescue_file(): string {
             writeFileSync(target_file_path, WALLETS_FILE_HEADERS.join(',') + '\n', 'utf-8');
             return target_file_path;
         } catch (err) {
-            throw new Error(`Failed to process target rescue entry '${target_file_path}': ${err}`);
+            throw new Error(`Failed to create '${target_file_path}': ${err}`);
         }
     } catch (err) {
-        throw new Error(`Failed to process '${WALLETS_RESCUE_DIR_PATH}': ${err}`);
+        throw new Error(`Failed to create '${WALLETS_RESCUE_DIR_PATH}': ${err}`);
     }
 }
 
@@ -181,10 +181,10 @@ export function get_wallet(index: number, wallets: Wallet[]): Wallet | undefined
     return wallets.find((wallet) => wallet.id == index);
 }
 
-export function chunks<T>(array: readonly T[], chunkSize = 10): T[][] {
+export function chunks<T>(array: readonly T[], chunk_size = 10): T[][] {
     let res: T[][] = [];
-    for (let currentChunk = 0; currentChunk < array.length; currentChunk += chunkSize) {
-        res.push(array.slice(currentChunk, currentChunk + chunkSize));
+    for (let currentChunk = 0; currentChunk < array.length; currentChunk += chunk_size) {
+        res.push(array.slice(currentChunk, currentChunk + chunk_size));
     }
     return res;
 }
@@ -195,7 +195,7 @@ export async function clear_lines_up(lines: number): Promise<void> {
 }
 
 export function is_valid_pubkey(input: string): boolean {
-    if (!/[a-zA-Z0-9]{43,44}/.test(input)) return false;
+    if (!/[a-zA-Z0-9]{43,44}/.test(input) && !/[a-zA-Z0-9]{32}/.test(input)) return false;
     try {
         new PublicKey(input);
         return true;
@@ -416,6 +416,11 @@ export async function retry_with_backoff<T>(
     }
 }
 
+export function zip<T, A>(arr_1: readonly T[], arr_2: readonly A[]): [T, A][] {
+    if (arr_1.length !== arr_2.length) throw new Error('Array lengths do not match');
+    return arr_1.map((e, i) => [e, arr_2[i]]) as [T, A][];
+}
+
 export function pick_random<T>(arr: readonly T[], count: number): T[] {
     const result: T[] = [];
     const used = new Set<number>();
@@ -428,4 +433,22 @@ export function pick_random<T>(arr: readonly T[], count: number): T[] {
         }
     }
     return result;
+}
+export function read_pubkeys(address_file_path: string): PublicKey[] {
+    const pubkeys: PublicKey[] = [];
+    try {
+        const content = readFileSync(address_file_path, 'utf-8');
+        const lines = content.split('\n').filter((line) => line.trim() !== '');
+        for (const line of lines) {
+            const address = line.trim();
+            if (is_valid_pubkey(address)) {
+                pubkeys.push(new PublicKey(address));
+            } else {
+                error(red(`Invalid address: ${address} at line ${lines.indexOf(line) + 1}`));
+            }
+        }
+    } catch (error) {
+        throw new Error(`Failed to read addresses from ${address_file_path}: ${error}`);
+    }
+    return pubkeys;
 }

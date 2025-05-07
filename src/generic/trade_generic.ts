@@ -145,7 +145,7 @@ export class Trader {
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
         const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint_meta.mint, slippage);
-        let [buy_instructions] = await swap_jupiter_instructions(trader, quote);
+        let [buy_instructions, ltas] = await swap_jupiter_instructions(trader, quote);
         let [sell_instructions] = await this.sell_token_instructions(
             {
                 uiAmount: Number(quote.outAmount) / 10 ** TRADE_DEFAULT_CURVE_DECIMALS,
@@ -157,7 +157,7 @@ export class Trader {
             slippage
         );
 
-        return [buy_instructions, sell_instructions, undefined];
+        return [buy_instructions, sell_instructions, ltas];
     }
 
     public static async buy_sell(
@@ -169,14 +169,20 @@ export class Trader {
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<[String, String]> {
-        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+        const [buy_instructions, sell_instructions, lta_accounts] = await this.buy_sell_instructions(
             sol_amount,
             trader,
             mint_meta,
             slippage
         );
 
-        const buy_signature = await trade.create_and_send_tx(buy_instructions, [trader], priority, protection_tip);
+        const buy_signature = await trade.create_and_send_tx(
+            buy_instructions,
+            [trader],
+            priority,
+            protection_tip,
+            lta_accounts
+        );
         let sell_signature;
 
         if (interval_ms > 0) await common.sleep(interval_ms);
@@ -184,7 +190,13 @@ export class Trader {
         let retries = 1;
         while (retries <= TRADE_RETRY_ITERATIONS) {
             try {
-                sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
+                sell_signature = await trade.create_and_send_tx(
+                    sell_instructions,
+                    [trader],
+                    priority,
+                    protection_tip,
+                    lta_accounts
+                );
             } catch (error) {
                 common.error(common.red(`Failed to send the sell transaction, retrying...`));
                 retries++;
@@ -204,7 +216,7 @@ export class Trader {
         slippage: number = 0.05,
         priority?: PriorityLevel
     ): Promise<String> {
-        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+        const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
             trader,
             mint_meta,
@@ -231,7 +243,12 @@ export class Trader {
             );
         }
 
-        return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip);
+        return await trade.create_and_send_bundle(
+            [buy_instructions, sell_instructions],
+            [[trader], [trader]],
+            tip,
+            ltas
+        );
     }
 
     public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<GenericMintMeta | undefined> {
@@ -266,12 +283,17 @@ export class Trader {
 
     public static async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<GenericMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
-            return { token_name: 'Unknown', token_symbol: 'Unknown', token_supply: 10 ** 16, price_per_token: 0.0 };
+            return {
+                token_name: 'Unknown',
+                token_symbol: 'Unknown',
+                token_supply: 10 ** 16,
+                price_per_token: 0.0,
+                token_decimals: 6
+            };
         });
 
-        const usd_market_cap = meta.price_per_token * meta.token_supply;
+        const usd_market_cap = meta.price_per_token * (meta.token_supply / 10 ** meta.token_decimals);
         const market_cap = sol_price ? usd_market_cap / sol_price : 0;
-
         return new GenericMintMeta({
             mint,
             name: meta.token_name,

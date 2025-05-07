@@ -46,8 +46,6 @@ export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111
 export const RENT_PROGRAM_ID = new PublicKey('SysvarRent111111111111111111111111111111111');
 export const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
-export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
-export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 export const JITO_BUNDLE_SIZE = 5;
 export const JITO_BUNDLE_INTERVAL_MS = 1000;
 export const JITO_TIP_ACCOUNTS = [
@@ -77,6 +75,10 @@ export enum PriorityLevel {
     DEFAULT = 'Default'
 }
 
+// TRADE DEX CONSTANTS
+export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
+export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+
 // MOON CONSTANTS
 export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
 
@@ -86,6 +88,8 @@ export const PUMP_IPFS_API_URL = 'https://pump.fun/api/ipfs';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
 export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%
+export const PUMP_LTA_ACCOUNT_EXTRA = new PublicKey('FNbKyKh4LjC1kSmhMahZ2gJPwt1anynVUdaCNmmuxzac');
+export const PUMP_LTA_ACCOUNT = new PublicKey('J5edBug5X1G1PoUgtnBjNUpcrhpeJiRKy7TWqs5Yvuk3');
 export const PUMP_TRADE_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 export const PUMP_GLOBAL_ACCOUNT = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
 export const PUMP_FEE_ACCOUNT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
@@ -116,8 +120,7 @@ export const SNIPE_RETRY_ITERATIONS = 5;
 export const SNIPE_RETRY_INTERVAL_MS = 500;
 
 // TRANSFER CONSTANTS
-export const SPIDER_EXTRA_SOL: number = 0.005;
-export const SPIDER_INTERVAL_MS: number = 1000;
+export const TRANSFER_INTERVAL_MS: number = 1000;
 
 // DROP CONSTANTS
 export const DROP_RECORDS_PER_ITERATION = 10;
@@ -125,8 +128,12 @@ export const DROP_AIRDROP_CSV = 'airdropusers.csv';
 export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
-export const VOLUME_MAX_WALLETS_PER_EXEC = 20;
+export const VOLUME_MAX_WALLETS_PER_EXEC = 30;
 export const VOLUME_TRADE_SLIPPAGE = 0.9;
+export const VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE = 15;
+export const VOLUME_MAX_WALLETS_PER_TRADE_TX = 6;
+export const VOLUME_MAX_WALLETS_PER_COLLECT_TX = 10;
+export const VOLUME_MAX_WALLETS_PER_FUND_TX = 20;
 
 // WALLET PNL CONSTANTS
 export const PNL_BATCH_SIZE = 50;

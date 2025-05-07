@@ -78,6 +78,11 @@ async function main() {
             })
             .default(WALLETS_FILE, WALLETS_FILE)
     );
+    program.addOption(
+        new Option('-g, --program <type>', 'specify program')
+            .choices(Object.values(common.Program) as string[])
+            .default(common.Program.Pump, common.Program.Pump)
+    );
 
     program
         .command('snipe')
@@ -92,15 +97,11 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
             return parseInt(value, 10);
         })
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            let { config, from, program } = options;
-            await commands.snipe(common.filter_wallets(wallets, from), program, config);
+            let { config, from } = options;
+            const pg = program.opts().program;
+            await commands.snipe(common.filter_wallets(wallets, from), pg, config);
         });
 
     program
@@ -112,16 +113,12 @@ async function main() {
             return common.read_json(value);
         })
         .option('-s, --simulate', 'Simulate the volume', false)
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            const { config, program, simulate } = options;
+            const { config, simulate } = options;
+            const pg = program.opts().program;
             const funder = common.get_reserve_wallet(wallets);
-            await commands.start_volume(funder!.keypair, program, simulate, config);
+            await commands.start_volume(funder!.keypair, pg, simulate, config);
         });
 
     program
@@ -237,18 +234,14 @@ async function main() {
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
         )
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
-            const { from, to, list, bundle, priority, min, max, program, interval } = options;
+            const { from, to, list, bundle, priority, min, max, interval } = options;
+            const pg = program.opts().program;
             await commands.warmup(
                 common.filter_wallets(wallets, from, to, list),
                 priority,
-                program,
+                pg,
                 bundle,
                 interval,
                 min,
@@ -321,15 +314,11 @@ async function main() {
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
         )
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, mint, buyer, options) => {
-            const { slippage, mev, priority, program } = options;
-            await commands.buy_token_once(amount, mint, buyer, slippage, mev, priority, program);
+            const { slippage, mev, priority } = options;
+            const pg = program.opts().program;
+            await commands.buy_token_once(amount, mint, buyer, slippage, mev, priority, pg);
         });
 
     program
@@ -371,15 +360,11 @@ async function main() {
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
         )
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, seller, options) => {
-            const { percent, slippage, mev, priority, program } = options;
-            await commands.sell_token_once(mint, seller, percent, slippage, mev, priority, program);
+            const { percent, slippage, mev, priority } = options;
+            const pg = program.opts().program;
+            await commands.sell_token_once(mint, seller, percent, slippage, mev, priority, pg);
         });
 
     program
@@ -458,19 +443,15 @@ async function main() {
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
         )
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { amount, min, max, slippage, from, to, list, bundle, mev, priority, program } = options;
+            const { amount, min, max, slippage, from, to, list, bundle, mev, priority } = options;
+            const pg = program.opts().program;
             await commands.buy_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
-                program,
+                pg,
                 mev,
                 bundle,
                 amount,
@@ -536,19 +517,15 @@ async function main() {
                 .choices(Object.values(PriorityLevel) as string[])
                 .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
         )
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { percent, slippage, from, to, list, bundle, mev, priority, program } = options;
+            const { percent, slippage, from, to, list, bundle, mev, priority } = options;
+            const pg = program.opts().program;
             await commands.sell_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
-                program,
+                pg,
                 mev,
                 bundle,
                 percent,
@@ -702,14 +679,9 @@ async function main() {
             if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
             return creator_wallet.keypair;
         })
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
-        .action(async (count, cid, creator, options) => {
-            const { program } = options;
-            await commands.promote(count, cid, creator, program);
+        .action(async (count, cid, creator) => {
+            const pg = program.opts().program;
+            await commands.promote(count, cid, creator, pg);
         });
 
     program
@@ -736,14 +708,10 @@ async function main() {
             if (isNaN(parsed_value) || parsed_value <= 0) throw new InvalidOptionArgumentError('Not a number.');
             return parsed_value;
         })
-        .addOption(
-            new Option('-g, --program <type>', 'specify program')
-                .choices(Object.values(common.Program) as string[])
-                .default(common.Program.Pump, common.Program.Pump)
-        )
         .action(async (cid, creator, options) => {
-            const { mint, buy, program } = options;
-            await commands.create_token(cid, creator, program, buy, mint);
+            const { mint, buy } = options;
+            const pg = program.opts().program;
+            await commands.create_token(cid, creator, pg, buy, mint);
         });
 
     program
@@ -751,6 +719,66 @@ async function main() {
         .alias('cl')
         .description('Clean the wallets')
         .action(async () => await commands.clean(wallets));
+
+    program
+        .command('create-lta')
+        .alias('clta')
+        .description('Create a Address Lookup Table Account')
+        .argument('<authority_index>', 'Index of the authority wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
+            return creator_wallet;
+        })
+        .action(async (authority) => await commands.create_lta(authority));
+
+    program
+        .command('extend-lta')
+        .alias('elta')
+        .description('Extend the Address Lookup Table Account')
+        .argument('<authority_index>', 'Index of the authority wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
+            return creator_wallet;
+        })
+        .argument('<lta>', 'Public address of the LTA', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<address_file>', 'Path to the file with the addresses', (value) => {
+            if (!existsSync(value)) throw new InvalidOptionArgumentError('Address file does not exist.');
+            return value;
+        })
+        .action(async (authority, lta, address_file) => await commands.extend_lta(authority, lta, address_file));
+
+    program
+        .command('deactivate-ltas')
+        .alias('dltas')
+        .description('Deactivate the Address Lookup Table Accounts by the provided authority')
+        .argument('<authority_index>', 'Index of the authority wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
+            return creator_wallet;
+        })
+        .action(async (authority) => await commands.deactivate_ltas(authority));
+
+    program
+        .command('close-ltas')
+        .alias('cltas')
+        .description('Close the Address Lookup Table Accounts by the provided authority')
+        .argument('<authority_index>', 'Index of the authority wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const creator_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!creator_wallet) throw new InvalidArgumentError('Invalid index.');
+            return creator_wallet;
+        })
+        .action(async (authority) => await commands.close_ltas(authority));
 
     program
         .command('drop')

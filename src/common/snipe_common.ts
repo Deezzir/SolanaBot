@@ -3,6 +3,7 @@ import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import {
+    COMMITMENT,
     PriorityLevel,
     SNIPE_BUY_SLIPPAGE,
     SNIPE_META_UPDATE_INTERVAL_MS,
@@ -178,7 +179,7 @@ export abstract class SniperBase implements ISniper {
         const balance_checks = wallets.map(async (wallet) => {
             const holder = wallet.keypair;
             try {
-                const sol_balance = (await trade.get_balance(holder.publicKey)) / LAMPORTS_PER_SOL;
+                const sol_balance = (await trade.get_balance(holder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
                 if (sol_balance <= min_balance) {
                     common.error(
                         `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`

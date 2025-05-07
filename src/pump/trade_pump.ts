@@ -51,7 +51,9 @@ import {
     TRADE_RAYDIUM_SWAP_TAX,
     TRADE_RETRY_ITERATIONS,
     TRADE_RETRY_INTERVAL_MS,
-    PUMP_AMM_HEADER as PUMP_AMM_STATE_HEADER
+    PUMP_AMM_HEADER as PUMP_AMM_STATE_HEADER,
+    PUMP_LTA_ACCOUNT,
+    TRADE_MAX_SLIPPAGE
 } from '../constants.js';
 import {
     get_raydium_amm_from_mint,
@@ -168,16 +170,11 @@ export class Trader {
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<String> {
-        const [instructions, address_lt_accounts] = await this.buy_token_instructions(
-            sol_amount,
-            buyer,
-            mint_meta,
-            slippage
-        );
+        const [instructions, ltas] = await this.buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip, address_lt_accounts);
+            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip, ltas);
         }
-        return await trade.create_and_send_smart_tx(instructions, [buyer]);
+        return await trade.create_and_send_smart_tx(instructions, [buyer], ltas);
     }
 
     public static async buy_token_instructions(
@@ -188,15 +185,18 @@ export class Trader {
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const pump_amm = this.get_pump_amm(mint_meta);
         const ray_amm = this.get_raydium_amm(mint_meta);
-        if (pump_amm) {
-            return this.get_buy_amm_instructions(sol_amount, buyer, mint_meta, slippage);
-        }
         if (ray_amm) {
             const sol_token_amount = trade.get_sol_token_amount(sol_amount);
             const mint = new PublicKey(mint_meta.mint);
             return swap_raydium_instructions(sol_token_amount, buyer, ray_amm, mint, slippage);
         }
-        return this.get_buy_instructions(sol_amount, buyer, mint_meta, slippage);
+        const lta = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
+        if (pump_amm) {
+            const instructions = await this.get_buy_amm_instructions(sol_amount, buyer, mint_meta, slippage);
+            return [instructions, lta];
+        }
+        const instructions = await this.get_buy_instructions(sol_amount, buyer, mint_meta, slippage);
+        return [instructions, lta];
     }
 
     public static async sell_token(
@@ -207,22 +207,11 @@ export class Trader {
         priority: PriorityLevel,
         protection_tip?: number
     ): Promise<String> {
-        const [instructions, address_lt_accounts] = await this.sell_token_instructions(
-            token_amount,
-            seller,
-            mint_meta,
-            slippage
-        );
+        const [instructions, ltas] = await this.sell_token_instructions(token_amount, seller, mint_meta, slippage);
         if (priority) {
-            return await trade.create_and_send_tx(
-                instructions,
-                [seller],
-                priority,
-                protection_tip,
-                address_lt_accounts
-            );
+            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip, ltas);
         }
-        return await trade.create_and_send_smart_tx(instructions, [seller]);
+        return await trade.create_and_send_smart_tx(instructions, [seller], ltas);
     }
 
     public static async sell_token_instructions(
@@ -233,13 +222,16 @@ export class Trader {
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const ray_amm = this.get_raydium_amm(mint_meta);
         const pump_amm = this.get_pump_amm(mint_meta);
-        if (pump_amm) {
-            return this.get_sell_amm_instructions(token_amount, seller, mint_meta, slippage);
-        }
         if (ray_amm) {
             return swap_raydium_instructions(token_amount, seller, ray_amm, SOL_MINT, slippage);
         }
-        return this.get_sell_instructions(token_amount, seller, mint_meta, slippage);
+        const lta = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
+        if (pump_amm) {
+            const instructions = await this.get_sell_amm_instructions(token_amount, seller, mint_meta, slippage);
+            return [instructions, lta];
+        }
+        const instructions = await this.get_sell_instructions(token_amount, seller, mint_meta, slippage);
+        return [instructions, lta];
     }
 
     public static async buy_sell_instructions(
@@ -251,7 +243,7 @@ export class Trader {
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(mint_meta.fee * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
-        let [buy_instructions] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
+        let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
                 uiAmount: Number(token_amount_raw) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
@@ -262,8 +254,7 @@ export class Trader {
             mint_meta,
             slippage
         );
-
-        return [buy_instructions, sell_instructions, undefined];
+        return [buy_instructions, sell_instructions, lta];
     }
 
     public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta | undefined> {
@@ -307,7 +298,7 @@ export class Trader {
 
         if (sol_amount > 0) {
             const token_meta = await this.default_mint_meta(mint.publicKey);
-            const [buy_instructions] = await this.get_buy_instructions(sol_amount, creator, token_meta, 0.05);
+            const buy_instructions = await this.get_buy_instructions(sol_amount, creator, token_meta, 0.05);
             instructions.push(...buy_instructions);
         }
 
@@ -347,7 +338,7 @@ export class Trader {
         slippage: number = 0.05,
         priority?: PriorityLevel
     ): Promise<String> {
-        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+        const [buy_instructions, sell_instructions, lta] = await this.buy_sell_instructions(
             sol_amount,
             trader,
             mint_meta,
@@ -374,7 +365,12 @@ export class Trader {
             );
         }
 
-        return await trade.create_and_send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip);
+        return await trade.create_and_send_bundle(
+            [buy_instructions, sell_instructions],
+            [[trader], [trader]],
+            tip,
+            lta
+        );
     }
 
     public static async buy_sell(
@@ -501,12 +497,12 @@ export class Trader {
     }
 
     private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0 || slippage >= 1) throw new RangeError('Slippage must be between 0 and 1');
+        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
     private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0 || slippage >= 1) throw new RangeError('Slippage must be between 0 and 1');
+        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
@@ -533,7 +529,7 @@ export class Trader {
         buyer: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
-    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+    ): Promise<TransactionInstruction[]> {
         if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -546,7 +542,7 @@ export class Trader {
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_FEE_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
-        const token_ata = await trade.calc_ata(buyer.publicKey, mint);
+        const token_ata = trade.calc_ata(buyer.publicKey, mint);
         const token_ata_exists = await trade.check_ata_exists(token_ata);
 
         let instructions: TransactionInstruction[] = [];
@@ -575,7 +571,7 @@ export class Trader {
                 data: instruction_data
             })
         );
-        return [instructions, undefined];
+        return instructions;
     }
 
     private static async get_sell_instructions(
@@ -583,7 +579,7 @@ export class Trader {
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
-    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+    ): Promise<TransactionInstruction[]> {
         if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -595,7 +591,7 @@ export class Trader {
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.get_solana_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
-        const token_ata = await trade.calc_ata(seller.publicKey, mint);
+        const token_ata = trade.calc_ata(seller.publicKey, mint);
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(
@@ -619,7 +615,7 @@ export class Trader {
             })
         );
 
-        return [instructions, undefined];
+        return instructions;
     }
 
     private static create_data(
@@ -801,7 +797,7 @@ export class Trader {
         buyer: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
-    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+    ): Promise<TransactionInstruction[]> {
         if (!mint_meta.mint || !mint_meta.pump_pool || !mint_meta.base_vault || !mint_meta.quote_vault) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -815,8 +811,8 @@ export class Trader {
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(PUMP_SWAP_PERCENTAGE * 10000))) / 10000n;
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
-        const token_ata = await trade.calc_ata(buyer.publicKey, mint);
-        const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
+        const token_ata = trade.calc_ata(buyer.publicKey, mint);
+        const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
         const token_ata_created = await trade.check_ata_exists(token_ata);
 
         let instructions: TransactionInstruction[] = [];
@@ -851,7 +847,6 @@ export class Trader {
                     { pubkey: PUMP_AMM_FEE_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_FEE_TOKEN_ACCOUNT, isSigner: false, isWritable: true },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_EVENT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
@@ -863,7 +858,7 @@ export class Trader {
         );
         instructions.push(createCloseAccountInstruction(wsol_ata, buyer.publicKey, buyer.publicKey));
 
-        return [instructions, undefined];
+        return instructions;
     }
 
     private static async get_sell_amm_instructions(
@@ -871,7 +866,7 @@ export class Trader {
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
-    ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+    ): Promise<TransactionInstruction[]> {
         if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.pump_pool) {
             throw new Error(`Failed to get the mint meta.`);
         }
@@ -885,8 +880,8 @@ export class Trader {
 
         const sol_amount_raw = this.get_solana_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
-        const token_ata = await trade.calc_ata(seller.publicKey, mint);
-        const wsol_ata = await trade.calc_ata(seller.publicKey, SOL_MINT);
+        const token_ata = trade.calc_ata(seller.publicKey, mint);
+        const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);
 
         let instructions: TransactionInstruction[] = [];
         instructions.push(
@@ -907,7 +902,6 @@ export class Trader {
                     { pubkey: PUMP_AMM_FEE_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_FEE_TOKEN_ACCOUNT, isSigner: false, isWritable: true },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_EVENT_AUTHORITY_ACCOUNT, isSigner: false, isWritable: false },
@@ -919,7 +913,7 @@ export class Trader {
         );
         instructions.push(createCloseAccountInstruction(wsol_ata, seller.publicKey, seller.publicKey));
 
-        return [instructions, undefined];
+        return instructions;
     }
 
     public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
