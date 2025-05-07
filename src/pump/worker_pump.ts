@@ -136,7 +136,11 @@ const sell = async () => {
 
         while (get_balance_retry < SNIPE_RETRY_ITERATIONS) {
             try {
-                balance = await trade.get_token_balance(WORKER_KEYPAIR.publicKey, new PublicKey(MINT_METADATA.mint));
+                balance = await trade.get_token_balance(
+                    WORKER_KEYPAIR.publicKey,
+                    new PublicKey(MINT_METADATA.mint),
+                    COMMITMENT
+                );
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
 
@@ -228,7 +232,7 @@ const control_loop = async () =>
     });
 
 async function main() {
-    const balance = (await trade.get_balance(WORKER_KEYPAIR.publicKey)) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(WORKER_KEYPAIR.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     const adjusted_spend_limit = Math.min(balance, WORKER_CONF.spend_limit) - SNIPE_MIN_BUY_THRESHOLD;
     WORKER_CONF.spend_limit = adjusted_spend_limit;
 

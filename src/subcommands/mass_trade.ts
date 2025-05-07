@@ -1,4 +1,10 @@
-import { ComputeBudgetProgram, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
+import {
+    AddressLookupTableAccount,
+    ComputeBudgetProgram,
+    LAMPORTS_PER_SOL,
+    Signer,
+    TransactionInstruction
+} from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel } from '../constants.js';
@@ -17,6 +23,7 @@ export async function bundle_buy(
     const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     let priority_fee: number | undefined = undefined;
+    const ltas: AddressLookupTableAccount[] = [];
 
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
@@ -25,28 +32,34 @@ export async function bundle_buy(
             const buyer = wallet.keypair;
             let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
             try {
-                const balance = await trade.get_balance(buyer.publicKey);
+                const balance = await trade.get_balance(buyer.publicKey, COMMITMENT);
                 if (balance < buy_amount) continue;
                 common.log(
                     `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
                 );
-                const [instrs] = await trader.buy_token_instructions(buy_amount, buyer, mint_meta, slippage);
+                const [buy_instructions, buy_ltas] = await trader.buy_token_instructions(
+                    buy_amount,
+                    buyer,
+                    mint_meta,
+                    slippage
+                );
                 if (priority && !priority_fee) {
                     priority_fee = await trade.get_priority_fee({
                         priority_level: priority,
                         transaction: {
-                            instructions: instrs,
+                            instructions: buy_instructions,
                             signers: [buyer]
                         }
                     });
                 }
-                instrs.unshift(
+                buy_instructions.unshift(
                     ComputeBudgetProgram.setComputeUnitPrice({
                         microLamports: priority_fee!
                     })
                 );
-                instructions.push(instrs);
+                instructions.push(buy_instructions);
                 signers.push([buyer]);
+                if (ltas.length === 0) ltas.push(...(buy_ltas || []));
             } catch (error) {
                 common.error(common.red(`Failed to add buy instruction to bundle ${wallet.name}: ${error}`));
             }
@@ -54,7 +67,7 @@ export async function bundle_buy(
         if (instructions.length === 0) continue;
         bundles.push(
             trade
-                .create_and_send_bundle(instructions, signers, bundle_tip)
+                .create_and_send_bundle(instructions, signers, bundle_tip, ltas)
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
@@ -95,6 +108,7 @@ export async function bundle_sell(
     const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     let priority_fee: number | undefined = undefined;
+    const ltas: AddressLookupTableAccount[] = [];
 
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
@@ -106,7 +120,7 @@ export async function bundle_sell(
                 common.log(
                     `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
                 );
-                const [instrs] = await trader.sell_token_instructions(
+                const [sell_instructions, sell_ltas] = await trader.sell_token_instructions(
                     token_amount_to_sell,
                     seller,
                     mint_meta,
@@ -116,18 +130,19 @@ export async function bundle_sell(
                     priority_fee = await trade.get_priority_fee({
                         priority_level: priority,
                         transaction: {
-                            instructions: instrs,
+                            instructions: sell_instructions,
                             signers: [seller]
                         }
                     });
                 }
-                instrs.unshift(
+                sell_instructions.unshift(
                     ComputeBudgetProgram.setComputeUnitPrice({
                         microLamports: priority_fee!
                     })
                 );
-                instructions.push(instrs);
+                instructions.push(sell_instructions);
                 signers.push([seller]);
+                if (ltas.length === 0) ltas.push(...(sell_ltas || []));
             } catch (error) {
                 common.error(common.red(`Failed to add sell instruction to bundle ${wallet.name}: ${error}`));
             }
@@ -162,7 +177,7 @@ export async function seq_buy(
         const buyer = wallet.keypair;
         let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
         try {
-            const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
+            const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
             if (balance < buy_amount) continue;
             common.log(
                 `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`

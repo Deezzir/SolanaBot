@@ -14,7 +14,8 @@ import {
     VersionedTransactionResponse,
     Finality,
     AddressLookupTableAccount,
-    Transaction
+    Transaction,
+    AddressLookupTableProgram
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -25,7 +26,7 @@ import {
     createCloseAccountInstruction,
     createTransferInstruction,
     getAccount,
-    getAssociatedTokenAddress,
+    getAssociatedTokenAddressSync,
     getMint
 } from '@solana/spl-token';
 import fetch from 'cross-fetch';
@@ -37,7 +38,8 @@ import {
     TRADE_MAX_RETRIES,
     TRADE_RETRY_INTERVAL_MS,
     JITO_TIP_ACCOUNTS,
-    JITO_BUNDLE_SIZE
+    JITO_BUNDLE_SIZE,
+    TRADE_RETRY_ITERATIONS
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -175,8 +177,8 @@ export async function check_ata_exists(account: PublicKey): Promise<boolean | un
     }
 }
 
-export async function calc_ata(owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
-    return await getAssociatedTokenAddress(mint, owner, true);
+export function calc_ata(owner: PublicKey, mint: PublicKey): PublicKey {
+    return getAssociatedTokenAddressSync(mint, owner, true);
 }
 
 export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint; decimals: number }> {
@@ -196,8 +198,8 @@ export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bi
     return { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
 }
 
-export async function get_balance(pubkey: PublicKey): Promise<number> {
-    return await global.CONNECTION.getBalance(pubkey);
+export async function get_balance(pubkey: PublicKey, commitment: Commitment = 'finalized'): Promise<number> {
+    return await global.CONNECTION.getBalance(pubkey, { commitment });
 }
 
 export async function get_token_balance(
@@ -206,11 +208,15 @@ export async function get_token_balance(
     commitment: Commitment = 'finalized'
 ): Promise<TokenAmount> {
     try {
-        const assoc_addres = await calc_ata(owner, mint);
+        const assoc_addres = calc_ata(owner, mint);
         const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
         return account_info.value;
     } catch (err) {
-        throw new Error(`Failed to get the token balance: ${err} `);
+        return {
+            uiAmount: null,
+            amount: '0',
+            decimals: 0
+        };
     }
 }
 
@@ -347,7 +353,7 @@ export async function create_and_send_bundle(
     instructions: TransactionInstruction[][],
     signers: Signer[][],
     tip: number,
-    alts?: AddressLookupTableAccount[][]
+    alts?: AddressLookupTableAccount[]
 ): Promise<String> {
     instructions = instructions.filter(Boolean);
     if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
@@ -358,7 +364,6 @@ export async function create_and_send_bundle(
         if (signers[i].length === 0) throw new Error(`No signers provided for tx ${i}.`);
         instructions[i] = instructions[i].filter(Boolean);
     }
-    if (alts && alts.length !== instructions.length) throw new Error(`Address lookup tables length mismatch.`);
 
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
@@ -369,7 +374,7 @@ export async function create_and_send_bundle(
         if (i === instructions.length - 1) {
             instructions[i].push(
                 SystemProgram.transfer({
-                    fromPubkey: signers[i][0].publicKey,
+                    fromPubkey: signers[i][signers[i].length - 1].publicKey,
                     toPubkey: jito_tip_account,
                     lamports: tip * LAMPORTS_PER_SOL
                 })
@@ -377,10 +382,10 @@ export async function create_and_send_bundle(
         }
         const versioned_tx = new VersionedTransaction(
             new TransactionMessage({
-                payerKey: signers[i][0].publicKey,
+                payerKey: signers[i][signers[i].length - 1].publicKey,
                 recentBlockhash: ctx.value.blockhash,
                 instructions: instructions[i]
-            }).compileToV0Message(alts ? alts[i] : undefined)
+            }).compileToV0Message(alts)
         );
         versioned_tx.sign(signers[i]);
         if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
@@ -453,11 +458,16 @@ export async function get_priority_fee(priority_opts: PriorityOptions): Promise<
     return Math.floor(response.priorityFeeEstimate || 0);
 }
 
-export async function create_and_send_smart_tx(instructions: TransactionInstruction[], signers: Signer[]) {
+export async function create_and_send_smart_tx(
+    instructions: TransactionInstruction[],
+    signers: Signer[],
+    alts?: AddressLookupTableAccount[]
+): Promise<String> {
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
-    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, [], {
+
+    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, alts, {
         skipPreflight: true,
         preflightCommitment: COMMITMENT,
         maxRetries: TRADE_MAX_RETRIES
@@ -492,7 +502,7 @@ export async function create_and_send_tx(
         );
     }
 
-    if (protection_tip) return await create_and_send_protected_tx(tx_instructions, signers, protection_tip);
+    if (protection_tip) return await create_and_send_protected_tx(tx_instructions, signers, protection_tip, alts);
 
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     const versioned_tx = new VersionedTransaction(
@@ -591,7 +601,7 @@ export async function send_lamports_with_retries(
                 common.error(
                     common.red(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`)
                 );
-                const balance = await get_balance(sender.publicKey);
+                const balance = await get_balance(sender.publicKey, COMMITMENT);
                 if (balance === 0) throw new Error(`Sender has no balance.`);
                 if (balance < amount) amount = balance;
             } else {
@@ -614,8 +624,8 @@ export async function send_tokens(
     const token_amount_raw = BigInt(token_amount.amount);
 
     let instructions: TransactionInstruction[] = [];
-    const receiver_ata = await calc_ata(receiver, mint);
-    const sender_ata = await calc_ata(sender.publicKey, mint);
+    const receiver_ata = calc_ata(receiver, mint);
+    const sender_ata = calc_ata(sender.publicKey, mint);
 
     if (!(await check_ata_exists(receiver_ata)) && create_receiver_ata) {
         instructions.push(createAssociatedTokenAccountInstruction(sender.publicKey, receiver_ata, receiver, mint));
@@ -648,7 +658,7 @@ export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; uns
     );
     const accounts_to_close = token_accounts.filter((acc) => acc.data.amount === BigInt(0));
 
-    if ((await get_balance(owner.publicKey)) === 0) {
+    if ((await get_balance(owner.publicKey, COMMITMENT)) === 0) {
         common.error(common.red(`Owner has no balance to close the accounts, skipping...`));
         return { ok: false, unsold: unsold_mints };
     }
@@ -695,4 +705,150 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
         amount: ((BigInt(token_amount.amount) * BigInt(Math.floor(percent * 10000))) / BigInt(10000)).toString(),
         decimals: token_amount.decimals
     } as TokenAmount;
+}
+
+export async function create_lta(payer: Signer): Promise<[PublicKey, String]> {
+    const commitment: Commitment = 'finalized';
+    let retries = TRADE_RETRY_ITERATIONS;
+
+    while (retries > 0) {
+        try {
+            const recent_slot = await global.CONNECTION.getSlot(commitment);
+            const [instruction, lt_address] = AddressLookupTableProgram.createLookupTable({
+                authority: payer.publicKey,
+                payer: payer.publicKey,
+                recentSlot: recent_slot
+            });
+            const signature = await create_and_send_tx([instruction], [payer], PriorityLevel.HIGH);
+            return [lt_address, signature];
+        } catch (err) {
+            retries--;
+        }
+    }
+    throw new Error(`Failed after multiple attempts`);
+}
+
+const lta_cache = new Map<string, AddressLookupTableAccount>();
+export async function get_ltas(addresses: PublicKey[]): Promise<AddressLookupTableAccount[]> {
+    const results: AddressLookupTableAccount[] = [];
+    const uncached: PublicKey[] = [];
+
+    for (const addr of addresses) {
+        const addr_str = addr.toString();
+        if (lta_cache.has(addr_str)) {
+            results.push(lta_cache.get(addr_str)!);
+        } else {
+            uncached.push(addr);
+        }
+    }
+
+    if (uncached.length > 0) {
+        const new_ltas = await Promise.all(
+            uncached.map(async (addr) => {
+                try {
+                    const account = await global.CONNECTION.getAddressLookupTable(addr, { commitment: COMMITMENT });
+                    if (account && account.value) {
+                        lta_cache.set(addr.toString(), account.value);
+                        return account.value;
+                    }
+                    throw new Error(`not found`);
+                } catch (error) {
+                    throw new Error(`Failed to get Address Lookup Table account for ${addr}: ${error}`);
+                }
+            })
+        );
+        results.push(...new_ltas);
+    }
+
+    return results.filter((acc) => acc !== null);
+}
+
+export async function extend_lta(lta: PublicKey, payer: Signer, addresses: PublicKey[]): Promise<String[]> {
+    const max_addresses = 256;
+    const lt_account = (await global.CONNECTION.getAddressLookupTable(lta, { commitment: COMMITMENT })).value;
+    if (!lt_account) throw new Error('Address Lookup Table not found');
+
+    const to_insert = addresses.filter(
+        (new_addr) => !lt_account.state.addresses.some((old_addr) => old_addr.equals(new_addr))
+    );
+    if (to_insert.length === 0) throw new Error('No new addresses to insert');
+    if (lt_account.state.addresses.length + to_insert.length > max_addresses)
+        throw new Error(`Address Lookup Table is full, cannot insert more addresses`);
+
+    const txs: Promise<String>[] = [];
+    for (const chunk of common.chunks(to_insert, 20)) {
+        const instruction = AddressLookupTableProgram.extendLookupTable({
+            authority: payer.publicKey,
+            lookupTable: lta,
+            payer: payer.publicKey,
+            addresses: chunk
+        });
+        txs.push(create_and_send_tx([instruction], [payer], PriorityLevel.HIGH));
+    }
+    return await Promise.all(txs);
+}
+
+export async function close_ltas(payer: Signer, ltas: readonly AddressLookupTableAccount[]): Promise<String[]> {
+    const deactivated_ltas = ltas.filter((item) => !item.isActive());
+
+    const instructions = deactivated_ltas.map((lta) =>
+        AddressLookupTableProgram.closeLookupTable({
+            authority: payer.publicKey,
+            recipient: payer.publicKey,
+            lookupTable: lta.key
+        })
+    );
+    const txs: Promise<String>[] = common
+        .chunks(instructions, 10)
+        .map((chunk) => create_and_send_smart_tx(chunk, [payer]));
+    return Promise.all(txs);
+}
+
+export async function get_ltas_by_authority(
+    authority: PublicKey,
+    is_active?: boolean
+): Promise<AddressLookupTableAccount[]> {
+    try {
+        const result = await global.CONNECTION.getProgramAccounts(AddressLookupTableProgram.programId, {
+            filters: [
+                {
+                    memcmp: {
+                        offset: 22,
+                        bytes: authority.toBase58()
+                    }
+                }
+            ]
+        });
+        if (!result) throw new Error(`No Address Lookup Table accounts found for authority ${authority}`);
+        const ltas = result.map(
+            (account) =>
+                new AddressLookupTableAccount({
+                    key: account.pubkey,
+                    state: AddressLookupTableAccount.deserialize(account.account.data)
+                })
+        );
+        if (is_active !== undefined) return ltas.filter((lta) => lta.isActive() === is_active);
+        return ltas;
+    } catch (error) {
+        throw new Error(`Failed to get Address Lookup Table accounts by authority: ${error}`);
+    }
+}
+
+export async function deactivate_ltas(
+    authority: Signer,
+    ltas: readonly AddressLookupTableAccount[]
+): Promise<String[]> {
+    const active_ltas = ltas.filter((item) => item.isActive());
+    if (ltas.length === 0) throw new Error(`No active Address Lookup Table accounts`);
+
+    const instructions = active_ltas.map((lta) =>
+        AddressLookupTableProgram.deactivateLookupTable({
+            authority: authority.publicKey,
+            lookupTable: lta.key
+        })
+    );
+    const txs: Promise<String>[] = common
+        .chunks(instructions, 10)
+        .map((chunk) => create_and_send_smart_tx(chunk, [authority]));
+    return Promise.all(txs);
 }

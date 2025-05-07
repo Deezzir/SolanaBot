@@ -95,7 +95,7 @@ export async function create_token(
     dev_buy = dev_buy || 0;
 
     const trader = get_trader(program);
-    const balance = (await trade.get_balance(dev.keypair.publicKey)) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(dev.keypair.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     const meta = await common.fetch_ipfs_json(meta_cid);
 
     if (dev_buy && dev_buy > balance) throw new Error(`Dev balance is not enough to buy for ${dev_buy} SOL`);
@@ -131,7 +131,7 @@ export async function promote(
     common.log(common.yellow(`Creating ${times} tokens with CID ${meta_cid}...\n`));
 
     const trader = get_trader(program);
-    const balance = (await trade.get_balance(dev.publicKey)) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(dev.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     const meta = await common.fetch_ipfs_json(meta_cid);
 
     common.log(common.bold(`Dev address: ${dev.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL`));
@@ -222,7 +222,7 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
     common.log(
         common.yellow(`Transferring ${amount} SOL from ${sender.publicKey.toString()} to ${receiver.toString()}...`)
     );
-    const balance = await trade.get_balance(sender.publicKey);
+    const balance = await trade.get_balance(sender.publicKey, COMMITMENT);
     if (balance < amount * LAMPORTS_PER_SOL) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
     trade
         .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.DEFAULT)
@@ -245,7 +245,7 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
     ]);
 
     for (const wallet of wallets) {
-        const balance = (await trade.get_balance(wallet.keypair.publicKey)) / LAMPORTS_PER_SOL;
+        const balance = (await trade.get_balance(wallet.keypair.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
         total += balance;
 
         common.print_row([
@@ -283,7 +283,7 @@ export async function sell_token_once(
 
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...`));
-    const token_amount = await trade.get_token_balance(seller.publicKey, mint);
+    const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
     common.log(
         common.bold(
             `\nSeller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
@@ -318,7 +318,7 @@ export async function buy_token_once(
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
-    const balance = (await trade.get_balance(buyer.publicKey)) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < amount) throw new Error(`Buyer balance is not enough to buy ${amount} SOL`);
 
@@ -364,7 +364,7 @@ export async function warmup(
     for (const [i, wallet] of wallets.entries()) {
         const buyer = wallet.keypair;
 
-        const balance = await trade.get_balance(buyer.publicKey);
+        const balance = await trade.get_balance(buyer.publicKey, COMMITMENT);
         if (balance === 0) {
             common.error(
                 common.red(
@@ -424,7 +424,7 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
     const transactions = [];
     for (const wallet of wallets) {
         const sender = wallet.keypair;
-        const amount = await trade.get_balance(sender.publicKey);
+        const amount = await trade.get_balance(sender.publicKey, COMMITMENT);
         if (amount === 0 || receiver.equals(sender.publicKey)) continue;
 
         common.log(
@@ -453,7 +453,7 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
         try {
             const sender = wallet.keypair;
             if (sender.publicKey.equals(receiver)) continue;
-            const token_amount = await trade.get_token_balance(sender.publicKey, mint);
+            const token_amount = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT);
             const create_receiver_ata = i === 0;
 
             common.log(
@@ -565,7 +565,7 @@ export async function fund(
         amounts = Array.from({ length: wallets.length }, () => amount);
     }
 
-    const balance = (await trade.get_balance(funder.publicKey)) / LAMPORTS_PER_SOL;
+    const balance = (await trade.get_balance(funder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     common.log(common.yellow(`Payer address: ${funder.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < total_amount) {
         throw new Error(`Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`);
@@ -581,13 +581,13 @@ export async function fund(
 
     if (depth) {
         common.log(`Running transfers with depth ${depth}:\n`);
-        const rescue_wallets = await transfers.run_deep_transfer(wallets, amounts, funder, depth);
+        const rescue_wallets = await transfers.run_deep_transfer(common.zip(wallets, amounts), funder, depth);
         common.log(`\nPerforming cleanup of the temporary wallets...\n`);
         await collect(rescue_wallets, funder.publicKey);
         return;
     }
 
-    await transfers.run_reg_transfer(wallets, amounts, funder);
+    await transfers.run_reg_transfer(common.zip(wallets, amounts), funder);
 }
 
 export async function snipe(
@@ -759,7 +759,7 @@ export async function start_volume(
 
     if (simulate) {
         const sol_price = await common.fetch_sol_price();
-        const funder_balance = (await trade.get_balance(funder.publicKey)) / LAMPORTS_PER_SOL;
+        const funder_balance = (await trade.get_balance(funder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
         common.log(common.yellow(`Simulating the ${volume_type_name} Volume Bot...\n`));
         const results = await volume.simulate(sol_price, volume_config, trader);
 
@@ -896,7 +896,7 @@ export async function drop(
 
     let token_balance: number = 0;
     try {
-        const balance = await trade.get_token_balance(drop.publicKey, mint_meta.mint);
+        const balance = await trade.get_token_balance(drop.publicKey, mint_meta.mint, COMMITMENT);
         token_balance = Math.floor(balance.uiAmount || 0);
         common.log(
             common.yellow(
@@ -916,4 +916,60 @@ export async function drop(
         airdrop_path,
         presale_path
     );
+}
+
+export async function create_lta(wallet: common.Wallet): Promise<void> {
+    common.log(common.yellow(`Creating Address Lookup Table...`));
+    common.log(`Authority address: ${wallet.keypair.publicKey.toString()}`);
+
+    let [lta, create_sig] = await trade.create_lta(wallet.keypair);
+    common.log(`\nAddress Lookup Table created, signature: ${create_sig}`);
+    common.log(common.green(`Address: ${lta.toBase58()}`));
+}
+
+export async function extend_lta(wallet: common.Wallet, lta: PublicKey, address_file_path: any): Promise<void> {
+    const addresses = common.read_pubkeys(address_file_path);
+    if (addresses.length === 0) throw new Error('No addresses provided.');
+
+    common.log(common.yellow(`Extending Address Lookup Table for ${addresses.length} addresses...`));
+    common.log(`Authority: ${wallet.keypair.publicKey.toString()}`);
+    common.log(`Address Lookup Table: ${lta.toBase58()}`);
+
+    const extend_sigs = await trade.extend_lta(lta, wallet.keypair, addresses);
+    common.log(common.green(`\nAddress Lookup Table extended, signatures:`));
+    extend_sigs.forEach((sig) => common.log(common.green(`${sig}`)));
+}
+
+export async function deactivate_ltas(wallet: common.Wallet): Promise<void> {
+    common.log(common.yellow(`Deactivating Address Lookup Tables...`));
+    common.log(`Authority: ${wallet.keypair.publicKey.toString()}`);
+
+    const ltas = await trade.get_ltas_by_authority(wallet.keypair.publicKey, true);
+    if (ltas.length === 0) throw new Error('No Active Address Lookup Tables found for the authority.');
+    common.log(`\nFound ${ltas.length} active Address Lookup Tables created by the authority`);
+
+    const deactivate_sigs = await trade.deactivate_ltas(wallet.keypair, ltas);
+
+    common.log(`\nAddress Lookup Tables deactivated, signatures:`);
+    deactivate_sigs.forEach((sig) => common.log(`${sig}`));
+
+    common.log(
+        common.green(`\nDeactivated Address Lookup Tables:\n${ltas.map((lta) => lta.key.toBase58()).join('\n')}`)
+    );
+}
+
+export async function close_ltas(wallet: common.Wallet): Promise<void> {
+    common.log(common.yellow(`Closing Address Lookup Tables...`));
+    common.log(`Authority: ${wallet.keypair.publicKey.toString()}`);
+
+    const ltas = await trade.get_ltas_by_authority(wallet.keypair.publicKey, false);
+    if (ltas.length === 0) throw new Error('No Deactivated Address Lookup Tables found for the authority.');
+    common.log(`\nFound ${ltas.length} deactivated Address Lookup Tables created by the authority`);
+
+    const close_sigs = await trade.close_ltas(wallet.keypair, ltas);
+
+    common.log(`\nAddress Lookup Tables closed, signatures:`);
+    close_sigs.forEach((sig) => common.log(`${sig}`));
+
+    common.log(common.green(`\nClosed Address Lookup Tables:\n${ltas.map((lta) => lta.key.toBase58()).join('\n')}`));
 }

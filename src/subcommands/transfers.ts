@@ -1,5 +1,5 @@
 import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { COMMANDS_INTERVAL_MS, PriorityLevel, SPIDER_EXTRA_SOL, SPIDER_INTERVAL_MS } from '../constants.js';
+import { COMMANDS_INTERVAL_MS, COMMITMENT, PriorityLevel, TRANSFER_INTERVAL_MS } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 
@@ -44,9 +44,6 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
         node.left = _build_tree(node.left, layer_cnt - 1);
 
         if (node.right || node.left) node.amount = (node.left?.amount || 0) + (node.right?.amount || 0);
-        if (node.right) node.amount += SPIDER_EXTRA_SOL;
-        if (node.left) node.amount += SPIDER_EXTRA_SOL;
-
         return node;
     };
 
@@ -89,12 +86,10 @@ function display_spider_tree(tree: SpiderTree) {
     common.log('');
 }
 
-function backup_spider_tree(tree: SpiderTree): string | undefined {
-    if (!tree.head) return;
+function backup_spider_tree(tree: SpiderTree): string {
+    if (!tree.head) throw new Error('Spider tree is empty');
 
     const target_file = common.setup_rescue_file();
-    if (!target_file) return;
-
     let postfixes: Map<number, number> = new Map();
 
     const _backup_spider_tree = (node: SpiderTreeNode | null, layer_cnt: number = 0): boolean => {
@@ -118,18 +113,14 @@ function backup_spider_tree(tree: SpiderTree): string | undefined {
     };
 
     const ok = _backup_spider_tree(tree.head);
-    if (!ok) {
-        common.error(
-            common.red('Something went wrong during the spider transfer, check the rescue file for wallet backups')
-        );
-    } else {
-        common.log(`Successfully backed the keys up for the spider transfer`);
-    }
+    if (!ok) throw new Error('Something went wrong during the spider transfer');
+
+    common.log(`Successfully backed the keys up for the spider transfer`);
     return target_file;
 }
 
-async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | undefined> {
-    if (!tree.head) return;
+async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[]> {
+    if (!tree.head) throw new Error('Spider tree is empty');
     const entries: Keypair[] = [];
 
     let postfixes: Map<number, number> = new Map();
@@ -164,7 +155,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 return false;
             }
 
-            await common.sleep(SPIDER_INTERVAL_MS);
+            await common.sleep(TRANSFER_INTERVAL_MS);
 
             const ok = await _process_inner_transfers(node.left, layer_cnt + 1);
             if (!ok) return false;
@@ -193,7 +184,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
                 return false;
             }
 
-            await common.sleep(SPIDER_INTERVAL_MS);
+            await common.sleep(TRANSFER_INTERVAL_MS);
 
             const ok = await _process_inner_transfers(node.right, layer_cnt + 1);
             if (!ok) return false;
@@ -203,87 +194,78 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[] | un
     };
 
     const ok = await _process_inner_transfers(tree.head);
-    if (!ok) {
-        common.error(common.red('Something went wrong during the spider transfer, check the logs for details'));
-        return;
-    }
+    if (!ok) throw new Error('Something went wrong during the spider transfer, check the logs for details');
 
     return entries;
 }
 
-async function process_final_transfers(wallets: common.Wallet[], entries: Keypair[]): Promise<void> {
-    if (entries.length === 0) return;
-    if (entries.length !== wallets.length) {
-        common.error(common.red("The number of entries doesn't match the number of keys"));
-        return;
-    }
+async function process_final_transfers(entries: [common.Wallet, Keypair][]): Promise<void> {
+    const transactions: Promise<void>[] = [];
 
-    const transactions: Promise<String>[] = [];
-
-    for (const [i, wallet] of wallets.entries()) {
-        const sender = entries[i];
+    for (const entry of entries) {
+        const [wallet, sender] = entry;
         const receiver = wallet.keypair;
-        const amount = await trade.get_balance(sender.publicKey);
+        const amount = await trade.get_balance(sender.publicKey, COMMITMENT);
         if (amount <= 0) continue;
 
         common.log(
             `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${(amount / LAMPORTS_PER_SOL).toFixed(3).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')}...`
         );
-        transactions.push(trade.send_lamports_with_retries(amount, sender, receiver.publicKey, PriorityLevel.DEFAULT));
-
-        await common.sleep(50);
+        transactions.push(
+            trade
+                .send_lamports_with_retries(amount, sender, receiver.publicKey, PriorityLevel.HIGH)
+                .then((sig) =>
+                    common.log(
+                        common.green(`Transaction completed for ${receiver.publicKey.toString()}, signature: ${sig}`)
+                    )
+                )
+                .catch((error) =>
+                    common.error(common.red(`Transaction failed for ${receiver.publicKey.toString()}: ${error}`))
+                )
+        );
     }
 
-    const results = await Promise.all(transactions);
-    if (results.every((result) => result)) {
-        common.log(`All transactions completed successfully`);
-    } else {
-        common.error(common.red('Some transactions failed, check the logs for details'));
-    }
+    await Promise.all(transactions);
 }
 
 export async function run_spider_transfer(
-    keys: common.Wallet[],
+    wallets: common.Wallet[],
     amount: number,
     sender: Keypair
 ): Promise<common.Wallet[]> {
-    const keys_cnt = keys.length;
+    const wallet_cnt = wallets.length;
 
     let tree = {
         head: null,
-        depth: Math.ceil(Math.log2(keys_cnt)) + 1
+        depth: Math.ceil(Math.log2(wallet_cnt)) + 1
     } as SpiderTree;
 
-    tree = build_spider_tree(tree, amount, keys_cnt, sender);
+    tree = build_spider_tree(tree, amount, wallet_cnt, sender);
     display_spider_tree(tree);
-
     const target_file = backup_spider_tree(tree);
-    if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
-    const rescue_keys = common.get_wallets(target_file);
 
-    common.log(`Processing inner transfers...\n`);
-    const final_entries = await process_inner_transfers(tree);
-    await common.sleep(SPIDER_INTERVAL_MS * 2);
-
-    if (final_entries) {
+    try {
+        common.log(`Processing inner transfers...\n`);
+        const final_entries = await process_inner_transfers(tree);
         common.log(`\nProcessing final transfers...\n`);
-        await process_final_transfers(keys, final_entries);
+        await process_final_transfers(common.zip(wallets, final_entries));
+    } catch (error) {
+        common.error(common.red(`Failed to process transfers: ${error}`));
     }
 
-    return rescue_keys;
+    return common.get_wallets(target_file);
 }
 
 export async function run_deep_transfer(
-    wallets: common.Wallet[],
-    amounts: number[],
+    entries: [common.Wallet, number][],
     sender: Keypair,
     depth: number
 ): Promise<common.Wallet[]> {
     const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
 
-    const transfer_map = wallets.map((wallet, index) => {
-        const amount = amounts[index];
+    const transfer_map = entries.map((entry, index) => {
+        const [wallet, amount] = entry;
         const path = [
             sender,
             ...Array.from({ length: depth }, (_v, i) => {
@@ -331,7 +313,7 @@ export async function run_deep_transfer(
                 failed.push({ name: wallet.name, id: wallet.id });
                 break;
             }
-            await common.sleep(SPIDER_INTERVAL_MS);
+            await common.sleep(TRANSFER_INTERVAL_MS);
         }
         common.log(common.bold(`Finished sending to ${wallet.name} (${wallet.id})\n`));
     }
@@ -344,15 +326,13 @@ export async function run_deep_transfer(
     return common.get_wallets(target_file);
 }
 
-export async function run_reg_transfer(wallets: common.Wallet[], amounts: number[], sender: Keypair): Promise<void> {
-    if (amounts.length !== wallets.length) throw new Error('The number of entries does not match the number of keys');
-
+export async function run_reg_transfer(entries: [common.Wallet, number][], sender: Keypair): Promise<void> {
     const transactions = [];
     const failed: { name: string; id: number }[] = [];
 
-    for (const [i, wallet] of wallets.entries()) {
+    for (const entry of entries) {
+        const [wallet, topup_amount] = entry;
         const receiver = wallet.keypair;
-        const topup_amount = amounts[i];
         if (receiver.publicKey.equals(sender.publicKey)) continue;
 
         common.log(

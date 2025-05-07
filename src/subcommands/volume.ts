@@ -1,13 +1,27 @@
 import inquirer from 'inquirer';
 import * as common from '../common/common.js';
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import {
+    AddressLookupTableAccount,
+    Keypair,
+    LAMPORTS_PER_SOL,
+    PublicKey,
+    Signer,
+    SystemProgram,
+    TransactionInstruction
+} from '@solana/web3.js';
 import * as trade from '../common/trade_common.js';
 import {
     JITO_BUNDLE_SIZE,
     VOLUME_MAX_WALLETS_PER_EXEC,
     TRADE_RETRY_ITERATIONS,
     VOLUME_TRADE_SLIPPAGE,
-    JITO_BUNDLE_INTERVAL_MS
+    JITO_BUNDLE_INTERVAL_MS,
+    VOLUME_MAX_WALLETS_PER_COLLECT_TX,
+    SOL_MINT,
+    VOLUME_MAX_WALLETS_PER_FUND_TX,
+    VOLUME_MAX_WALLETS_PER_TRADE_TX,
+    VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE,
+    COMMITMENT
 } from '../constants.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 
@@ -28,170 +42,12 @@ export enum VolumeType {
     Bump = 'Bump'
 }
 
-function calc_buy_amount(amount_sol: number, slippage: number, platform_fee: number, bundle_tip: number = 0): number {
-    return (
-        amount_sol / (slippage + 1.0) -
-        amount_sol * platform_fee * 2 -
-        5000 / LAMPORTS_PER_SOL -
-        bundle_tip -
-        0.0021 * 3
-    );
-}
-
-async function fund_bundle(
-    wallets: Keypair[],
-    amounts: number[],
-    funder: Signer,
-    bundle_tip: number
-): Promise<String[]> {
-    if (wallets.length !== amounts.length) throw new Error('Wallets and amounts length mismatch');
-    if (wallets.length === 0) throw new Error('No wallets to fund');
-
-    let instructions: TransactionInstruction[] = [];
-    wallets.forEach((keypair, i) => {
-        const receiver = keypair.publicKey;
-        const amount = amounts[i];
-
-        instructions.push(
-            SystemProgram.transfer({
-                fromPubkey: funder.publicKey,
-                toPubkey: receiver,
-                lamports: Math.floor(amount * LAMPORTS_PER_SOL)
-            })
-        );
-    });
-
-    const chunks = common.chunks(common.chunks(instructions, 20), JITO_BUNDLE_SIZE);
-    const bundle_ids: String[] = [];
-    for (const chunk of chunks) {
-        let retries = TRADE_RETRY_ITERATIONS;
-        while (retries > 0) {
-            const signers = Array.from({ length: chunk.length }, () => [funder]);
-            try {
-                const bundle_id = await trade.create_and_send_bundle(chunk, signers, bundle_tip);
-                bundle_ids.push(bundle_id);
-                break;
-            } catch (error) {
-                common.log(common.red(`Failed to send fund bundle: ${error}`));
-                retries--;
-                if (retries === 0) throw new Error('Failed to send bundle after multiple attempts');
-            }
-            await common.sleep(JITO_BUNDLE_INTERVAL_MS);
-        }
-    }
-    return bundle_ids;
-}
-
-async function collect_bundle(wallets: Keypair[], receiver: Signer, bundle_tip: number): Promise<String[]> {
-    if (wallets.length === 0) throw new Error('No wallets to collect from');
-
-    let filtered_keypairs = (
-        await Promise.all(
-            wallets.map(async (keypair) => {
-                const balance = await trade.get_balance(keypair.publicKey);
-                if (balance === 0) return;
-                return { keypair, balance };
-            })
-        )
-    ).filter((pair) => pair !== undefined);
-    const wallet_bundles = common.chunks(filtered_keypairs, JITO_BUNDLE_SIZE);
-
-    const bundle_ids: String[] = [];
-    for (const wallet_bundle of wallet_bundles) {
-        const instructions: TransactionInstruction[][] = [];
-        const signers: Signer[][] = [];
-        for (const [i, wallet] of wallet_bundle.entries()) {
-            const is_tipper = i === wallet_bundle.length - 1;
-            instructions.push([
-                SystemProgram.transfer({
-                    fromPubkey: wallet.keypair.publicKey,
-                    toPubkey: receiver.publicKey,
-                    lamports: Math.floor(wallet.balance - 5000 - (is_tipper ? bundle_tip * LAMPORTS_PER_SOL : 0))
-                })
-            ]);
-            signers.push([wallet.keypair]);
-        }
-        if (instructions.length === 0) continue;
-        let retries = TRADE_RETRY_ITERATIONS;
-        while (retries > 0) {
-            try {
-                const bundle_id = await trade.create_and_send_bundle(instructions, signers, bundle_tip);
-                bundle_ids.push(bundle_id);
-                break;
-            } catch (error) {
-                common.log(common.red(`Failed to send collect bundle: ${error}`));
-                retries--;
-                if (retries === 0) throw new Error('Failed to send bundle after multiple attempts');
-            }
-            await common.sleep(JITO_BUNDLE_INTERVAL_MS);
-        }
-    }
-    return bundle_ids;
-}
-
-async function buy_sell_bundle(
-    wallets: Keypair[],
-    amounts: number[],
-    trader: trade.IProgramTrader,
-    mint_meta: trade.IMintMeta,
-    bundle_tip: number
-): Promise<void> {
-    if (wallets.length !== amounts.length) throw new Error('Wallets and amounts length mismatch');
-    if (wallets.length === 0) throw new Error('No wallets to buy/sell');
-    const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
-    const amount_bundles = common.chunks(amounts, JITO_BUNDLE_SIZE);
-    const buy_bundles: Promise<boolean>[] = [];
-
-    for (const [bundle_idx, wallet_bundle] of wallet_bundles.entries()) {
-        const instructions: TransactionInstruction[][] = [];
-        const signers: Signer[][] = [];
-        const amount_bundle = amount_bundles[bundle_idx];
-        for (const [wallet_idx, wallet] of wallet_bundle.entries()) {
-            const is_tipper = wallet_idx === wallet_bundle.length - 1;
-            const token_ata = await trade.calc_ata(wallet.publicKey, mint_meta.mint_pubkey);
-            const amount = calc_buy_amount(
-                amount_bundle[wallet_idx],
-                VOLUME_TRADE_SLIPPAGE,
-                mint_meta.platform_fee,
-                is_tipper ? bundle_tip : 0
-            );
-            const [buy_instrs, sell_instrs] = await trader.buy_sell_instructions(
-                amount,
-                wallet,
-                mint_meta,
-                VOLUME_TRADE_SLIPPAGE
-            );
-            const close_account_instruction = createCloseAccountInstruction(
-                token_ata,
-                wallet.publicKey,
-                wallet.publicKey
-            );
-            instructions.push([...buy_instrs, ...sell_instrs, close_account_instruction]);
-            signers.push([wallet]);
-        }
-        buy_bundles.push(
-            trade
-                .create_and_send_bundle(instructions, signers, bundle_tip)
-                .then((signature) => {
-                    common.log(common.green(`Buy Bundle completed, signature: ${signature}`));
-                    return true;
-                })
-                .catch((error) => {
-                    common.error(common.red(`Buy Bundle failed: ${error}`));
-                    return false;
-                })
-        );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
-        mint_meta = await trader.update_mint_meta(mint_meta);
-    }
-    await Promise.all(buy_bundles);
-}
-
 export async function execute_fast(
     funder: Signer,
     volume_config: VolumeConfig,
     trader: trade.IProgramTrader
 ): Promise<common.Wallet[]> {
+    await validate_funder(funder, volume_config);
     const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
     const mint_meta = await trader.get_mint_meta(volume_config.mint);
@@ -203,29 +59,42 @@ export async function execute_fast(
             common.save_rescue_key(pair, target_file, exec, i);
             return pair;
         });
-        const amounts = Array.from({ length: volume_config.wallet_cnt }, () =>
-            common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount)
+        const keypairs_with_amounts = common.zip(
+            keypairs,
+            Array.from({ length: volume_config.wallet_cnt }, () =>
+                common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount)
+            )
         );
         common.log(common.blue(`\nRunning execution: ${exec + 1}`));
 
-        common.log('Topping up the wallets...');
+        common.log(`\nCreating Address Lookup Table Account...`);
+        let lta: AddressLookupTableAccount;
         try {
-            const bundle_ids = await fund_bundle(keypairs, amounts, funder, volume_config.bundle_tip);
-            common.log(common.green(`Fund completed, signatures:\n${bundle_ids.join('\n')}\n`));
+            lta = await prepare_lta(funder, keypairs, volume_config.mint);
+            common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
         } catch (error) {
-            common.log(common.red(`Fund failed: ${error} for execution ${exec + 1}, skipping...`));
+            common.error(common.red(`LTA creation failed: ${error}, skipping execution...`));
             continue;
         }
 
-        common.log(`Buying and selling the tokens...`);
-        await buy_sell_bundle(keypairs, amounts, trader, mint_meta, volume_config.bundle_tip);
+        common.log('\nTopping up the wallets...');
+        try {
+            const bundle_ids = await fund_bundle(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
+            common.log(common.green(`Fund completed, signatures:\n${bundle_ids.join('\n')}\n`));
+        } catch (error) {
+            common.error(common.red(`Fund failed: ${error} for execution ${exec + 1}, skipping...`));
+            continue;
+        }
+
+        common.log(`Trading the tokens...`);
+        await buy_sell_bundle(keypairs_with_amounts, trader, mint_meta!, volume_config.bundle_tip, lta);
 
         common.log('\nCollecting the funds from the wallets...');
         try {
-            const bundle_ids = await collect_bundle(keypairs, funder, volume_config.bundle_tip);
+            const bundle_ids = await collect_bundle(keypairs, funder, volume_config.bundle_tip, lta);
             common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}\n`));
         } catch (error) {
-            common.log(common.red(`Collect failed: ${error}`));
+            common.error(common.red(`Collect failed: ${error}`));
         }
 
         const delay_seconds = common.normal_random(volume_config.delay, volume_config.delay * 0.1);
@@ -243,6 +112,260 @@ export async function execute_natural(_volume_config: VolumeConfig, _trader: tra
 
 export async function execute_bump(_volume_config: VolumeConfig, _trader: trade.IProgramTrader) {
     throw new Error('[ERROR] Not implemented.');
+}
+
+export async function simulate(sol_price: number, volume_config: VolumeConfig, trader: trade.IProgramTrader) {
+    const mint_meta = await trader.get_mint_meta(volume_config.mint);
+    if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
+
+    switch (volume_config.type) {
+        case VolumeType.Fast: {
+            const total_wallet_cnt = volume_config.wallet_cnt * volume_config.executions;
+            let total_fee_sol = 0;
+            let total_volume_sol = 0;
+            let total_sol_utilization = volume_config.max_sol_amount * volume_config.wallet_cnt;
+
+            total_fee_sol +=
+                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_FUND_TX * JITO_BUNDLE_SIZE)) *
+                volume_config.bundle_tip;
+            for (let i = 0; i < volume_config.executions; i++) {
+                for (let j = 0; j < volume_config.wallet_cnt; j++) {
+                    const sol_amount = common.uniform_random(
+                        volume_config.min_sol_amount,
+                        volume_config.max_sol_amount
+                    );
+                    total_fee_sol += sol_amount * mint_meta.platform_fee * 2;
+                    total_volume_sol += sol_amount;
+                }
+            }
+            total_fee_sol +=
+                Math.ceil(total_wallet_cnt / VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE) * volume_config.bundle_tip;
+            total_fee_sol +=
+                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_COLLECT_TX * JITO_BUNDLE_SIZE)) *
+                volume_config.bundle_tip;
+
+            return {
+                total_sol_utilization,
+                total_fee_sol: total_fee_sol,
+                total_fee_usd: total_fee_sol * sol_price,
+                total_volume_sol,
+                total_volume_usd: total_volume_sol * sol_price
+            };
+        }
+        default:
+            throw new Error('[ERROR] Not implemented.');
+    }
+}
+
+async function validate_funder(funder: Signer, volume_config: VolumeConfig): Promise<void> {
+    const balance = await trade.get_balance(funder.publicKey, COMMITMENT);
+    const required_balance = volume_config.max_sol_amount * LAMPORTS_PER_SOL * volume_config.wallet_cnt;
+    if (balance < required_balance)
+        throw new Error(
+            `Funder has insufficient balance. Required: ${required_balance.toFixed(2)} SOL, Available: ${(balance / LAMPORTS_PER_SOL).toFixed(2)} SOL`
+        );
+}
+
+function calc_buy_amount(amount_sol: number, slippage: number, platform_fee: number, bundle_tip: number = 0): number {
+    return (
+        amount_sol / (slippage + 1.0) -
+        amount_sol * platform_fee * 2 -
+        5000 / LAMPORTS_PER_SOL -
+        bundle_tip -
+        0.0021 * 3
+    );
+}
+
+async function retry_send_bundle(
+    bundle_instructions: TransactionInstruction[][],
+    bundle_signers: Signer[][],
+    bundle_tip: number,
+    ltas: AddressLookupTableAccount[]
+): Promise<String> {
+    let retries = TRADE_RETRY_ITERATIONS;
+    while (retries > 0) {
+        try {
+            const bundle_id = await trade.create_and_send_bundle(bundle_instructions, bundle_signers, bundle_tip, ltas);
+            return bundle_id;
+        } catch (error) {
+            common.log(common.red(`Failed to send bundle: ${error}`));
+            retries--;
+        }
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+    }
+    throw new Error('Failed after multiple attempts');
+}
+
+async function fund_bundle(
+    wallets: [Keypair, number][],
+    funder: Signer,
+    bundle_tip: number,
+    lta: AddressLookupTableAccount
+): Promise<String[]> {
+    if (wallets.length === 0) throw new Error('No wallets to fund');
+    let instructions: TransactionInstruction[] = [];
+    wallets.forEach(([keypair, amount]) => {
+        const receiver = keypair.publicKey;
+        instructions.push(
+            SystemProgram.transfer({
+                fromPubkey: funder.publicKey,
+                toPubkey: receiver,
+                lamports: Math.floor(amount * LAMPORTS_PER_SOL)
+            })
+        );
+    });
+
+    const chunks = common.chunks(common.chunks(instructions, VOLUME_MAX_WALLETS_PER_FUND_TX), JITO_BUNDLE_SIZE);
+    const bundle_ids: String[] = [];
+    for (const chunk of chunks) {
+        bundle_ids.push(
+            await trade.create_and_send_bundle(
+                chunk,
+                Array.from({ length: chunk.length }, () => [funder]),
+                bundle_tip,
+                [lta]
+            )
+        );
+    }
+    return bundle_ids;
+}
+
+async function collect_bundle(
+    wallets: Keypair[],
+    receiver: Signer,
+    bundle_tip: number,
+    lta: AddressLookupTableAccount
+): Promise<String[]> {
+    if (wallets.length === 0) throw new Error('No wallets to collect from');
+    let filtered_keypairs = (
+        await Promise.all(
+            wallets.map(async (keypair) => {
+                const balance = await trade.get_balance(keypair.publicKey, COMMITMENT);
+                if (balance === 0) return;
+                return { keypair, balance };
+            })
+        )
+    ).filter((pair) => pair !== undefined);
+    const wallet_bundles = common.chunks(
+        common.chunks(filtered_keypairs, VOLUME_MAX_WALLETS_PER_COLLECT_TX),
+        JITO_BUNDLE_SIZE
+    );
+
+    const bundle_ids: String[] = [];
+    for (const wallet_bundle of wallet_bundles) {
+        const bundle_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Signer[][] = [];
+        for (const [tx_i, tx_wallets] of wallet_bundle.entries()) {
+            const instructions: TransactionInstruction[] = [];
+            const signers: Signer[] = [];
+            for (const [wallet_i, wallet] of tx_wallets.entries()) {
+                const is_payer = wallet_i === tx_wallets.length - 1;
+                const is_tipper = is_payer && tx_i === wallet_bundle.length - 1;
+                instructions.push(
+                    SystemProgram.transfer({
+                        fromPubkey: wallet.keypair.publicKey,
+                        toPubkey: receiver.publicKey,
+                        lamports: Math.floor(
+                            wallet.balance -
+                                (is_payer ? 5000 * VOLUME_MAX_WALLETS_PER_COLLECT_TX : 0) -
+                                (is_tipper ? bundle_tip * LAMPORTS_PER_SOL : 0)
+                        )
+                    })
+                );
+                signers.push(wallet.keypair);
+            }
+            bundle_instructions.push(instructions);
+            bundle_signers.push(signers);
+        }
+        try {
+            bundle_ids.push(await retry_send_bundle(bundle_instructions, bundle_signers, bundle_tip, [lta]));
+        } catch (error) {
+            common.log(common.red(`Failed to send collect bundle: ${error}`));
+        }
+    }
+    return bundle_ids;
+}
+
+async function buy_sell_bundle(
+    wallets: [Keypair, number][],
+    trader: trade.IProgramTrader,
+    mint_meta: trade.IMintMeta,
+    bundle_tip: number,
+    lta: AddressLookupTableAccount
+): Promise<void> {
+    if (wallets.length === 0) throw new Error('No wallets to buy/sell');
+    const wallet_bundles = common
+        .chunks(wallets, VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE)
+        .map((chunk) => common.chunks(chunk, VOLUME_MAX_WALLETS_PER_TRADE_TX));
+    const buy_bundles: Promise<void>[] = [];
+
+    const bundle_ltas: AddressLookupTableAccount[] = [];
+    for (const wallet_bundle of wallet_bundles) {
+        const bundle_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Signer[][] = [];
+        for (const [tx_i, tx_wallets] of wallet_bundle.entries()) {
+            const buy_instructions: TransactionInstruction[] = [];
+            const sell_instructions: TransactionInstruction[] = [];
+            const buy_signers: Signer[] = [];
+            const sell_signers: Signer[] = [];
+            for (const [wallet_i, wallet] of tx_wallets.entries()) {
+                const [keypair, amount] = wallet;
+                const is_tipper = wallet_i === tx_wallets.length - 1 && tx_i === wallet_bundle.length - 1;
+                const adjusted_amount = calc_buy_amount(
+                    amount,
+                    VOLUME_TRADE_SLIPPAGE,
+                    mint_meta.platform_fee,
+                    is_tipper ? bundle_tip : 0
+                );
+                const [buy_instrs, sell_instrs, trade_ltas] = await trader.buy_sell_instructions(
+                    adjusted_amount,
+                    keypair,
+                    mint_meta,
+                    VOLUME_TRADE_SLIPPAGE
+                );
+                const close_account_instruction = createCloseAccountInstruction(
+                    trade.calc_ata(keypair.publicKey, mint_meta.mint_pubkey),
+                    keypair.publicKey,
+                    keypair.publicKey
+                );
+                if (tx_wallets.length === VOLUME_MAX_WALLETS_PER_TRADE_TX) {
+                    buy_instructions.push(...buy_instrs);
+                    sell_instructions.push(...sell_instrs, close_account_instruction);
+                    buy_signers.push(keypair);
+                    sell_signers.push(keypair);
+                } else {
+                    sell_instructions.unshift(...buy_instrs);
+                    sell_instructions.push(...sell_instrs, close_account_instruction);
+                    sell_signers.push(keypair);
+                }
+                if (bundle_ltas.length === 0) bundle_ltas.push(...(trade_ltas || []), lta);
+            }
+            if (buy_instructions.length > 0) bundle_instructions.unshift(buy_instructions);
+            bundle_instructions.push(sell_instructions);
+            if (buy_signers.length > 0) bundle_signers.unshift(buy_signers);
+            bundle_signers.push(sell_signers);
+        }
+        buy_bundles.push(
+            trade
+                .create_and_send_bundle(bundle_instructions, bundle_signers, bundle_tip, bundle_ltas)
+                .then((signature) => common.log(common.green(`Trade Bundle completed, signature: ${signature}`)))
+                .catch((error) => common.error(common.red(`Trade Bundle failed: ${error}`)))
+        );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
+    }
+    await Promise.all(buy_bundles);
+}
+
+async function prepare_lta(funder: Signer, wallets: Keypair[], mint: PublicKey): Promise<AddressLookupTableAccount> {
+    const [created_lt] = await trade.create_lta(funder);
+    const token_atas = wallets.map((keypair) => trade.calc_ata(keypair.publicKey, mint));
+    const wsol_atas = wallets.map((keypair) => trade.calc_ata(keypair.publicKey, SOL_MINT));
+    const keys = [...wallets.map((keypair) => keypair.publicKey), mint, ...token_atas, ...wsol_atas, funder.publicKey];
+    await trade.extend_lta(created_lt, funder, keys);
+
+    const [lta] = await trade.get_ltas([created_lt]);
+    return lta;
 }
 
 async function get_config() {
@@ -385,43 +508,6 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
     }
 }
 
-export async function simulate(sol_price: number, volume_config: VolumeConfig, trader: trade.IProgramTrader) {
-    const mint_meta = await trader.get_mint_meta(volume_config.mint);
-    if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
-
-    switch (volume_config.type) {
-        case VolumeType.Fast: {
-            const total_wallet_cnt = volume_config.wallet_cnt * volume_config.executions;
-            let total_fee_sol = 0;
-            let total_volume_sol = 0;
-            let total_sol_utilization = volume_config.max_sol_amount * volume_config.wallet_cnt;
-
-            total_fee_sol += Math.ceil(total_wallet_cnt / VOLUME_MAX_WALLETS_PER_EXEC) * volume_config.bundle_tip;
-            for (let i = 0; i < volume_config.executions; i++) {
-                for (let j = 0; j < volume_config.wallet_cnt; j++) {
-                    const sol_amount = common.uniform_random(
-                        volume_config.min_sol_amount,
-                        volume_config.max_sol_amount
-                    );
-                    total_fee_sol += sol_amount * mint_meta.platform_fee * 2 + volume_config.bundle_tip;
-                    total_volume_sol += sol_amount;
-                }
-            }
-            total_fee_sol += Math.ceil(total_wallet_cnt / JITO_BUNDLE_SIZE) * volume_config.bundle_tip;
-
-            return {
-                total_sol_utilization,
-                total_fee_sol: total_fee_sol,
-                total_fee_usd: total_fee_sol * sol_price,
-                total_volume_sol,
-                total_volume_usd: total_volume_sol * sol_price
-            };
-        }
-        default:
-            throw new Error('[ERROR] Not implemented.');
-    }
-}
-
 async function validate_json_config(json: any): Promise<VolumeConfig> {
     const required_fields = ['mint', 'executions', 'bundle_tip', 'min_sol_amount', 'max_sol_amount'];
     for (const field of required_fields) {
@@ -434,6 +520,9 @@ async function validate_json_config(json: any): Promise<VolumeConfig> {
         }
         json.type = type as VolumeType;
     }
+    if (!('type' in json)) json.type = VolumeType.Fast;
+    if (!('wallet_cnt' in json)) json.wallet_cnt = 1;
+
     if (!common.is_valid_pubkey(mint)) {
         throw new Error('Invalid Raydium Pair ID (AMM) public key.');
     }
@@ -452,25 +541,17 @@ async function validate_json_config(json: any): Promise<VolumeConfig> {
     if (typeof delay !== 'number' || delay <= 0) {
         throw new Error('Invalid delay number. Must be greater than 0.');
     }
-    if (type) {
-        if (
-            type === VolumeType.Fast &&
-            (!wallet_cnt ||
-                typeof wallet_cnt !== 'number' ||
-                wallet_cnt <= 0 ||
-                wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC)
-        ) {
-            throw new Error(
-                `Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
-            );
-        }
-
-        if (type === VolumeType.Natural && wallet_cnt) {
-            throw new Error('Invalid wallet_cnt number. Must be undefined for Natural type.');
-        }
+    if (
+        json.type === VolumeType.Fast &&
+        (!wallet_cnt || typeof wallet_cnt !== 'number' || wallet_cnt <= 0 || wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC)
+    ) {
+        throw new Error(
+            `Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
+        );
     }
-    if (!('type' in json)) json.type = VolumeType.Fast;
-    if (!('wallet_cnt' in json)) json.wallet_cnt = 1;
+    if (json.type === VolumeType.Natural && wallet_cnt) {
+        throw new Error('Invalid wallet_cnt number. Must be undefined for Natural type.');
+    }
     json.mint = new PublicKey(mint);
 
     return json as VolumeConfig;

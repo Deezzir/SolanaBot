@@ -5,7 +5,7 @@
 
 - Remove raydium sdk dependancy
 - Finish Moonshot (without dep)
-- Add more dexes
+- Add more dexes (Meteora, Orca, etc)
 - Add dexscreener to program
 
 - Rework snipe logic

@@ -44,10 +44,6 @@ interface WalletPNL {
     total_unrealized_pnl: number;
 }
 
-function lamports_to_sol(lamports: number): number {
-    return lamports / LAMPORTS_PER_SOL;
-}
-
 async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSignatureInfo[]> {
     const all_signatures: ConfirmedSignatureInfo[] = [];
     let last_signature: string | undefined;
@@ -96,8 +92,8 @@ function calculate_balance_changes(tx: ParsedTransactionWithMeta, public_key: Pu
         (change) => change.owner === public_key.toString()
     );
 
-    const pre_sol_balance = lamports_to_sol(tx.meta.preBalances[change_sol_index]);
-    const post_sol_balance = lamports_to_sol(tx.meta.postBalances[change_sol_index]);
+    const pre_sol_balance = tx.meta.preBalances[change_sol_index] / LAMPORTS_PER_SOL;
+    const post_sol_balance = tx.meta.postBalances[change_sol_index] / LAMPORTS_PER_SOL;
 
     let pre_token_balance = 0.0;
     let post_token_balance = 0.0;
