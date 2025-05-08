@@ -225,7 +225,7 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
     const balance = await trade.get_balance(sender.publicKey, COMMITMENT);
     if (balance < amount * LAMPORTS_PER_SOL) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
     trade
-        .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.DEFAULT)
+        .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.HIGH)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
