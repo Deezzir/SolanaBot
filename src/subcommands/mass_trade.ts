@@ -194,6 +194,7 @@ export async function seq_buy(
                         )
                     )
             );
+            if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
@@ -234,6 +235,7 @@ export async function seq_sell(
                         )
                     )
             );
+            if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));
