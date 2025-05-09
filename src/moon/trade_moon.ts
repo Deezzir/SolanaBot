@@ -133,10 +133,7 @@ export class Trader {
             mint_meta,
             slippage
         );
-        if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip, address_lt_accounts);
-        }
-        return await trade.create_and_send_smart_tx(instructions, [buyer]);
+        return await trade.send_tx(instructions, [buyer], priority, protection_tip, address_lt_accounts);
     }
 
     public static async buy_token_instructions(
@@ -168,16 +165,7 @@ export class Trader {
             mint_meta,
             slippage
         );
-        if (priority) {
-            return await trade.create_and_send_tx(
-                instructions,
-                [seller],
-                priority,
-                protection_tip,
-                address_lt_accounts
-            );
-        }
-        return await trade.create_and_send_smart_tx(instructions, [seller]);
+        return await trade.send_tx(instructions, [seller], priority, protection_tip, address_lt_accounts);
     }
 
     public static async sell_token_instructions(
@@ -249,7 +237,8 @@ export class Trader {
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount: number = 0,
-        _mint?: Keypair
+        _mint?: Keypair,
+        _priority?: PriorityLevel
     ): Promise<[String, PublicKey]> {
         throw new Error('Not implemented');
     }

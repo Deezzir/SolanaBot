@@ -220,7 +220,7 @@ export abstract class SniperBase implements ISniper {
             throw new Error(`The number of keys doesn't match the number of threads`);
 
         const all_has_balances = await this.check_balances(wallets);
-        if (!all_has_balances) throw new Error('Topup the specified accounts, exiting...');
+        if (!all_has_balances) throw new Error('Fund the specified accounts, exiting...');
 
         common.log('[Main Worker] Starting the workers...');
         const started_promises: Promise<void>[] = [];

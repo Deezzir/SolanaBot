@@ -3,14 +3,7 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { parse } from 'csv-parse/sync';
-import {
-    COMMANDS_DELAY_MS,
-    COMMANDS_MAX_RETRIES,
-    IPFS,
-    PUMP_FETCH_API_URL,
-    WALLETS_FILE_HEADERS,
-    WALLETS_RESCUE_DIR_PATH
-} from '../constants.js';
+import { IPFS, PUMP_FETCH_API_URL, WALLETS_FILE_HEADERS, WALLETS_RESCUE_DIR_PATH } from '../constants.js';
 import base58 from 'bs58';
 import path from 'path';
 
@@ -400,19 +393,15 @@ export function print_footer(columns: { width: number }[]) {
     log(`${BORDER_CHARS.bottomLeft}${bottomBorder}${BORDER_CHARS.bottomRight}`);
 }
 
-export async function retry_with_backoff<T>(
-    operation: () => Promise<T>,
-    retries = COMMANDS_MAX_RETRIES,
-    delay = COMMANDS_DELAY_MS
-): Promise<T> {
+export async function retry_with_backoff<T>(operation: () => Promise<T>, retries = 5, delay_ms = 100): Promise<T> {
     try {
-        await sleep(delay);
+        await sleep(delay_ms);
         return await operation();
     } catch (error: any) {
         if (retries === 0 || !error.toString().includes('429')) {
             throw error;
         }
-        return retry_with_backoff(operation, retries - 1, delay * 3);
+        return retry_with_backoff(operation, retries - 1, delay_ms * 3);
     }
 }
 

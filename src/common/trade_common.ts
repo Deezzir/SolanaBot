@@ -20,12 +20,9 @@ import {
 import {
     AccountLayout,
     TOKEN_PROGRAM_ID,
-    TokenAccountNotFoundError,
-    TokenInvalidAccountOwnerError,
-    createAssociatedTokenAccountInstruction,
+    createAssociatedTokenAccountIdempotentInstruction,
     createCloseAccountInstruction,
     createTransferInstruction,
-    getAccount,
     getAssociatedTokenAddressSync,
     getMint
 } from '@solana/spl-token';
@@ -35,14 +32,16 @@ import {
     JITO_ENDPOINTS,
     PriorityLevel,
     TRADE_DEFAULT_CURVE_DECIMALS,
-    TRADE_MAX_RETRIES,
+    TRADE_TX_RETRIES,
     TRADE_RETRY_INTERVAL_MS,
     JITO_TIP_ACCOUNTS,
     JITO_BUNDLE_SIZE,
-    TRADE_RETRY_ITERATIONS
+    TRADE_RETRIES,
+    JITO_BUNDLE_INTERVAL_MS
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
+import { SmartTransactionOptions } from 'helius-sdk';
 
 export interface IMintMeta {
     readonly token_name: string;
@@ -113,7 +112,8 @@ export interface IProgramTrader {
         token_symbol: string,
         meta_cid: string,
         sol_amount?: number,
-        mint?: Keypair
+        mint?: Keypair,
+        priority?: PriorityLevel
     ): Promise<[String, PublicKey]>;
     create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string>;
     get_random_mints(count: number): Promise<IMintMeta[]>;
@@ -146,35 +146,80 @@ export type TokenMetrics = {
     supply: bigint;
 };
 
-export async function get_tx_with_retries(
+export async function retry_get_tx(
     signature: string,
-    max_retries: number = 5
+    retries: number = TRADE_RETRIES
 ): Promise<VersionedTransactionResponse | null> {
-    let retries = max_retries;
-
     while (retries > 0) {
         const transaction = await global.CONNECTION.getTransaction(signature, {
             maxSupportedTransactionVersion: 0,
             commitment: COMMITMENT
         });
-
         if (transaction) return transaction;
         retries--;
     }
     return null;
 }
 
-export async function check_ata_exists(account: PublicKey): Promise<boolean | undefined> {
-    try {
-        let account_info = await getAccount(global.CONNECTION, account);
-        if (account_info && account_info.isInitialized) return true;
-    } catch (error) {
-        if (error instanceof TokenAccountNotFoundError || error instanceof TokenInvalidAccountOwnerError) {
-            return false;
-        } else {
-            throw new Error(`Failed to check the account: ${error}`);
+export async function retry_send_lamports(
+    amount: number,
+    sender: Keypair,
+    receiver: PublicKey,
+    priority?: PriorityLevel,
+    retries: number = TRADE_RETRIES
+): Promise<String> {
+    while (retries > 0) {
+        try {
+            return await send_lamports(amount, sender, receiver, priority);
+        } catch (error) {
+            const balance = await get_balance(sender.publicKey, COMMITMENT);
+            if (balance === 0) throw new Error(`Sender has no balance.`);
+            if (balance < amount) amount = balance;
+            retries--;
         }
+        await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
+    throw new Error('Send lamports failed after multiple attempts');
+}
+
+export async function retry_send_bundle(
+    bundle_instructions: TransactionInstruction[][],
+    bundle_signers: Signer[][],
+    bundle_tip: number,
+    priority?: PriorityLevel,
+    ltas?: AddressLookupTableAccount[],
+    retries: number = TRADE_RETRIES
+): Promise<String> {
+    while (retries > 0) {
+        try {
+            return await send_bundle(bundle_instructions, bundle_signers, bundle_tip, priority, ltas);
+        } catch (error) {
+            common.log(common.red(`Failed to send bundle: ${error}`));
+            retries--;
+        }
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS * (retries + 1));
+    }
+    throw new Error('Send bundle failed after multiple attempts');
+}
+
+export async function retry_send_tx(
+    instructions: TransactionInstruction[],
+    signers: Signer[],
+    priority?: PriorityLevel,
+    protection_tip?: number,
+    alts?: AddressLookupTableAccount[],
+    retries: number = TRADE_RETRIES
+): Promise<String> {
+    while (retries > 0) {
+        try {
+            return await send_tx(instructions, signers, priority, protection_tip, alts);
+        } catch (error) {
+            common.log(common.red(`Failed to send transaction: ${error}`));
+            retries--;
+        }
+        await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
+    }
+    throw new Error('Send transaction failed after multiple attempts');
 }
 
 export function calc_ata(owner: PublicKey, mint: PublicKey): PublicKey {
@@ -245,6 +290,26 @@ function get_random_jito_tip_account(): PublicKey {
     return new PublicKey(random_tip_account);
 }
 
+function create_versioned_tx(
+    signers: Signer[],
+    instructions: TransactionInstruction[],
+    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
+    alts?: AddressLookupTableAccount[]
+): VersionedTransaction {
+    if (instructions.length === 0) throw new Error(`No instructions provided.`);
+    if (signers.length === 0) throw new Error(`No signers provided.`);
+
+    const versioned_tx = new VersionedTransaction(
+        new TransactionMessage({
+            payerKey: signers[0].publicKey,
+            recentBlockhash: ctx.value.blockhash,
+            instructions: instructions
+        }).compileToV0Message(alts)
+    );
+    versioned_tx.sign(signers);
+    return versioned_tx;
+}
+
 async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
     const requests = JITO_ENDPOINTS.map((endpoint) =>
         fetch(`${endpoint}/bundles`, {
@@ -307,7 +372,7 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
-async function create_and_send_protected_tx(
+async function send_protected_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
     tip: number,
@@ -316,27 +381,19 @@ async function create_and_send_protected_tx(
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
-    const payer = signers.at(0)!;
 
     const jito_tip_account = get_random_jito_tip_account();
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
     instructions.push(
         SystemProgram.transfer({
-            fromPubkey: payer.publicKey,
+            fromPubkey: signers[0].publicKey,
             toPubkey: jito_tip_account,
             lamports: tip * LAMPORTS_PER_SOL
         })
     );
 
-    const versioned_tx = new VersionedTransaction(
-        new TransactionMessage({
-            payerKey: payer.publicKey,
-            recentBlockhash: ctx.value.blockhash,
-            instructions: instructions
-        }).compileToV0Message(alts)
-    );
-    versioned_tx.sign(signers);
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    const versioned_tx = create_versioned_tx(signers, instructions, ctx, alts);
     const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
     const serialized_tx = Buffer.from(versioned_tx.serialize()).toString('base64');
 
@@ -349,10 +406,11 @@ async function create_and_send_protected_tx(
     }
 }
 
-export async function create_and_send_bundle(
+export async function send_bundle(
     instructions: TransactionInstruction[][],
     signers: Signer[][],
     tip: number,
+    priority?: PriorityLevel,
     alts?: AddressLookupTableAccount[]
 ): Promise<String> {
     instructions = instructions.filter(Boolean);
@@ -365,29 +423,46 @@ export async function create_and_send_bundle(
         instructions[i] = instructions[i].filter(Boolean);
     }
 
+    let priority_fee: number | undefined;
+    if (priority && !priority_fee) {
+        priority_fee = await get_priority_fee({
+            priority_level: priority,
+            transaction: {
+                instructions: instructions[0],
+                signers: signers[0]
+            }
+        });
+    }
+
     const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     let signature: string;
 
     let serialized_txs = [];
     for (let i = 0; i < instructions.length; i++) {
+        if (priority_fee)
+            instructions[i].unshift(
+                ComputeBudgetProgram.setComputeUnitPrice({
+                    microLamports: priority_fee!
+                })
+            );
         if (i === instructions.length - 1) {
             instructions[i].push(
                 SystemProgram.transfer({
-                    fromPubkey: signers[i][signers[i].length - 1].publicKey,
+                    fromPubkey: signers[i][0].publicKey,
                     toPubkey: jito_tip_account,
                     lamports: tip * LAMPORTS_PER_SOL
                 })
             );
         }
-        const versioned_tx = new VersionedTransaction(
-            new TransactionMessage({
-                payerKey: signers[i][signers[i].length - 1].publicKey,
-                recentBlockhash: ctx.value.blockhash,
-                instructions: instructions[i]
-            }).compileToV0Message(alts)
-        );
-        versioned_tx.sign(signers[i]);
+        const versioned_tx = create_versioned_tx(signers[i], instructions[i], ctx, alts);
+        // simulate the transaction
+        const simulation = await global.CONNECTION.simulateTransaction(versioned_tx, {
+            commitment: COMMITMENT
+        });
+        if (simulation.value.err) {
+            throw new Error(`Simulation failed for transaction ${i}: ${JSON.stringify(simulation.value, null, 2)}`);
+        }
         if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
         serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }
@@ -434,7 +509,7 @@ async function check_transaction_status(
     }
 }
 
-export async function get_priority_fee(priority_opts: PriorityOptions): Promise<number> {
+async function get_priority_fee(priority_opts: PriorityOptions): Promise<number> {
     let encoded_tx: string | undefined;
 
     if (priority_opts.transaction) {
@@ -458,68 +533,69 @@ export async function get_priority_fee(priority_opts: PriorityOptions): Promise<
     return Math.floor(response.priorityFeeEstimate || 0);
 }
 
-export async function create_and_send_smart_tx(
+async function send_smart_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
+    protection_tip?: number,
     alts?: AddressLookupTableAccount[]
 ): Promise<String> {
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
-    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, alts, {
+    const options: SmartTransactionOptions = {
         skipPreflight: true,
         preflightCommitment: COMMITMENT,
-        maxRetries: TRADE_MAX_RETRIES
-    });
+        maxRetries: TRADE_TX_RETRIES
+    };
+
+    if (protection_tip)
+        return await global.HELIUS_CONNECTION.rpc.sendSmartTransactionWithTip(
+            instructions,
+            signers,
+            alts,
+            protection_tip,
+            'Default',
+            options
+        );
+    return await global.HELIUS_CONNECTION.rpc.sendSmartTransaction(instructions, signers, alts, options);
 }
 
-export async function create_and_send_tx(
+export async function send_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
     priority?: PriorityLevel,
     protection_tip?: number,
     alts?: AddressLookupTableAccount[]
 ): Promise<String> {
+    const tx_instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
-    const tx_instructions = instructions.filter(Boolean);
 
-    if (priority) {
-        const fee = await get_priority_fee({
-            priority_level: priority,
-            transaction: { instructions: tx_instructions, signers }
-        });
-        tx_instructions.unshift(
-            ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: fee
-            })
-        );
-        tx_instructions.unshift(
-            ComputeBudgetProgram.setComputeUnitLimit({
-                units: 1_600_000
-            })
-        );
-    }
+    if (!priority) return send_smart_tx(tx_instructions, signers, protection_tip, alts);
 
-    if (protection_tip) return await create_and_send_protected_tx(tx_instructions, signers, protection_tip, alts);
+    const fee = await get_priority_fee({
+        priority_level: priority,
+        transaction: { instructions: tx_instructions, signers }
+    });
+    tx_instructions.unshift(
+        ComputeBudgetProgram.setComputeUnitPrice({
+            microLamports: fee
+        }),
+        ComputeBudgetProgram.setComputeUnitLimit({
+            units: 1_600_000
+        })
+    );
+
+    if (protection_tip) return send_protected_tx(tx_instructions, signers, protection_tip, alts);
 
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const versioned_tx = new VersionedTransaction(
-        new TransactionMessage({
-            payerKey: signers[0].publicKey,
-            recentBlockhash: ctx.value.blockhash,
-            instructions: tx_instructions
-        }).compileToV0Message(alts)
-    );
-    versioned_tx.sign(signers);
-
+    const versioned_tx = create_versioned_tx(signers, tx_instructions, ctx, alts);
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
         skipPreflight: false,
         preflightCommitment: COMMITMENT,
-        maxRetries: TRADE_MAX_RETRIES
+        maxRetries: TRADE_TX_RETRIES
     });
-
     await check_transaction_status(signature, ctx);
     return signature;
 }
@@ -552,22 +628,24 @@ export async function send_lamports(
     priority?: PriorityLevel
 ): Promise<String> {
     lamports = Math.floor(lamports);
-    const send_instruction = SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
-        toPubkey: receiver,
-        lamports: lamports
-    });
+    let instructions = [
+        SystemProgram.transfer({
+            fromPubkey: sender.publicKey,
+            toPubkey: receiver,
+            lamports: lamports
+        })
+    ];
 
     if (priority) {
         const units = 500;
         const fees = await get_priority_fee({
             priority_level: priority,
             transaction: {
-                instructions: [send_instruction],
+                instructions: instructions,
                 signers: [sender]
             }
         });
-        let instructions = [
+        instructions = [
             ComputeBudgetProgram.setComputeUnitLimit({
                 units: units
             }),
@@ -580,59 +658,37 @@ export async function send_lamports(
                 lamports: lamports - 5000 - Math.ceil((fees * units) / 10 ** 6)
             })
         ];
-        return await create_and_send_tx(instructions, [sender]);
     }
 
-    return await create_and_send_smart_tx([send_instruction], [sender]);
-}
-
-export async function send_lamports_with_retries(
-    amount: number,
-    sender: Keypair,
-    receiver: PublicKey,
-    priority?: PriorityLevel,
-    max_retries: number = 5
-): Promise<String> {
-    for (let attempt = 1; attempt <= max_retries; attempt++) {
-        try {
-            return await send_lamports(amount, sender, receiver, priority);
-        } catch (error) {
-            if (attempt < max_retries) {
-                common.error(
-                    common.red(`Transaction failed for ${receiver.toString()}, attempt ${attempt}. Retrying...`)
-                );
-                const balance = await get_balance(sender.publicKey, COMMITMENT);
-                if (balance === 0) throw new Error(`Sender has no balance.`);
-                if (balance < amount) amount = balance;
-            } else {
-                common.error(common.red(`Transaction failed for ${receiver.toString()} after ${max_retries} attempts`));
-            }
-        }
-        await common.sleep(TRADE_RETRY_INTERVAL_MS * attempt);
-    }
-    throw new Error('Max retries reached, transaction failed');
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    const versioned_tx = create_versioned_tx([sender], instructions, ctx);
+    const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
+        skipPreflight: false,
+        preflightCommitment: COMMITMENT,
+        maxRetries: TRADE_TX_RETRIES
+    });
+    await check_transaction_status(signature, ctx);
+    return signature;
 }
 
 export async function send_tokens(
     token_amount: TokenAmount,
     mint: PublicKey,
     sender: Signer,
-    receiver: PublicKey,
-    create_receiver_ata: boolean = false
+    receiver: PublicKey
 ): Promise<String> {
     if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
     const token_amount_raw = BigInt(token_amount.amount);
 
-    let instructions: TransactionInstruction[] = [];
     const receiver_ata = calc_ata(receiver, mint);
     const sender_ata = calc_ata(sender.publicKey, mint);
 
-    if (!(await check_ata_exists(receiver_ata)) && create_receiver_ata) {
-        instructions.push(createAssociatedTokenAccountInstruction(sender.publicKey, receiver_ata, receiver, mint));
-    }
-    instructions.push(createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw));
+    const instructions = [
+        createAssociatedTokenAccountIdempotentInstruction(sender.publicKey, receiver_ata, receiver, mint),
+        createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw)
+    ];
 
-    return await create_and_send_smart_tx(instructions, [sender]);
+    return await send_tx(instructions, [sender]);
 }
 
 export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; unsold: PublicKey[] }> {
@@ -668,7 +724,7 @@ export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; uns
                 return createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey);
             });
             try {
-                const signature = await create_and_send_tx(intructions, [owner], PriorityLevel.HIGH);
+                const signature = await send_tx(intructions, [owner], PriorityLevel.HIGH);
                 common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {
@@ -709,7 +765,7 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
 
 export async function create_lta(payer: Signer): Promise<[PublicKey, String]> {
     const commitment: Commitment = 'finalized';
-    let retries = TRADE_RETRY_ITERATIONS;
+    let retries = TRADE_RETRIES;
 
     while (retries > 0) {
         try {
@@ -719,7 +775,7 @@ export async function create_lta(payer: Signer): Promise<[PublicKey, String]> {
                 payer: payer.publicKey,
                 recentSlot: recent_slot
             });
-            const signature = await create_and_send_tx([instruction], [payer], PriorityLevel.HIGH);
+            const signature = await send_tx([instruction], [payer], PriorityLevel.HIGH);
             return [lt_address, signature];
         } catch (err) {
             retries--;
@@ -783,7 +839,7 @@ export async function extend_lta(lta: PublicKey, payer: Signer, addresses: Publi
             payer: payer.publicKey,
             addresses: chunk
         });
-        txs.push(create_and_send_tx([instruction], [payer], PriorityLevel.HIGH));
+        txs.push(send_tx([instruction], [payer], PriorityLevel.HIGH));
     }
     return await Promise.all(txs);
 }
@@ -798,9 +854,7 @@ export async function close_ltas(payer: Signer, ltas: readonly AddressLookupTabl
             lookupTable: lta.key
         })
     );
-    const txs: Promise<String>[] = common
-        .chunks(instructions, 10)
-        .map((chunk) => create_and_send_smart_tx(chunk, [payer]));
+    const txs: Promise<String>[] = common.chunks(instructions, 10).map((chunk) => send_tx(chunk, [payer]));
     return Promise.all(txs);
 }
 
@@ -847,8 +901,6 @@ export async function deactivate_ltas(
             lookupTable: lta.key
         })
     );
-    const txs: Promise<String>[] = common
-        .chunks(instructions, 10)
-        .map((chunk) => create_and_send_smart_tx(chunk, [authority]));
+    const txs: Promise<String>[] = common.chunks(instructions, 10).map((chunk) => send_tx(chunk, [authority]));
     return Promise.all(txs);
 }

@@ -13,7 +13,6 @@ import * as trade from '../common/trade_common.js';
 import {
     JITO_BUNDLE_SIZE,
     VOLUME_MAX_WALLETS_PER_EXEC,
-    TRADE_RETRY_ITERATIONS,
     VOLUME_TRADE_SLIPPAGE,
     JITO_BUNDLE_INTERVAL_MS,
     VOLUME_MAX_WALLETS_PER_COLLECT_TX,
@@ -71,31 +70,24 @@ export async function execute_fast(
         let lta: AddressLookupTableAccount;
         try {
             lta = await prepare_lta(funder, keypairs, volume_config.mint);
-            common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
         } catch (error) {
             common.error(common.red(`LTA creation failed: ${error}, skipping execution...`));
             continue;
         }
 
-        common.log('\nTopping up the wallets...');
+        common.log('\Funding the wallets...');
         try {
-            const bundle_ids = await fund_bundle(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
-            common.log(common.green(`Fund completed, signatures:\n${bundle_ids.join('\n')}\n`));
+            await fund_bundles(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
         } catch (error) {
             common.error(common.red(`Fund failed: ${error} for execution ${exec + 1}, skipping...`));
             continue;
         }
 
         common.log(`Trading the tokens...`);
-        await buy_sell_bundle(keypairs_with_amounts, trader, mint_meta!, volume_config.bundle_tip, lta);
+        await buy_sell_bundles(keypairs_with_amounts, trader, mint_meta!, volume_config.bundle_tip, lta);
 
         common.log('\nCollecting the funds from the wallets...');
-        try {
-            const bundle_ids = await collect_bundle(keypairs, funder, volume_config.bundle_tip, lta);
-            common.log(common.green(`Collect completed, signatures:\n${bundle_ids.join('\n')}\n`));
-        } catch (error) {
-            common.error(common.red(`Collect failed: ${error}`));
-        }
+        await collect_bundles(keypairs, funder, volume_config.bundle_tip, lta);
 
         const delay_seconds = common.normal_random(volume_config.delay, volume_config.delay * 0.1);
         common.log(common.blue(`Sleeping for ${delay_seconds.toFixed(1)} seconds`));
@@ -176,32 +168,12 @@ function calc_buy_amount(amount_sol: number, slippage: number, platform_fee: num
     );
 }
 
-async function retry_send_bundle(
-    bundle_instructions: TransactionInstruction[][],
-    bundle_signers: Signer[][],
-    bundle_tip: number,
-    ltas: AddressLookupTableAccount[]
-): Promise<String> {
-    let retries = TRADE_RETRY_ITERATIONS;
-    while (retries > 0) {
-        try {
-            const bundle_id = await trade.create_and_send_bundle(bundle_instructions, bundle_signers, bundle_tip, ltas);
-            return bundle_id;
-        } catch (error) {
-            common.log(common.red(`Failed to send bundle: ${error}`));
-            retries--;
-        }
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
-    }
-    throw new Error('Failed after multiple attempts');
-}
-
-async function fund_bundle(
+async function fund_bundles(
     wallets: [Keypair, number][],
     funder: Signer,
     bundle_tip: number,
     lta: AddressLookupTableAccount
-): Promise<String[]> {
+): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets to fund');
     let instructions: TransactionInstruction[] = [];
     wallets.forEach(([keypair, amount]) => {
@@ -215,27 +187,34 @@ async function fund_bundle(
         );
     });
 
-    const chunks = common.chunks(common.chunks(instructions, VOLUME_MAX_WALLETS_PER_FUND_TX), JITO_BUNDLE_SIZE);
-    const bundle_ids: String[] = [];
-    for (const chunk of chunks) {
-        bundle_ids.push(
-            await trade.create_and_send_bundle(
-                chunk,
-                Array.from({ length: chunk.length }, () => [funder]),
-                bundle_tip,
-                [lta]
-            )
+    const bundles = common.chunks(common.chunks(instructions, VOLUME_MAX_WALLETS_PER_FUND_TX), JITO_BUNDLE_SIZE);
+    const promises: Promise<void>[] = [];
+    for (const bundle_instructions of bundles) {
+        promises.push(
+            trade
+                .send_bundle(
+                    bundle_instructions,
+                    Array.from({ length: bundle_instructions.length }, () => [funder]),
+                    bundle_tip,
+                    undefined,
+                    [lta]
+                )
+                .then((signature) => common.log(common.green(`Fund Bundle completed, signature: ${signature}`)))
+                .catch((error) => {
+                    throw error;
+                })
         );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
     }
-    return bundle_ids;
+    await Promise.all(promises);
 }
 
-async function collect_bundle(
+async function collect_bundles(
     wallets: Keypair[],
     receiver: Signer,
     bundle_tip: number,
     lta: AddressLookupTableAccount
-): Promise<String[]> {
+): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets to collect from');
     let filtered_keypairs = (
         await Promise.all(
@@ -246,47 +225,47 @@ async function collect_bundle(
             })
         )
     ).filter((pair) => pair !== undefined);
-    const wallet_bundles = common.chunks(
+    const bundles = common.chunks(
         common.chunks(filtered_keypairs, VOLUME_MAX_WALLETS_PER_COLLECT_TX),
         JITO_BUNDLE_SIZE
     );
 
-    const bundle_ids: String[] = [];
-    for (const wallet_bundle of wallet_bundles) {
+    const promises: Promise<void>[] = [];
+    for (const bundle of bundles) {
         const bundle_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
-        for (const [tx_i, tx_wallets] of wallet_bundle.entries()) {
-            const instructions: TransactionInstruction[] = [];
-            const signers: Signer[] = [];
-            for (const [wallet_i, wallet] of tx_wallets.entries()) {
-                const is_payer = wallet_i === tx_wallets.length - 1;
-                const is_tipper = is_payer && tx_i === wallet_bundle.length - 1;
-                instructions.push(
+        for (const [tx_idx, tx] of bundle.entries()) {
+            const tx_instructions: TransactionInstruction[] = [];
+            const tx_signers: Signer[] = [];
+            for (const [wallet_idx, wallet] of tx.entries()) {
+                const amount =
+                    Math.floor(wallet.balance) -
+                    (!wallet_idx ? 5000 * tx.length : 0) -
+                    (!wallet_idx && tx_idx === bundle.length - 1 ? bundle_tip * LAMPORTS_PER_SOL : 0);
+                tx_instructions.push(
                     SystemProgram.transfer({
                         fromPubkey: wallet.keypair.publicKey,
                         toPubkey: receiver.publicKey,
-                        lamports: Math.floor(
-                            wallet.balance -
-                                (is_payer ? 5000 * VOLUME_MAX_WALLETS_PER_COLLECT_TX : 0) -
-                                (is_tipper ? bundle_tip * LAMPORTS_PER_SOL : 0)
-                        )
+                        lamports: amount
                     })
                 );
-                signers.push(wallet.keypair);
+                tx_signers.push(wallet.keypair);
             }
-            bundle_instructions.push(instructions);
-            bundle_signers.push(signers);
+            bundle_instructions.push(tx_instructions);
+            bundle_signers.push(tx_signers);
         }
-        try {
-            bundle_ids.push(await retry_send_bundle(bundle_instructions, bundle_signers, bundle_tip, [lta]));
-        } catch (error) {
-            common.log(common.red(`Failed to send collect bundle: ${error}`));
-        }
+        promises.push(
+            trade
+                .retry_send_bundle(bundle_instructions, bundle_signers, bundle_tip, undefined, [lta])
+                .then((signature) => common.log(common.green(`Collect Bundle completed, signature: ${signature}`)))
+                .catch((error) => common.error(common.red(`Collect Bundle failed: ${error}`)))
+        );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
     }
-    return bundle_ids;
+    await Promise.all(promises);
 }
 
-async function buy_sell_bundle(
+async function buy_sell_bundles(
     wallets: [Keypair, number][],
     trader: trade.IProgramTrader,
     mint_meta: trade.IMintMeta,
@@ -294,28 +273,25 @@ async function buy_sell_bundle(
     lta: AddressLookupTableAccount
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets to buy/sell');
-    const wallet_bundles = common
+    const bundles = common
         .chunks(wallets, VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE)
         .map((chunk) => common.chunks(chunk, VOLUME_MAX_WALLETS_PER_TRADE_TX));
-    const buy_bundles: Promise<void>[] = [];
 
-    const bundle_ltas: AddressLookupTableAccount[] = [];
-    for (const wallet_bundle of wallet_bundles) {
+    const promises: Promise<void>[] = [];
+    const ltas: AddressLookupTableAccount[] = [];
+    for (const bundle of bundles) {
         const bundle_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
-        for (const [tx_i, tx_wallets] of wallet_bundle.entries()) {
-            const buy_instructions: TransactionInstruction[] = [];
-            const sell_instructions: TransactionInstruction[] = [];
-            const buy_signers: Signer[] = [];
-            const sell_signers: Signer[] = [];
-            for (const [wallet_i, wallet] of tx_wallets.entries()) {
+        for (const [tx_idx, tx] of bundle.entries()) {
+            const tx_instructions: TransactionInstruction[] = [];
+            const tx_signers: Signer[] = [];
+            for (const [wallet_idx, wallet] of tx.entries()) {
                 const [keypair, amount] = wallet;
-                const is_tipper = wallet_i === tx_wallets.length - 1 && tx_i === wallet_bundle.length - 1;
                 const adjusted_amount = calc_buy_amount(
                     amount,
                     VOLUME_TRADE_SLIPPAGE,
                     mint_meta.platform_fee,
-                    is_tipper ? bundle_tip : 0
+                    !wallet_idx && tx_idx === bundle.length - 1 ? bundle_tip : 0
                 );
                 const [buy_instrs, sell_instrs, trade_ltas] = await trader.buy_sell_instructions(
                     adjusted_amount,
@@ -328,33 +304,24 @@ async function buy_sell_bundle(
                     keypair.publicKey,
                     keypair.publicKey
                 );
-                if (tx_wallets.length === VOLUME_MAX_WALLETS_PER_TRADE_TX) {
-                    buy_instructions.push(...buy_instrs);
-                    sell_instructions.push(...sell_instrs, close_account_instruction);
-                    buy_signers.push(keypair);
-                    sell_signers.push(keypair);
-                } else {
-                    sell_instructions.unshift(...buy_instrs);
-                    sell_instructions.push(...sell_instrs, close_account_instruction);
-                    sell_signers.push(keypair);
-                }
-                if (bundle_ltas.length === 0) bundle_ltas.push(...(trade_ltas || []), lta);
+                tx_instructions.unshift(...buy_instrs);
+                tx_instructions.push(...sell_instrs, close_account_instruction);
+                tx_signers.push(keypair);
+                if (ltas.length === 0) ltas.push(...(trade_ltas || []), lta);
             }
-            if (buy_instructions.length > 0) bundle_instructions.unshift(buy_instructions);
-            bundle_instructions.push(sell_instructions);
-            if (buy_signers.length > 0) bundle_signers.unshift(buy_signers);
-            bundle_signers.push(sell_signers);
+            bundle_instructions.push(tx_instructions);
+            bundle_signers.push(tx_signers);
         }
-        buy_bundles.push(
+        promises.push(
             trade
-                .create_and_send_bundle(bundle_instructions, bundle_signers, bundle_tip, bundle_ltas)
+                .send_bundle(bundle_instructions, bundle_signers, bundle_tip, undefined, ltas)
                 .then((signature) => common.log(common.green(`Trade Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Trade Bundle failed: ${error}`)))
         );
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
-    await Promise.all(buy_bundles);
+    await Promise.all(promises);
 }
 
 async function prepare_lta(funder: Signer, wallets: Keypair[], mint: PublicKey): Promise<AddressLookupTableAccount> {
@@ -365,6 +332,7 @@ async function prepare_lta(funder: Signer, wallets: Keypair[], mint: PublicKey):
     await trade.extend_lta(created_lt, funder, keys);
 
     const [lta] = await trade.get_ltas([created_lt]);
+    common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
     return lta;
 }
 

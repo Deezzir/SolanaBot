@@ -1,6 +1,5 @@
 import {
     AddressLookupTableAccount,
-    ComputeBudgetProgram,
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
@@ -14,7 +13,6 @@ import * as trade from '../common/trade_common.js';
 import {
     ASSOCIATED_TOKEN_PROGRAM_ID,
     createAssociatedTokenAccountIdempotentInstruction,
-    createAssociatedTokenAccountInstruction,
     createCloseAccountInstruction,
     createSyncNativeInstruction,
     TOKEN_PROGRAM_ID
@@ -49,8 +47,6 @@ import {
     PUMP_CREATE_DISCRIMINATOR,
     PUMP_IPFS_API_URL,
     TRADE_RAYDIUM_SWAP_TAX,
-    TRADE_RETRY_ITERATIONS,
-    TRADE_RETRY_INTERVAL_MS,
     PUMP_AMM_HEADER as PUMP_AMM_STATE_HEADER,
     PUMP_LTA_ACCOUNT,
     TRADE_MAX_SLIPPAGE
@@ -171,10 +167,7 @@ export class Trader {
         protection_tip?: number
     ): Promise<String> {
         const [instructions, ltas] = await this.buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
-        if (priority) {
-            return await trade.create_and_send_tx(instructions, [buyer], priority, protection_tip, ltas);
-        }
-        return await trade.create_and_send_smart_tx(instructions, [buyer], ltas);
+        return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
     }
 
     public static async buy_token_instructions(
@@ -208,10 +201,7 @@ export class Trader {
         protection_tip?: number
     ): Promise<String> {
         const [instructions, ltas] = await this.sell_token_instructions(token_amount, seller, mint_meta, slippage);
-        if (priority) {
-            return await trade.create_and_send_tx(instructions, [seller], priority, protection_tip, ltas);
-        }
-        return await trade.create_and_send_smart_tx(instructions, [seller], ltas);
+        return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
     }
 
     public static async sell_token_instructions(
@@ -285,7 +275,8 @@ export class Trader {
         token_symbol: string,
         meta_cid: string,
         sol_amount: number = 0.0,
-        mint?: Keypair
+        mint?: Keypair,
+        priority?: PriorityLevel
     ): Promise<[String, PublicKey]> {
         if (!mint) mint = Keypair.generate();
         const instructions = await this.get_create_token_instructions(
@@ -302,7 +293,8 @@ export class Trader {
             instructions.push(...buy_instructions);
         }
 
-        const sig = await trade.create_and_send_smart_tx(instructions, [creator, mint]);
+        const ltas = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
+        const sig = await trade.send_tx(instructions, [creator, mint], priority, undefined, ltas);
         return [sig, mint.publicKey];
     }
 
@@ -344,33 +336,7 @@ export class Trader {
             mint_meta,
             slippage
         );
-
-        if (priority) {
-            const fee = await trade.get_priority_fee({
-                priority_level: priority,
-                transaction: {
-                    instructions: buy_instructions,
-                    signers: [trader]
-                }
-            });
-            buy_instructions.unshift(
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: fee
-                })
-            );
-            sell_instructions.unshift(
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: fee
-                })
-            );
-        }
-
-        return await trade.create_and_send_bundle(
-            [buy_instructions, sell_instructions],
-            [[trader], [trader]],
-            tip,
-            lta
-        );
+        return await trade.send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip, priority, lta);
     }
 
     public static async buy_sell(
@@ -378,35 +344,38 @@ export class Trader {
         trader: Signer,
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
-        interval_ms: number = 0,
+        interval_ms?: number,
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<[String, String]> {
-        const [buy_instructions, sell_instructions] = await this.buy_sell_instructions(
+        const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
             trader,
             mint_meta,
             slippage
         );
 
-        const buy_signature = await trade.create_and_send_tx(buy_instructions, [trader], priority, protection_tip);
-        let sell_signature;
-
-        if (interval_ms > 0) await common.sleep(interval_ms);
-
-        let retries = 1;
-        while (retries <= TRADE_RETRY_ITERATIONS) {
-            try {
-                sell_signature = await trade.create_and_send_tx(sell_instructions, [trader], priority, protection_tip);
-            } catch (error) {
-                common.error(common.red(`Failed to send the sell transaction, retrying...`));
-                retries++;
-                await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
-            }
+        if (interval_ms && interval_ms > 0) {
+            const buy_signature = await trade.send_tx(buy_instructions, [trader], priority, protection_tip, ltas);
+            await common.sleep(interval_ms);
+            const sell_signature = await trade.retry_send_tx(
+                sell_instructions,
+                [trader],
+                priority,
+                protection_tip,
+                ltas
+            );
+            return [buy_signature, sell_signature];
         }
 
-        if (!sell_signature) throw new Error('Failed to send the sell transaction after retries.');
-        return [buy_signature, sell_signature];
+        const signature = await trade.send_tx(
+            [...buy_instructions, ...sell_instructions],
+            [trader],
+            priority,
+            protection_tip,
+            ltas
+        );
+        return [signature, signature];
     }
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number = 0): Promise<PumpMintMeta> {
@@ -543,15 +512,9 @@ export class Trader {
         const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
-        const token_ata_exists = await trade.check_ata_exists(token_ata);
 
-        let instructions: TransactionInstruction[] = [];
-        if (!token_ata_exists) {
-            instructions.push(
-                createAssociatedTokenAccountInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint)
-            );
-        }
-        instructions.push(
+        return [
+            createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint),
             new TransactionInstruction({
                 keys: [
                     { pubkey: PUMP_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
@@ -570,8 +533,7 @@ export class Trader {
                 programId: PUMP_TRADE_PROGRAM_ID,
                 data: instruction_data
             })
-        );
-        return instructions;
+        ];
     }
 
     private static async get_sell_instructions(
@@ -813,26 +775,16 @@ export class Trader {
         const instruction_data = this.buy_data(sol_amount_raw_after_fee, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
-        const token_ata_created = await trade.check_ata_exists(token_ata);
 
-        let instructions: TransactionInstruction[] = [];
-        if (!token_ata_created) {
-            instructions.push(
-                createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint)
-            );
-        }
-        instructions.push(
-            ...[
-                createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, wsol_ata, buyer.publicKey, SOL_MINT),
-                SystemProgram.transfer({
-                    fromPubkey: buyer.publicKey,
-                    toPubkey: wsol_ata,
-                    lamports: this.calc_slippage_up(sol_amount_raw, slippage)
-                }),
-                createSyncNativeInstruction(wsol_ata)
-            ]
-        );
-        instructions.push(
+        return [
+            createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, token_ata, buyer.publicKey, mint),
+            createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, wsol_ata, buyer.publicKey, SOL_MINT),
+            SystemProgram.transfer({
+                fromPubkey: buyer.publicKey,
+                toPubkey: wsol_ata,
+                lamports: this.calc_slippage_up(sol_amount_raw, slippage)
+            }),
+            createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({
                 keys: [
                     { pubkey: amm, isSigner: false, isWritable: false },
@@ -855,11 +807,9 @@ export class Trader {
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data
-            })
-        );
-        instructions.push(createCloseAccountInstruction(wsol_ata, buyer.publicKey, buyer.publicKey));
-
-        return instructions;
+            }),
+            createCloseAccountInstruction(wsol_ata, buyer.publicKey, buyer.publicKey)
+        ];
     }
 
     private static async get_sell_amm_instructions(

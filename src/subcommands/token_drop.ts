@@ -123,7 +123,7 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
             const token_amount = trade.get_token_amount(record.tokensToSend, mint_meta.token_decimals);
 
             try {
-                await trade.send_tokens(token_amount, mint_meta.mint, drop, receiver, true).then((sig) => {
+                await trade.send_tokens(token_amount, mint_meta.mint, drop, receiver).then((sig) => {
                     record.tx = sig;
                     common.log(common.green(`Sent ${record.tokensToSend} to ${receiver.toBase58()} | tx: ${sig}`));
                 });

@@ -1,5 +1,13 @@
-import { Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { COMMANDS_INTERVAL_MS, COMMITMENT, PriorityLevel, TRANSFER_INTERVAL_MS } from '../constants.js';
+import { Keypair, LAMPORTS_PER_SOL, Signer, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import {
+    COMMANDS_INTERVAL_MS,
+    COMMITMENT,
+    JITO_BUNDLE_INTERVAL_MS,
+    PriorityLevel,
+    TRANSFER_INTERVAL_MS,
+    TRANSFER_MAX_DEPTH,
+    TRANSFER_MAX_WALLETS_PER_TX
+} from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 
@@ -143,7 +151,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[]> {
             );
 
             try {
-                const sig = await trade.send_lamports_with_retries(
+                const sig = await trade.retry_send_lamports(
                     sol_amount,
                     sender,
                     receiver.publicKey,
@@ -172,7 +180,7 @@ async function process_inner_transfers(tree: SpiderTree): Promise<Keypair[]> {
                 `${sender.publicKey.toString().padEnd(44, ' ')} is sending ${amount.toFixed(4).padEnd(7, ' ')} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} (Layer: ${layer_name}})...`
             );
             try {
-                let sig = await trade.send_lamports_with_retries(
+                let sig = await trade.retry_send_lamports(
                     sol_amount,
                     sender,
                     receiver.publicKey,
@@ -213,7 +221,7 @@ async function process_final_transfers(entries: [common.Wallet, Keypair][]): Pro
         );
         transactions.push(
             trade
-                .send_lamports_with_retries(amount, sender, receiver.publicKey, PriorityLevel.HIGH)
+                .retry_send_lamports(amount, sender, receiver.publicKey, PriorityLevel.HIGH)
                 .then((sig) =>
                     common.log(
                         common.green(`Transaction completed for ${receiver.publicKey.toString()}, signature: ${sig}`)
@@ -259,9 +267,11 @@ export async function run_spider_transfer(
 export async function run_deep_transfer(
     entries: [common.Wallet, number][],
     sender: Keypair,
-    depth: number
+    depth: number,
+    bundle_tip: number
 ): Promise<common.Wallet[]> {
     const target_file = common.setup_rescue_file();
+    if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
     if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
 
     const transfer_map = entries.map((entry, index) => {
@@ -283,40 +293,57 @@ export async function run_deep_transfer(
         };
     });
 
+    const promises: Promise<void>[] = [];
     const failed: { name: string; id: number }[] = [];
-    for (const entry of transfer_map) {
-        const wallet = entry.wallet;
-        const topup_amount = entry.amount;
-
+    for (const bundle of transfer_map) {
+        const wallet = bundle.wallet;
+        const fund_amount = bundle.amount;
+        const txs = common.chunks(bundle.path, TRANSFER_MAX_WALLETS_PER_TX);
+        const bundle_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Signer[][] = [];
         common.log(
             common.bold(
-                `Sending ${topup_amount} SOL to ${wallet.keypair.publicKey.toString()} ${wallet.name} (${wallet.id})...`
+                `Sending ${fund_amount} SOL to ${wallet.keypair.publicKey.toString()} ${wallet.name} (${wallet.id})...`
             )
         );
 
-        for (let index = 1; index < entry.path.length; index++) {
-            const sender = entry.path[index - 1];
-            const receiver = entry.path[index];
-
-            try {
-                const signature = await trade.send_lamports_with_retries(
-                    topup_amount * LAMPORTS_PER_SOL,
-                    sender,
-                    receiver.publicKey,
-                    PriorityLevel.HIGH
+        for (const [tx_idx, tx] of txs.entries()) {
+            const tx_instructions: TransactionInstruction[] = [];
+            const tx_signers: Signer[] = [];
+            const tx_lamports = Math.floor(
+                Math.floor(fund_amount * LAMPORTS_PER_SOL) -
+                    (5000 * tx.length - 2) -
+                    (tx_idx === txs.length - 1 ? bundle_tip * LAMPORTS_PER_SOL : 0)
+            );
+            for (let wallet_idx = 1; wallet_idx < tx.length; wallet_idx++) {
+                const sender = bundle.path[wallet_idx - 1 + txs.length * tx_idx];
+                const receiver = bundle.path[wallet_idx + txs.length * tx_idx];
+                tx_instructions.push(
+                    SystemProgram.transfer({
+                        fromPubkey: sender.publicKey,
+                        toPubkey: receiver.publicKey,
+                        lamports: tx_lamports
+                    })
                 );
-                common.log(
-                    common.green(`Transaction completed for ${wallet.name}, signature: ${signature}, depth: ${index}`)
-                );
-            } catch (error) {
-                common.error(common.red(`Transaction failed for ${wallet.name}: ${error}, depth: ${index}`));
-                failed.push({ name: wallet.name, id: wallet.id });
-                break;
+                tx_signers.push(sender);
             }
-            await common.sleep(TRANSFER_INTERVAL_MS);
+            bundle_instructions.push(tx_instructions);
+            bundle_signers.push(tx_signers);
         }
-        common.log(common.bold(`Finished sending to ${wallet.name} (${wallet.id})\n`));
+        promises.push(
+            trade
+                .retry_send_bundle(bundle_instructions, bundle_signers, bundle_tip)
+                .then((signature) =>
+                    common.log(common.green(`Fund Bundle completed for ${wallet.name}, signature: ${signature}`))
+                )
+                .catch((error) => {
+                    common.error(common.red(`Fund Bundle failed for ${wallet.name}: ${error}`));
+                    failed.push({ name: wallet.name, id: wallet.id });
+                })
+        );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
     }
+    await Promise.allSettled(promises);
 
     if (failed.length > 0) {
         common.error(common.red(`Failed transactions:`));
@@ -331,16 +358,16 @@ export async function run_reg_transfer(entries: [common.Wallet, number][], sende
     const failed: { name: string; id: number }[] = [];
 
     for (const entry of entries) {
-        const [wallet, topup_amount] = entry;
+        const [wallet, fund_amount] = entry;
         const receiver = wallet.keypair;
         if (receiver.publicKey.equals(sender.publicKey)) continue;
 
         common.log(
-            `Sending ${topup_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
+            `Sending ${fund_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
         transactions.push(
             trade
-                .send_lamports(topup_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.HIGH)
+                .send_lamports(fund_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.HIGH)
                 .then((signature) =>
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                 )

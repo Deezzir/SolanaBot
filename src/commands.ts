@@ -353,7 +353,6 @@ export async function warmup(
     if (wallets.length === 0) throw new Error('No wallets available.');
     if (max < min) throw new Error('Invalid min and max values.');
     if (interval && bundle_tip) throw new Error('Interval and bundle tip cannot be used together.');
-    if (!interval && !bundle_tip) throw new Error('Interval or bundle tip should be provided.');
 
     common.log(common.yellow(`Warming up ${wallets.length} accounts...`));
 
@@ -386,23 +385,23 @@ export async function warmup(
                 `Warming up with ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`
             );
             try {
-                if (interval) {
+                if (bundle_tip) {
+                    const signature = await trader.buy_sell_bundle(amount, buyer, mint, bundle_tip, 0.5, priority);
+                    common.log(common.green(`Bundle completed for ${wallet.name}, signature: ${signature}`));
+                } else {
                     const [buy_sig, sell_sig] = await trader.buy_sell(
                         amount,
                         buyer,
                         mint,
                         slippage,
-                        interval * 1000,
+                        interval ? interval * 1000 : undefined,
                         priority
                     );
                     common.log(
                         common.green(
-                            `Trade completed for ${wallet.name}, Buy signature: ${buy_sig}, Sell signature: ${sell_sig}`
+                            `Trade completed for ${wallet.name}\nBuy signature: ${buy_sig}\nSell signature: ${sell_sig}`
                         )
                     );
-                } else if (bundle_tip) {
-                    const bundle_id = await trader.buy_sell_bundle(amount, buyer, mint, bundle_tip, 0.5, priority);
-                    common.log(common.green(`Bundle completed for ${wallet.name}, bundle ID: ${bundle_id}`));
                 }
             } catch (error) {
                 common.log(
@@ -449,19 +448,18 @@ export async function collect_token(wallets: common.Wallet[], mint: PublicKey, r
     common.log(common.yellow(`Collecting all the tokens from the accounts to ${receiver}...`));
     const transactions = [];
 
-    for (const [i, wallet] of wallets.entries()) {
+    for (const wallet of wallets) {
         try {
             const sender = wallet.keypair;
             if (sender.publicKey.equals(receiver)) continue;
             const token_amount = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT);
-            const create_receiver_ata = i === 0;
 
             common.log(
                 `Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
             transactions.push(
                 trade
-                    .send_tokens(token_amount, mint, sender, receiver, create_receiver_ata)
+                    .send_tokens(token_amount, mint, sender, receiver)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -550,10 +548,13 @@ export async function fund(
     funder: Keypair,
     is_spider: boolean,
     is_random: boolean,
-    depth?: number
+    depth?: number,
+    bundle_tip?: number
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
     if (depth && is_spider) throw new Error('Transfers and spider cannot be used together.');
+    if (depth && !bundle_tip) throw new Error('Bundle tip is required for depth transfers.');
+    if (bundle_tip && !depth) throw new Error('Bundle tip is only available for depth transfers.');
     const total_amount = wallets.length * amount;
     let amounts: number[] = [];
 
@@ -579,9 +580,14 @@ export async function fund(
         return;
     }
 
-    if (depth) {
+    if (depth && bundle_tip) {
         common.log(`Running transfers with depth ${depth}:\n`);
-        const rescue_wallets = await transfers.run_deep_transfer(common.zip(wallets, amounts), funder, depth);
+        const rescue_wallets = await transfers.run_deep_transfer(
+            common.zip(wallets, amounts),
+            funder,
+            depth,
+            bundle_tip
+        );
         common.log(`\nPerforming cleanup of the temporary wallets...\n`);
         await collect(rescue_wallets, funder.publicKey);
         return;

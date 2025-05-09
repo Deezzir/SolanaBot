@@ -15,6 +15,7 @@ import {
     HELIUS_RPC,
     PriorityLevel,
     TRADE_MAX_SLIPPAGE,
+    TRANSFER_MAX_DEPTH,
     WALLETS_FILE
 } from './constants.js';
 import base58 from 'bs58';
@@ -626,21 +627,36 @@ async function main() {
         })
         .option(
             '-d, --depth <number>',
-            "The number of transfers to be done between the sender and receiver. Can't be used with Spider enabled",
+            "The number of transfers to be done between the sender and receiver. Can't be used with --spider",
             (value) => {
                 const parsed_value = parseInt(value);
                 if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-                if (parsed_value < 1 || parsed_value > 20)
-                    throw new InvalidOptionArgumentError('Invalid transfers. Must be greater than 0 and less than 5.');
+                if (parsed_value < 1 || parsed_value > TRANSFER_MAX_DEPTH)
+                    throw new InvalidOptionArgumentError(
+                        `Invalid depth. Must be greater than 0 and less than or equal to ${TRANSFER_MAX_DEPTH}.`
+                    );
                 return parsed_value;
             }
         )
-        .addOption(new Option('-s, --spider', 'Topup the wallets using the spider').default(false).conflicts('depth'))
-        .option('-r, --random', 'Topup with random values using <amount> argument as a mean value', false)
+        .option('-b, --bundle <tip>', 'Amount to tip for the fund bundle, Must be used with --depth', (value) => {
+            if (!common.validate_float(value, 0))
+                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+            return parseFloat(value);
+        })
+        .addOption(new Option('-s, --spider', 'Fund the wallets using the spider').default(false).conflicts('depth'))
+        .option('-r, --random', 'Fund with random values using <amount> argument as a mean value', false)
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, sender, options) => {
-            const { from, to, list, depth, spider, random } = options;
-            await commands.fund(common.filter_wallets(wallets, from, to, list), amount, sender, spider, random, depth);
+            const { from, to, list, depth, spider, random, bundle } = options;
+            await commands.fund(
+                common.filter_wallets(wallets, from, to, list),
+                amount,
+                sender,
+                spider,
+                random,
+                depth,
+                bundle
+            );
         });
 
     program
