@@ -12,7 +12,7 @@ import {
     SNIPE_TRADE_BATCH,
     SNIPE_MIN_BUY,
     SNIPE_MIN_BUY_THRESHOLD,
-    SNIPE_RETRY_ITERATIONS,
+    SNIPE_RETRIES,
     SNIPE_RETRY_INTERVAL_MS
 } from '../constants.js';
 
@@ -134,7 +134,7 @@ const sell = async () => {
         let get_balance_retry = 0;
         let balance: TokenAmount | undefined = undefined;
 
-        while (get_balance_retry < SNIPE_RETRY_ITERATIONS) {
+        while (get_balance_retry < SNIPE_RETRIES) {
             try {
                 balance = await trade.get_token_balance(
                     WORKER_KEYPAIR.publicKey,
@@ -144,9 +144,9 @@ const sell = async () => {
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;
 
-                if (get_balance_retry < SNIPE_RETRY_ITERATIONS)
+                if (get_balance_retry < SNIPE_RETRIES)
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] Retrying to get the balance...`);
-                if (get_balance_retry === SNIPE_RETRY_ITERATIONS) {
+                if (get_balance_retry === SNIPE_RETRIES) {
                     MESSAGE_BUFFER.push(`[Worker ${WORKER_CONF.id}] No tokens to sell, exiting...`);
                     sold = true;
                 }

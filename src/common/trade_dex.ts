@@ -27,16 +27,7 @@ import {
     TRADE_SWAP_SEED,
     COMMITMENT
 } from '../constants.js';
-import {
-    calc_ata,
-    check_ata_exists,
-    create_and_send_smart_tx,
-    create_and_send_tx,
-    get_token_supply,
-    get_vault_balance,
-    TokenMetrics,
-    get_ltas
-} from './trade_common.js';
+import { calc_ata, send_tx, get_token_supply, get_vault_balance, TokenMetrics, get_ltas } from './trade_common.js';
 import {
     createAssociatedTokenAccountInstruction,
     createCloseAccountInstruction,
@@ -93,10 +84,7 @@ export async function swap_jupiter(
 ): Promise<String> {
     const quote = await quote_jupiter(amount, from, to, slippage);
     const [instructions, lta_accounts] = await swap_jupiter_instructions(seller, quote);
-    if (priority) {
-        return await create_and_send_tx(instructions, [seller], priority, protection_tip, lta_accounts);
-    }
-    return await create_and_send_smart_tx(instructions, [seller], lta_accounts);
+    return await send_tx(instructions, [seller], priority, protection_tip, lta_accounts);
 }
 
 export async function quote_jupiter(
@@ -166,10 +154,7 @@ export async function swap_raydium(
     protection_tip?: number
 ): Promise<String> {
     const [instructions, address_lt_accounts] = await swap_raydium_instructions(amount, seller, swap_to, amm, slippage);
-    if (priority) {
-        return await create_and_send_tx(instructions, [seller], priority, protection_tip, address_lt_accounts);
-    }
-    return await create_and_send_smart_tx(instructions, [seller]);
+    return await send_tx(instructions, [seller], priority, protection_tip, address_lt_accounts);
 }
 
 export async function swap_raydium_instructions(
@@ -203,11 +188,9 @@ export async function swap_raydium_instructions(
 
     if (token_in.equals(SOL_MINT)) {
         token_out_acc = calc_ata(seller.publicKey, token_out);
-        if (!(await check_ata_exists(token_out_acc))) {
-            instructions.push(
-                createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
-            );
-        }
+        instructions.push(
+            createAssociatedTokenAccountInstruction(seller.publicKey, token_out_acc, seller.publicKey, token_out)
+        );
         token_in_acc = await PublicKey.createWithSeed(seller.publicKey, TRADE_SWAP_SEED, TOKEN_PROGRAM_ID);
         instructions = instructions.concat(await get_swap_acc_intsruction(seller, token_in_acc, raw_amount_in));
     } else {

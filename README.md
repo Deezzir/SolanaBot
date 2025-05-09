@@ -63,7 +63,7 @@
     sell-token|st [options] <mint>                              Sell all the token by the mint from the wallets
     transfer|tr <amount> <receiver> <sender_index>              Transfer SOL from the specified keypair to the receiver
     token-collect|tc [options] <mint> <receiver>                Collect all the token by the mint from the wallets to the provided address
-    topup|t [options] <amount> <sender_index>                   Topup the wallets with SOL using the provided wallet
+    fund|f [options] <amount> <sender_index>                   Fund the wallets with SOL using the provided wallet
     create-metadata|cm <json_path> <image_path>                 Upload the metadata of the token using the provided JSON file and image
     promote|pr [options] <count> <cid> <creator_index>          Create promotion tokens using the provided wallet
     create-token|ct [options] <cid> <creator_index>             Create a token

@@ -61,7 +61,7 @@ export class Runner extends snipe.SniperBase {
                     if (err) return;
                     if (logs && logs.includes('Program log: Instruction: Create')) {
                         try {
-                            const tx = await trade.get_tx_with_retries(signature);
+                            const tx = await trade.retry_get_tx(signature);
                             if (!tx || !tx.meta || !tx.transaction.message) return;
 
                             const instructions = tx.transaction.message.compiledInstructions;

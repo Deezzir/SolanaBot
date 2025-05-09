@@ -1,10 +1,4 @@
-import {
-    AddressLookupTableAccount,
-    ComputeBudgetProgram,
-    LAMPORTS_PER_SOL,
-    Signer,
-    TransactionInstruction
-} from '@solana/web3.js';
+import { AddressLookupTableAccount, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel } from '../constants.js';
@@ -22,7 +16,6 @@ export async function bundle_buy(
 ): Promise<void> {
     const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
-    let priority_fee: number | undefined = undefined;
     const ltas: AddressLookupTableAccount[] = [];
 
     for (const wallet_bundle of wallet_bundles) {
@@ -43,20 +36,6 @@ export async function bundle_buy(
                     mint_meta,
                     slippage
                 );
-                if (priority && !priority_fee) {
-                    priority_fee = await trade.get_priority_fee({
-                        priority_level: priority,
-                        transaction: {
-                            instructions: buy_instructions,
-                            signers: [buyer]
-                        }
-                    });
-                }
-                buy_instructions.unshift(
-                    ComputeBudgetProgram.setComputeUnitPrice({
-                        microLamports: priority_fee!
-                    })
-                );
                 instructions.push(buy_instructions);
                 signers.push([buyer]);
                 if (ltas.length === 0) ltas.push(...(buy_ltas || []));
@@ -67,7 +46,7 @@ export async function bundle_buy(
         if (instructions.length === 0) continue;
         bundles.push(
             trade
-                .create_and_send_bundle(instructions, signers, bundle_tip, ltas)
+                .send_bundle(instructions, signers, bundle_tip, priority, ltas)
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
@@ -107,7 +86,6 @@ export async function bundle_sell(
 
     const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
-    let priority_fee: number | undefined = undefined;
     const ltas: AddressLookupTableAccount[] = [];
 
     for (const wallet_bundle of wallet_bundles) {
@@ -126,20 +104,6 @@ export async function bundle_sell(
                     mint_meta,
                     slippage
                 );
-                if (priority && !priority_fee) {
-                    priority_fee = await trade.get_priority_fee({
-                        priority_level: priority,
-                        transaction: {
-                            instructions: sell_instructions,
-                            signers: [seller]
-                        }
-                    });
-                }
-                sell_instructions.unshift(
-                    ComputeBudgetProgram.setComputeUnitPrice({
-                        microLamports: priority_fee!
-                    })
-                );
                 instructions.push(sell_instructions);
                 signers.push([seller]);
                 if (ltas.length === 0) ltas.push(...(sell_ltas || []));
@@ -150,7 +114,7 @@ export async function bundle_sell(
         if (instructions.length === 0) continue;
         bundles.push(
             trade
-                .create_and_send_bundle(instructions, signers, bundle_tip)
+                .send_bundle(instructions, signers, bundle_tip, priority, ltas)
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );

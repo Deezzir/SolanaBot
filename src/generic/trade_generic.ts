@@ -1,6 +1,5 @@
 import {
     AddressLookupTableAccount,
-    ComputeBudgetProgram,
     Keypair,
     PublicKey,
     Signer,
@@ -16,9 +15,7 @@ import {
     PriorityLevel,
     SOL_MINT,
     TRADE_DEFAULT_CURVE_DECIMALS,
-    TRADE_RAYDIUM_SWAP_TAX,
-    TRADE_RETRY_INTERVAL_MS,
-    TRADE_RETRY_ITERATIONS
+    TRADE_RAYDIUM_SWAP_TAX
 } from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
 import { readFileSync } from 'fs';
@@ -164,48 +161,39 @@ export class Trader {
         sol_amount: number,
         trader: Signer,
         mint_meta: GenericMintMeta,
-        interval_ms: number,
         slippage: number = 0.05,
+        interval_ms?: number,
         priority?: PriorityLevel,
         protection_tip?: number
     ): Promise<[String, String]> {
-        const [buy_instructions, sell_instructions, lta_accounts] = await this.buy_sell_instructions(
+        const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
             trader,
             mint_meta,
             slippage
         );
 
-        const buy_signature = await trade.create_and_send_tx(
-            buy_instructions,
+        if (interval_ms && interval_ms > 0) {
+            const buy_signature = await trade.send_tx(buy_instructions, [trader], priority, protection_tip, ltas);
+            await common.sleep(interval_ms);
+            const sell_signature = await trade.retry_send_tx(
+                sell_instructions,
+                [trader],
+                priority,
+                protection_tip,
+                ltas
+            );
+            return [buy_signature, sell_signature];
+        }
+
+        const signature = await trade.send_tx(
+            [...buy_instructions, ...sell_instructions],
             [trader],
             priority,
             protection_tip,
-            lta_accounts
+            ltas
         );
-        let sell_signature;
-
-        if (interval_ms > 0) await common.sleep(interval_ms);
-
-        let retries = 1;
-        while (retries <= TRADE_RETRY_ITERATIONS) {
-            try {
-                sell_signature = await trade.create_and_send_tx(
-                    sell_instructions,
-                    [trader],
-                    priority,
-                    protection_tip,
-                    lta_accounts
-                );
-            } catch (error) {
-                common.error(common.red(`Failed to send the sell transaction, retrying...`));
-                retries++;
-                await common.sleep(TRADE_RETRY_INTERVAL_MS * retries * 3);
-            }
-        }
-
-        if (!sell_signature) throw new Error('Failed to send the sell transaction after retries.');
-        return [buy_signature, sell_signature];
+        return [signature, signature];
     }
 
     public static async buy_sell_bundle(
@@ -222,31 +210,11 @@ export class Trader {
             mint_meta,
             slippage
         );
-
-        if (priority) {
-            const fee = await trade.get_priority_fee({
-                priority_level: priority,
-                transaction: {
-                    instructions: buy_instructions,
-                    signers: [trader]
-                }
-            });
-            buy_instructions.unshift(
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: fee
-                })
-            );
-            sell_instructions.unshift(
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: fee
-                })
-            );
-        }
-
-        return await trade.create_and_send_bundle(
+        return await trade.send_bundle(
             [buy_instructions, sell_instructions],
             [[trader], [trader]],
             tip,
+            priority,
             ltas
         );
     }
@@ -269,7 +237,8 @@ export class Trader {
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount: number = 0,
-        _mint?: Keypair
+        _mint?: Keypair,
+        _priority?: PriorityLevel
     ): Promise<[String, PublicKey]> {
         throw new Error('Token creation is not supported by Generic program');
     }

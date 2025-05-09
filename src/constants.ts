@@ -20,7 +20,6 @@ export const COMMITMENT = 'confirmed';
 export const COMMANDS_INTERVAL_MS = 50;
 export const COMMANDS_SELL_SLIPPAGE = 0.1;
 export const COMMANDS_BUY_SLIPPAGE = 0.05;
-export const COMMANDS_MAX_RETRIES = 5;
 export const COMMANDS_DELAY_MS = 100;
 
 // WALLET CONSTANTS
@@ -35,8 +34,8 @@ export const IPFS_JWT = get_env_variable('PINATA_IPFS_JWT');
 
 // TRADE COMMON CONSTANTS
 export const TRADE_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
-export const TRADE_MAX_RETRIES = 0;
-export const TRADE_RETRY_ITERATIONS = 5;
+export const TRADE_TX_RETRIES = 0;
+export const TRADE_RETRIES = 5;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
 export const TRADE_MAX_SLIPPAGE = 5.0;
 export const TRADE_DEFAULT_CURVE_DECIMALS = 6;
@@ -116,11 +115,13 @@ export const SNIPE_MIN_BUY = 0.005;
 export const SNIPE_TRADE_BATCH = 1;
 export const SNIPE_META_UPDATE_INTERVAL_MS = 300;
 export const SNIPE_MIN_MCAP = 5000;
-export const SNIPE_RETRY_ITERATIONS = 5;
+export const SNIPE_RETRIES = 5;
 export const SNIPE_RETRY_INTERVAL_MS = 500;
 
 // TRANSFER CONSTANTS
 export const TRANSFER_INTERVAL_MS: number = 1000;
+export const TRANSFER_MAX_DEPTH: number = 23;
+export const TRANSFER_MAX_WALLETS_PER_TX: number = 7;
 
 // DROP CONSTANTS
 export const DROP_RECORDS_PER_ITERATION = 10;
@@ -128,10 +129,10 @@ export const DROP_AIRDROP_CSV = 'airdropusers.csv';
 export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
-export const VOLUME_MAX_WALLETS_PER_EXEC = 30;
+export const VOLUME_MAX_WALLETS_PER_EXEC = 20;
 export const VOLUME_TRADE_SLIPPAGE = 0.9;
-export const VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE = 15;
-export const VOLUME_MAX_WALLETS_PER_TRADE_TX = 6;
+export const VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE = 10;
+export const VOLUME_MAX_WALLETS_PER_TRADE_TX = 2;
 export const VOLUME_MAX_WALLETS_PER_COLLECT_TX = 10;
 export const VOLUME_MAX_WALLETS_PER_FUND_TX = 20;
 
