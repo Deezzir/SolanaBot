@@ -20,10 +20,6 @@ import {
 } from './constants.js';
 import base58 from 'bs58';
 
-//------------------------------------------------------------
-// MAIN
-// -----------------------------------------------------------
-
 function reserve_wallet_check(wallets: common.Wallet[]) {
     if (!common.check_reserve_exists(wallets)) {
         common.error(common.red('Reserve wallet not found.'));
@@ -41,6 +37,100 @@ function get_wallets_from_file(file: string): common.Wallet[] {
     }
     return [];
 }
+
+function get_priority_option(): Option {
+    return new Option('-pr, --priority <level>', 'specify priority level')
+        .choices(Object.values(PriorityLevel) as string[])
+        .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT);
+}
+
+function get_json_config_option(): Option {
+    return new Option('-c, --config <path>', 'Path to the JSON config file').argParser((value) => {
+        if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
+        return common.read_json(value);
+    });
+}
+
+function get_from_option(wallet_cnt: number): Option {
+    return new Option('-f, --from <number>', 'Starting from the provided index').argParser((value) => {
+        if (!common.validate_int(value, 0, wallet_cnt))
+            throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+        return parseInt(value, 10);
+    });
+}
+
+function get_to_option(wallet_cnt: number): Option {
+    return new Option('-t, --to <number>', 'Ending at the provided index (exclusive)').argParser((value) => {
+        if (!common.validate_int(value, 0, wallet_cnt))
+            throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+        return parseInt(value, 10);
+    });
+}
+
+function get_list_option(wallet_cnt: number): Option {
+    return new Option('-l, --list <wallets...>', 'Specify the list of wallet files').argParser((value, prev: any) => {
+        if (!common.validate_int(value, 0, wallet_cnt))
+            throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
+        return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
+    });
+}
+
+function get_bundle_tip_option(): Option {
+    return new Option('-b, --bundle <tip>', 'Enable bundles by providing tip amount').argParser((value) => {
+        if (!common.validate_float(value, 0))
+            throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+        return parseFloat(value);
+    });
+}
+
+function get_protection_tip_option(): Option {
+    return new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
+        .argParser((value) => {
+            if (!common.validate_float(value, 0))
+                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+            return parseFloat(value);
+        })
+        .conflicts('bundle');
+}
+
+function get_slippage_option(): Option {
+    return new Option('-s, --slippage <number>', 'Slippage in percents').argParser((value) => {
+        const parsed_value = parseFloat(value);
+        if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+        if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
+            throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
+        return parsed_value;
+    });
+}
+
+function get_percent_option(): Option {
+    return new Option('-p, --percent <number>', 'Percentage of the token to sell').argParser((value) => {
+        const parsed_value = parseFloat(value);
+        if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+        if (parsed_value < 0.0 || parsed_value > 1.0)
+            throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
+        return parsed_value;
+    });
+}
+
+function get_depth_option(): Option {
+    return new Option(
+        '-d, --depth <number>',
+        'The number of transfers to be done between the sender and receiver'
+    ).argParser((value) => {
+        const parsed_value = parseInt(value);
+        if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+        if (parsed_value < 1 || parsed_value > TRANSFER_MAX_DEPTH)
+            throw new InvalidOptionArgumentError(
+                `Invalid depth. Must be greater than 0 and less than or equal to ${TRANSFER_MAX_DEPTH}.`
+            );
+        return parsed_value;
+    });
+}
+
+//------------------------------------------------------------
+// MAIN
+// -----------------------------------------------------------
 
 async function main() {
     let wallets = get_wallets_from_file(WALLETS_FILE);
@@ -89,15 +179,8 @@ async function main() {
         .command('snipe')
         .alias('sn')
         .description('Start the snipe bot')
-        .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
-            if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
-            return common.read_json(value);
-        })
-        .option('-f, --from <number>', 'Snipe using wallets starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_json_config_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             let { config, from } = options;
@@ -108,12 +191,9 @@ async function main() {
     program
         .command('volume')
         .alias('v')
-        .description('Generate the volume for a token')
-        .option('-c, --config <path>', 'Path to the JSON config file', (value) => {
-            if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
-            return common.read_json(value);
-        })
+        .description('Start the volume bot')
         .option('-s, --simulate', 'Simulate the volume', false)
+        .addOption(get_json_config_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             const { config, simulate } = options;
@@ -125,9 +205,7 @@ async function main() {
     program
         .command('generate')
         .alias('g')
-        .description(
-            'Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.'
-        )
+        .description('Generate the wallets')
         .argument('<file_path>', 'Path of the file to save the wallets')
         .option('-s, --secrets <path>', 'Path to the file with secret keys to convert', (value) => {
             if (!existsSync(value)) throw new InvalidOptionArgumentError('Keys file does not exist.');
@@ -162,19 +240,9 @@ async function main() {
         .action(async () => await commands.balance(wallets));
 
     program
-        .command('wallet-pnl')
-        .alias('pnl')
-        .description('Get the PNL of the wallet')
-        .argument('<address>', 'Public address of the wallet', (value) => {
-            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not a address.');
-            return new PublicKey(value);
-        })
-        .action(async (address) => await commands.wallet_pnl(address));
-
-    program
         .command('token-balance')
         .alias('tb')
-        .description('Get the total balance of a token of the wallets')
+        .description('Get the token balance of the wallets')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
@@ -185,21 +253,9 @@ async function main() {
         .command('warmup')
         .alias('w')
         .description('Warmup the wallets with the tokens')
-        .option('-f, --from <number>', 'Warmup starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Warmup ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
         .option('--min <number>', 'Minimum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
@@ -214,11 +270,6 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid maximum amount. Must be between 1 and 50');
             return parsed_value;
         })
-        .option('-b, --bundle <tip>', 'Amount to tip for buy/sell bundle', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
         .addOption(
             new Option('-i, --interval <number>', 'Interval between each buy/sell in seconds')
                 .argParser((value) => {
@@ -230,11 +281,8 @@ async function main() {
                 })
                 .conflicts('bundle')
         )
-        .addOption(
-            new Option('-pr, --priority <level>', 'specify priority level')
-                .choices(Object.values(PriorityLevel) as string[])
-                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
-        )
+        .addOption(get_bundle_tip_option())
+        .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
             const { from, to, list, bundle, priority, min, max, interval } = options;
@@ -251,6 +299,12 @@ async function main() {
         });
 
     program
+        .command('clean')
+        .alias('cl')
+        .description('Clean the wallets by closing zero balance token accounts')
+        .action(async () => await commands.clean(wallets));
+
+    program
         .command('collect')
         .alias('c')
         .description('Collect all the SOL from the wallets to the provided address')
@@ -258,24 +312,115 @@ async function main() {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-f, --from <number>', 'Colllect starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Collect ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
         .action(async (receiver, options) => {
             const { from, to, list } = options;
             await commands.collect(common.filter_wallets(wallets, from, to, list), receiver);
+        });
+
+    program
+        .command('token-collect')
+        .alias('tc')
+        .description('Collect all tokens by mint from the wallets to the provided address')
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<receiver>', 'Public address of the receiver', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .hook('preAction', () => reserve_wallet_check(wallets))
+        .action(async (mint, receiver, options) => {
+            const { from, to, list } = options;
+            await commands.collect_token(common.filter_wallets(wallets, from, to, list), mint, receiver);
+        });
+
+    program
+        .command('fund')
+        .alias('f')
+        .description('Fund the wallets with SOL using the provided wallet')
+        .argument('<amount>', 'Amount of SOL to fund', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
+            if (parsed_value < 0) throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
+            return parsed_value;
+        })
+        .argument('<sender_index>', 'Index of the sender wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
+            return sender_wallet.keypair;
+        })
+        .addOption(
+            new Option('-s, --spider', 'Fund the wallets using the spider (cannot be used with --depth parameter)')
+                .default(false)
+                .conflicts('depth')
+        )
+        .option('-r, --random', 'Fund randomly using <amount> argument as a mean value', false)
+        .addOption(get_depth_option())
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .addOption(get_bundle_tip_option())
+        .hook('preAction', () => reserve_wallet_check(wallets))
+        .action(async (amount, sender, options) => {
+            const { from, to, list, depth, spider, random, bundle } = options;
+            await commands.fund_sol(
+                common.filter_wallets(wallets, from, to, list),
+                amount,
+                sender,
+                spider,
+                random,
+                depth,
+                bundle
+            );
+        });
+
+    program
+        .command('token-distribute')
+        .alias('td')
+        .description('Distribute the token by the mint from the sender to the wallets')
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<percent>', 'Percentage of the token to distribute', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
+            if (parsed_value < 0.0 || parsed_value > 1.0) throw new InvalidArgumentError('Invalid range (0.0 - 1.0).');
+            return parsed_value;
+        })
+        .argument('<sender_index>', 'Index of the sender wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const sender_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
+            return sender_wallet.keypair;
+        })
+        .option('-r, --random', 'Distribute randomly', false)
+        .addOption(get_depth_option())
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .addOption(get_bundle_tip_option())
+        .action(async (mint, percent, sender, options) => {
+            const { from, to, list, depth, random, bundle } = options;
+            await commands.distribute_token(
+                common.filter_wallets(wallets, from, to, list),
+                mint,
+                percent,
+                sender,
+                random,
+                depth,
+                bundle
+            );
         });
 
     program
@@ -298,23 +443,9 @@ async function main() {
             if (!buyer_wallet) throw new InvalidArgumentError('Invalid index.');
             return buyer_wallet.keypair;
         })
-        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
-            return parsed_value;
-        })
-        .option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
-        .addOption(
-            new Option('-pr, --priority <level>', 'specify priority level')
-                .choices(Object.values(PriorityLevel) as string[])
-                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
-        )
+        .addOption(get_slippage_option())
+        .addOption(get_protection_tip_option())
+        .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, mint, buyer, options) => {
             const { slippage, mev, priority } = options;
@@ -337,30 +468,10 @@ async function main() {
             if (!seller_wallet) throw new InvalidArgumentError('Invalid index.');
             return seller_wallet.keypair;
         })
-        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 1.0)
-                throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
-            return parsed_value;
-        })
-        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
-            return parsed_value;
-        })
-        .option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
-        .addOption(
-            new Option('-pr, --priority <level>', 'specify priority level')
-                .choices(Object.values(PriorityLevel) as string[])
-                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
-        )
+        .addOption(get_percent_option())
+        .addOption(get_slippage_option())
+        .addOption(get_protection_tip_option())
+        .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, seller, options) => {
             const { percent, slippage, mev, priority } = options;
@@ -383,7 +494,7 @@ async function main() {
         })
         .option(
             '--min <number>',
-            'Minimum amount for random buy in SOL (cannot be used with "--amount" parameter)',
+            'Minimum amount for random buy in SOL (cannot be used with --amount parameter)',
             (value) => {
                 const parsed_value = parseFloat(value);
                 if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
@@ -403,47 +514,13 @@ async function main() {
                 return parsed_value;
             }
         )
-        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
-            return parsed_value;
-        })
-        .option('-f, --from <number>', 'Buy starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Buy ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
-        .option('-b, --bundle <tip>', 'Enable bundles by providing tip amount', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
-        .addOption(
-            new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
-                .argParser((value) => {
-                    if (!common.validate_float(value, 0))
-                        throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-                    return parseFloat(value);
-                })
-                .conflicts('bundle')
-        )
-        .addOption(
-            new Option('-pr, --priority <level>', 'specify priority level')
-                .choices(Object.values(PriorityLevel) as string[])
-                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
-        )
+        .addOption(get_slippage_option())
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .addOption(get_bundle_tip_option())
+        .addOption(get_protection_tip_option())
+        .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
             const { amount, min, max, slippage, from, to, list, bundle, mev, priority } = options;
@@ -470,54 +547,14 @@ async function main() {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-p, --percent <number>', 'Percentage of the token to sell', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > 1.0)
-                throw new InvalidOptionArgumentError('Invalid range (0.0 - 1.0).');
-            return parsed_value;
-        })
-        .option('-s, --slippage <number>', 'Slippage in percents', (value) => {
-            const parsed_value = parseFloat(value);
-            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-            if (parsed_value < 0.0 || parsed_value > TRADE_MAX_SLIPPAGE)
-                throw new InvalidOptionArgumentError(`Invalid range (0.0 - ${TRADE_MAX_SLIPPAGE.toFixed(1)}).`);
-            return parsed_value;
-        })
-        .option('-f, --from <number>', 'Sell starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Sell ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
-        .option('-b, --bundle <tip>', 'Enable bundles by providing tip amount', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
-        .addOption(
-            new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
-                .argParser((value) => {
-                    if (!common.validate_float(value, 0))
-                        throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-                    return parseFloat(value);
-                })
-                .conflicts('bundle')
-        )
-        .addOption(
-            new Option('-pr, --priority <level>', 'specify priority level')
-                .choices(Object.values(PriorityLevel) as string[])
-                .default(PriorityLevel.DEFAULT, PriorityLevel.DEFAULT)
-        )
+        .addOption(get_percent_option())
+        .addOption(get_slippage_option())
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .addOption(get_bundle_tip_option())
+        .addOption(get_protection_tip_option())
+        .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
             const { percent, slippage, from, to, list, bundle, mev, priority } = options;
@@ -535,9 +572,19 @@ async function main() {
         });
 
     program
+        .command('wallet-pnl')
+        .alias('pnl')
+        .description('Get the PNL of the wallet')
+        .argument('<address>', 'Public address of the wallet', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not a address.');
+            return new PublicKey(value);
+        })
+        .action(async (address) => await commands.wallet_pnl(address));
+
+    program
         .command('transfer')
         .alias('tr')
-        .description('Transfer SOL from the specified keypair to the receiver')
+        .description('Transfer SOL from the specified wallet to the receiver')
         .argument('<amount>', 'Amount of SOL to transfer', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
@@ -556,52 +603,25 @@ async function main() {
             return sender_wallet.keypair;
         })
         .hook('preAction', () => reserve_wallet_check(wallets))
-        .action(async (amount, receiver, sender) => {
-            await commands.transfer_sol(amount, receiver, sender);
-        });
+        .action(async (amount, receiver, sender) => await commands.transfer_sol(amount, receiver, sender));
 
     program
-        .command('token-collect')
-        .alias('tc')
-        .description('Collect all the token by the mint from the wallets to the provided address')
+        .command('transfer-token')
+        .alias('tt')
+        .description('Transfer the token from the specified wallet to the receiver')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .argument('<receiver>', 'Public address of the receiver', (value) => {
-            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
-            return new PublicKey(value);
-        })
-        .option('-f, --from <number>', 'Collect starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Collect ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
-        .hook('preAction', () => reserve_wallet_check(wallets))
-        .action(async (mint, receiver, options) => {
-            const { from, to, list } = options;
-            await commands.collect_token(common.filter_wallets(wallets, from, to, list), mint, receiver);
-        });
-
-    program
-        .command('fund')
-        .alias('f')
-        .description('Fund the wallets with SOL using the provided wallet')
-        .argument('<amount>', 'Amount of SOL to fund', (value) => {
+        .argument('<amount>', 'Amount of token to transfer', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             if (parsed_value < 0) throw new InvalidArgumentError('Invalid amount. Must be greater than 0.0');
             return parsed_value;
+        })
+        .argument('<receiver>', 'Public address of the receiver', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
         })
         .argument('<sender_index>', 'Index of the sender wallet', (value) => {
             if (!common.validate_int(value, 0, wallet_cnt))
@@ -610,54 +630,9 @@ async function main() {
             if (!sender_wallet) throw new InvalidArgumentError('Invalid index.');
             return sender_wallet.keypair;
         })
-        .option('-f, --from <number>', 'Fund starting from the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-t, --to <number>', 'Fund ending at the provided index', (value) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return parseInt(value, 10);
-        })
-        .option('-l, --list <wallets...>', 'Specify the list of wallet files', (value, prev: any) => {
-            if (!common.validate_int(value, 0, wallet_cnt))
-                throw new InvalidOptionArgumentError(`Not a valid range(0 - ${wallet_cnt}).`);
-            return prev ? prev?.concat(parseInt(value, 10)) : [parseInt(value, 10)];
-        })
-        .option(
-            '-d, --depth <number>',
-            "The number of transfers to be done between the sender and receiver. Can't be used with --spider",
-            (value) => {
-                const parsed_value = parseInt(value);
-                if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
-                if (parsed_value < 1 || parsed_value > TRANSFER_MAX_DEPTH)
-                    throw new InvalidOptionArgumentError(
-                        `Invalid depth. Must be greater than 0 and less than or equal to ${TRANSFER_MAX_DEPTH}.`
-                    );
-                return parsed_value;
-            }
-        )
-        .option('-b, --bundle <tip>', 'Amount to tip for the fund bundle, Must be used with --depth', (value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
-        })
-        .addOption(new Option('-s, --spider', 'Fund the wallets using the spider').default(false).conflicts('depth'))
-        .option('-r, --random', 'Fund with random values using <amount> argument as a mean value', false)
-        .hook('preAction', () => reserve_wallet_check(wallets))
-        .action(async (amount, sender, options) => {
-            const { from, to, list, depth, spider, random, bundle } = options;
-            await commands.fund(
-                common.filter_wallets(wallets, from, to, list),
-                amount,
-                sender,
-                spider,
-                random,
-                depth,
-                bundle
-            );
-        });
+        .action(
+            async (mint, amount, receiver, sender) => await commands.transfer_token(mint, amount, receiver, sender)
+        );
 
     program
         .command('create-metadata')
@@ -731,12 +706,6 @@ async function main() {
         });
 
     program
-        .command('clean')
-        .alias('cl')
-        .description('Clean the wallets')
-        .action(async () => await commands.clean(wallets));
-
-    program
         .command('create-lta')
         .alias('clta')
         .description('Create a Address Lookup Table Account')
@@ -799,7 +768,7 @@ async function main() {
     program
         .command('drop')
         .alias('dr')
-        .description('Do the drop')
+        .description('Execute token airdrop/presale')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);

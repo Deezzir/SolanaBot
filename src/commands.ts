@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
 import { GenericTrader } from './generic/generic.js';
@@ -226,6 +226,33 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
     if (balance < amount * LAMPORTS_PER_SOL) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
     trade
         .send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.HIGH)
+        .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
+        .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
+}
+
+export async function transfer_token(
+    mint: PublicKey,
+    amount: number,
+    receiver: PublicKey,
+    sender: Keypair
+): Promise<void> {
+    if (sender.publicKey.equals(receiver)) throw new Error('Sender and receiver addresses are the same.');
+    const mint_meta = await trade.get_token_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found`);
+
+    common.log(
+        common.yellow(
+            `Transferring ${amount} $${mint_meta.token_symbol} from ${sender.publicKey.toString()} to ${receiver.toString()}...`
+        )
+    );
+
+    const token_balance = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT);
+    if (!token_balance.uiAmount) throw new Error(`Sender has no token balance for ${mint_meta.token_name}`);
+    if (token_balance.uiAmount < amount)
+        throw new Error(`Sender balance is not enough to transfer ${amount} $${mint_meta.token_symbol}`);
+
+    trade
+        .send_tokens(trade.get_token_amount(amount, mint_meta.token_decimals), mint, sender, receiver)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -542,7 +569,7 @@ export async function sell_token(
     return await mass_trade.bundle_sell(mint_meta, wallets, trader, percent, slippage, bundle_tip, priority);
 }
 
-export async function fund(
+export async function fund_sol(
     wallets: common.Wallet[],
     amount: number,
     funder: Keypair,
@@ -558,31 +585,31 @@ export async function fund(
     const total_amount = wallets.length * amount;
     let amounts: number[] = [];
 
-    if (is_random) {
-        common.log(common.yellow(`Topping up random amount of SOL to every ${wallets.length} walets...`));
-        amounts = common.random_amounts(total_amount, wallets.length);
-    } else {
-        common.log(common.yellow(`Topping up ${amount} SOL to every ${wallets.length} walets...`));
-        amounts = Array.from({ length: wallets.length }, () => amount);
-    }
-
     const balance = (await trade.get_balance(funder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
-    common.log(common.yellow(`Payer address: ${funder.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
+    common.log(common.yellow(`Funder address: ${funder.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < total_amount) {
         throw new Error(`Payer balance is not enough to top up ${total_amount} SOL to ${wallets.length} wallets`);
     }
 
+    if (is_random) {
+        common.log(common.yellow(`Funding random amounts of SOL to every ${wallets.length} wallet...`));
+        amounts = common.random_amounts(total_amount, wallets.length);
+    } else {
+        common.log(common.yellow(`Funding ${amount} SOL to every ${wallets.length} wallet...`));
+        amounts = Array.from({ length: wallets.length }, () => amount);
+    }
+
     if (is_spider) {
         common.log('Running spider:\n');
-        const rescue_wallets = await transfers.run_spider_transfer(wallets, amount, funder);
+        const rescue_wallets = await transfers.execute_spider_fund_sol(wallets, amount, funder);
         common.log(`\nPerforming cleanup of the temporary wallets...\n`);
         await collect(rescue_wallets, funder.publicKey);
         return;
     }
 
     if (depth && bundle_tip) {
-        common.log(`Running transfers with depth ${depth}:\n`);
-        const rescue_wallets = await transfers.run_deep_transfer(
+        common.log(`Running fund with depth ${depth}:\n`);
+        const rescue_wallets = await transfers.execute_depth_sol_fund(
             common.zip(wallets, amounts),
             funder,
             depth,
@@ -593,7 +620,68 @@ export async function fund(
         return;
     }
 
-    await transfers.run_reg_transfer(common.zip(wallets, amounts), funder);
+    await transfers.execute_fund_sol(common.zip(wallets, amounts), funder);
+}
+
+export async function distribute_token(
+    wallets: common.Wallet[],
+    mint: PublicKey,
+    percent: number,
+    funder: Keypair,
+    is_random: boolean,
+    depth?: number,
+    bundle_tip?: number
+): Promise<void> {
+    if (wallets.length === 0) throw new Error('No wallets available.');
+    if (depth && !bundle_tip) throw new Error('Bundle tip is required for depth transfers.');
+    if (bundle_tip && !depth) throw new Error('Bundle tip is only available for depth transfers.');
+    if (percent < 0 || percent > 1) throw new Error('Percent should be between 0 and 1.');
+    const mint_meta = await trade.get_token_meta(mint);
+    let amounts: TokenAmount[] = [];
+
+    const balance = await trade.get_token_balance(funder.publicKey, mint, COMMITMENT);
+    if (!balance.uiAmount) throw new Error(`Distributer has no token balance for ${mint_meta.token_name}`);
+    common.log(
+        common.yellow(
+            `Distributer address: ${funder.publicKey.toString()} | Balance: ${balance.uiAmount.toFixed(5)} $${mint_meta.token_symbol}\n`
+        )
+    );
+    const total_amount = balance.uiAmount * percent;
+
+    if (is_random) {
+        common.log(
+            common.yellow(
+                `Distributing random amount of $${mint_meta.token_symbol} to every ${wallets.length} wallet...`
+            )
+        );
+        amounts = common
+            .random_amounts(total_amount, wallets.length)
+            .map((amount) => trade.get_token_amount(amount, mint_meta.token_decimals));
+    } else {
+        const amount = total_amount / wallets.length;
+        common.log(
+            common.yellow(`Distributing ${amount} $${mint_meta.token_symbol} to every ${wallets.length} wallet...`)
+        );
+        amounts = Array.from({ length: wallets.length }, () =>
+            trade.get_token_amount(amount, mint_meta.token_decimals)
+        );
+    }
+
+    if (depth && bundle_tip) {
+        common.log(`Running distribute with depth ${depth}:\n`);
+        const rescue_wallets = await transfers.execute_depth_dist_token(
+            common.zip(wallets, amounts),
+            mint_meta,
+            funder,
+            depth,
+            bundle_tip
+        );
+        common.log(`\nPerforming cleanup of the temporary wallets...\n`);
+        await collect(rescue_wallets, funder.publicKey);
+        return;
+    }
+
+    await transfers.execute_dist_token(common.zip(wallets, amounts), mint_meta, funder);
 }
 
 export async function snipe(
@@ -897,7 +985,7 @@ export async function drop(
     );
 
     const mint_meta = await trade.get_token_meta(mint);
-    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${common.Program.Pump}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found`);
     common.log(`Token name: ${mint_meta.token_name} | Symbol: ${mint_meta.token_symbol}\n`);
 
     let token_balance: number = 0;

@@ -1,4 +1,4 @@
-import { Keypair, LAMPORTS_PER_SOL, Signer, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, Signer, SystemProgram, TokenAmount, TransactionInstruction } from '@solana/web3.js';
 import {
     COMMANDS_INTERVAL_MS,
     COMMITMENT,
@@ -10,6 +10,11 @@ import {
 } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
+import {
+    createAssociatedTokenAccountIdempotentInstruction,
+    createCloseAccountInstruction,
+    createTransferInstruction
+} from '@solana/spl-token';
 
 type SpiderTreeNode = {
     amount: number;
@@ -236,45 +241,13 @@ async function process_final_transfers(entries: [common.Wallet, Keypair][]): Pro
     await Promise.all(transactions);
 }
 
-export async function run_spider_transfer(
-    wallets: common.Wallet[],
-    amount: number,
-    sender: Keypair
-): Promise<common.Wallet[]> {
-    const wallet_cnt = wallets.length;
-
-    let tree = {
-        head: null,
-        depth: Math.ceil(Math.log2(wallet_cnt)) + 1
-    } as SpiderTree;
-
-    tree = build_spider_tree(tree, amount, wallet_cnt, sender);
-    display_spider_tree(tree);
-    const target_file = backup_spider_tree(tree);
-
-    try {
-        common.log(`Processing inner transfers...\n`);
-        const final_entries = await process_inner_transfers(tree);
-        common.log(`\nProcessing final transfers...\n`);
-        await process_final_transfers(common.zip(wallets, final_entries));
-    } catch (error) {
-        common.error(common.red(`Failed to process transfers: ${error}`));
-    }
-
-    return common.get_wallets(target_file);
-}
-
-export async function run_deep_transfer(
-    entries: [common.Wallet, number][],
+function generate_depth_transfer_map(
+    entries: [common.Wallet, number | TokenAmount][],
     sender: Keypair,
     depth: number,
-    bundle_tip: number
-): Promise<common.Wallet[]> {
-    const target_file = common.setup_rescue_file();
-    if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
-    if (!target_file) throw new Error('Failed to create a target file for the spider transfer');
-
-    const transfer_map = entries.map((entry, index) => {
+    target_file: string
+): { amount: number | TokenAmount; wallet: common.Wallet; path: Keypair[] }[] {
+    return entries.map((entry, index) => {
         const [wallet, amount] = entry;
         const path = [
             sender,
@@ -292,19 +265,58 @@ export async function run_deep_transfer(
             path
         };
     });
+}
+
+export async function execute_spider_fund_sol(
+    wallets: common.Wallet[],
+    amount: number,
+    funder: Keypair
+): Promise<common.Wallet[]> {
+    const wallet_cnt = wallets.length;
+
+    let tree = {
+        head: null,
+        depth: Math.ceil(Math.log2(wallet_cnt)) + 1
+    } as SpiderTree;
+
+    tree = build_spider_tree(tree, amount, wallet_cnt, funder);
+    display_spider_tree(tree);
+    const target_file = backup_spider_tree(tree);
+
+    try {
+        common.log(`Processing inner transfers...\n`);
+        const final_entries = await process_inner_transfers(tree);
+        common.log(`\nProcessing final transfers...\n`);
+        await process_final_transfers(common.zip(wallets, final_entries));
+    } catch (error) {
+        common.error(common.red(`Failed to process transfers: ${error}`));
+    }
+
+    return common.get_wallets(target_file);
+}
+
+export async function execute_depth_sol_fund(
+    entries: [common.Wallet, number][],
+    funder: Keypair,
+    depth: number,
+    bundle_tip: number
+): Promise<common.Wallet[]> {
+    const target_file = common.setup_rescue_file();
+    if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
+    if (!target_file) throw new Error('Failed to create a target file for the funding transfers');
+
+    const transfer_map = generate_depth_transfer_map(entries, funder, depth, target_file);
 
     const promises: Promise<void>[] = [];
     const failed: { name: string; id: number }[] = [];
     for (const bundle of transfer_map) {
         const wallet = bundle.wallet;
-        const fund_amount = bundle.amount;
+        const fund_amount = bundle.amount as number;
         const txs = common.chunks(bundle.path, TRANSFER_MAX_WALLETS_PER_TX);
         const bundle_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
         common.log(
-            common.bold(
-                `Sending ${fund_amount} SOL to ${wallet.keypair.publicKey.toString()} ${wallet.name} (${wallet.id})...`
-            )
+            `Sending ${fund_amount} SOL to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
 
         for (const [tx_idx, tx] of txs.entries()) {
@@ -353,21 +365,130 @@ export async function run_deep_transfer(
     return common.get_wallets(target_file);
 }
 
-export async function run_reg_transfer(entries: [common.Wallet, number][], sender: Keypair): Promise<void> {
+export async function execute_fund_sol(entries: [common.Wallet, number][], funder: Keypair): Promise<void> {
     const transactions = [];
     const failed: { name: string; id: number }[] = [];
 
     for (const entry of entries) {
         const [wallet, fund_amount] = entry;
         const receiver = wallet.keypair;
-        if (receiver.publicKey.equals(sender.publicKey)) continue;
-
+        if (receiver.publicKey.equals(funder.publicKey)) continue;
         common.log(
             `Sending ${fund_amount} SOL to ${receiver.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
         transactions.push(
             trade
-                .send_lamports(fund_amount * LAMPORTS_PER_SOL, sender, receiver.publicKey, PriorityLevel.HIGH)
+                .send_lamports(fund_amount * LAMPORTS_PER_SOL, funder, receiver.publicKey, PriorityLevel.HIGH)
+                .then((signature) =>
+                    common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
+                )
+                .catch((error) => {
+                    common.error(common.red(`Transaction failed for ${wallet.name}: ${error.message}`));
+                    failed.push({ name: wallet.name, id: wallet.id });
+                })
+        );
+
+        await common.sleep(COMMANDS_INTERVAL_MS);
+    }
+    await Promise.allSettled(transactions);
+
+    if (failed.length > 0) {
+        common.error(common.red(`\nFailed transactions:`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item.name} (${item.id})`));
+    }
+}
+
+export async function execute_depth_dist_token(
+    entries: [common.Wallet, TokenAmount][],
+    mint_meta: trade.MintAsset,
+    distributer: Keypair,
+    depth: number,
+    bundle_tip: number
+) {
+    const target_file = common.setup_rescue_file();
+    if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
+    if (!target_file) throw new Error('Failed to create a target file for the distribution transfers');
+
+    const transfer_map = generate_depth_transfer_map(entries, distributer, depth, target_file);
+
+    const promises: Promise<void>[] = [];
+    const failed: { name: string; id: number }[] = [];
+    for (const bundle of transfer_map) {
+        const wallet = bundle.wallet;
+        const token_amount = bundle.amount as TokenAmount;
+        const txs = common.chunks(bundle.path, TRANSFER_MAX_WALLETS_PER_TX);
+        const bundle_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Signer[][] = [];
+        common.log(
+            `Sending ${token_amount.uiAmount} $${mint_meta.token_symbol} to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
+        );
+
+        for (const [tx_idx, tx] of txs.entries()) {
+            const tx_instructions: TransactionInstruction[] = [];
+            const tx_signers: Signer[] = [];
+            for (let wallet_idx = 1; wallet_idx < tx.length; wallet_idx++) {
+                const sender = bundle.path[wallet_idx - 1 + txs.length * tx_idx];
+                const receiver = bundle.path[wallet_idx + txs.length * tx_idx];
+                const receiver_ata = trade.calc_ata(receiver.publicKey, mint_meta.mint);
+                const sender_ata = trade.calc_ata(sender.publicKey, mint_meta.mint);
+                const token_amount_raw = BigInt(token_amount.amount);
+                tx_instructions.push(
+                    createAssociatedTokenAccountIdempotentInstruction(
+                        sender.publicKey,
+                        receiver_ata,
+                        receiver.publicKey,
+                        mint_meta.mint
+                    ),
+                    createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw)
+                );
+                if (!sender.publicKey.equals(distributer.publicKey))
+                    tx_instructions.push(createCloseAccountInstruction(sender_ata, sender.publicKey, sender.publicKey));
+                tx_signers.push(sender);
+            }
+            bundle_instructions.push(tx_instructions);
+            bundle_signers.push(tx_signers);
+        }
+        promises.push(
+            trade
+                .retry_send_bundle(bundle_instructions, bundle_signers, bundle_tip)
+                .then((signature) =>
+                    common.log(common.green(`Fund Bundle completed for ${wallet.name}, signature: ${signature}`))
+                )
+                .catch((error) => {
+                    common.error(common.red(`Fund Bundle failed for ${wallet.name}: ${error}`));
+                    failed.push({ name: wallet.name, id: wallet.id });
+                })
+        );
+        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+    }
+    await Promise.allSettled(promises);
+
+    if (failed.length > 0) {
+        common.error(common.red(`Failed transactions:`));
+        for (const item of failed) common.error(common.bold(`Wallet: ${item.name} (${item.id})`));
+    }
+
+    return common.get_wallets(target_file);
+}
+
+export async function execute_dist_token(
+    entries: [common.Wallet, TokenAmount][],
+    mint_meta: trade.MintAsset,
+    distributer: Keypair
+) {
+    const transactions = [];
+    const failed: { name: string; id: number }[] = [];
+
+    for (const entry of entries) {
+        const [wallet, token_amount] = entry;
+        const receiver = wallet.keypair;
+        if (receiver.publicKey.equals(distributer.publicKey)) continue;
+        common.log(
+            `Sending ${token_amount.uiAmount} $${mint_meta.token_symbol} to ${receiver.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
+        );
+        transactions.push(
+            trade
+                .send_tokens(token_amount, mint_meta.mint, distributer, receiver.publicKey, PriorityLevel.HIGH)
                 .then((signature) =>
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                 )

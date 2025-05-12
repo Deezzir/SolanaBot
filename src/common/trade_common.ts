@@ -675,7 +675,8 @@ export async function send_tokens(
     token_amount: TokenAmount,
     mint: PublicKey,
     sender: Signer,
-    receiver: PublicKey
+    receiver: PublicKey,
+    priority?: PriorityLevel
 ): Promise<String> {
     if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
     const token_amount_raw = BigInt(token_amount.amount);
@@ -688,7 +689,7 @@ export async function send_tokens(
         createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw)
     ];
 
-    return await send_tx(instructions, [sender]);
+    return await send_tx(instructions, [sender], priority);
 }
 
 export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; unsold: PublicKey[] }> {
