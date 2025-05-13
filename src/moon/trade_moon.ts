@@ -238,6 +238,8 @@ export class Trader {
         _meta_cid: string,
         _sol_amount: number = 0,
         _mint?: Keypair,
+        _traders?: [Signer, number][],
+        _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<[String, PublicKey]> {
         throw new Error('Not implemented');
@@ -248,6 +250,13 @@ export class Trader {
     }
 
     public static async default_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
+        throw new Error('Not Implemented');
+    }
+
+    public static update_mint_meta_reserves(
+        _mint_meta: MoonshotMintMeta,
+        _amount: number | TokenAmount
+    ): MoonshotMintMeta {
         throw new Error('Not Implemented');
     }
 

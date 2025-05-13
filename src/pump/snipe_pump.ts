@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { COMMITMENT, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_TRADE_PROGRAM_ID } from '../constants.js';
+import { COMMITMENT, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_PROGRAM_ID } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
@@ -71,7 +71,7 @@ export class Runner extends snipe.SniperBase {
                                 const program_id = address_lookup.get(instr.programIdIndex);
                                 const mint = address_lookup.get(1);
 
-                                if (!program_id || !program_id.equals(PUMP_TRADE_PROGRAM_ID)) continue;
+                                if (!program_id || !program_id.equals(PUMP_PROGRAM_ID)) continue;
                                 const result = this.decode_create_instr(instr.data);
                                 if (!result) continue;
 

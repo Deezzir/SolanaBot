@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount, Signer } from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
 import { MoonTrader, MoonRunner } from './moon/moon.js';
 import { GenericTrader } from './generic/generic.js';
@@ -11,6 +11,7 @@ import {
     COMMITMENT,
     HELIUS_RPC,
     PriorityLevel,
+    TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
     WALLETS_FILE_HEADERS
 } from './constants.js';
 import * as common from './common/common.js';
@@ -89,8 +90,20 @@ export async function create_token(
     dev: common.Wallet,
     program: common.Program = common.Program.Pump,
     dev_buy?: number,
-    mint?: Keypair
+    mint?: Keypair,
+    wallets?: common.Wallet[],
+    min?: number,
+    max?: number,
+    bundle_tip?: number
 ): Promise<void> {
+    if (wallets && (wallets.length === 0 || wallets.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE))
+        throw new Error(
+            `Invalid wallet count: ${wallets.length}. The number of wallets should be between 1 and ${TRADE_MAX_WALLETS_PER_CREATE_BUNDLE}`
+        );
+    if (bundle_tip && !wallets) throw new Error('Bundle tip is only available for bundle buy.');
+    if (wallets && !bundle_tip) throw new Error('Bundle tip is required for bundle buy.');
+    if (wallets && (!min || !max)) throw new Error('Both min and max should be provided, when bundle buy is enabled.');
+
     common.log('Creating a token...\n');
     dev_buy = dev_buy || 0;
 
@@ -102,9 +115,18 @@ export async function create_token(
 
     common.log(common.yellow(`Dev: ${dev.keypair.publicKey.toString()} | Balance: ${balance.toFixed(2)} SOL`));
     common.log(common.bold(`Dev Buy: ${dev_buy.toFixed(2)} SOL\n`));
+
+    let entries: [Signer, number][] | undefined;
+    if (wallets) {
+        common.log(common.yellow('Bundle buy'));
+        common.log(common.bold(`Wallets count: ${wallets.length} | Amounts between ${min} and ${max} SOL...`));
+        entries = wallets.map((w) => [w.keypair, common.uniform_random(min ?? 0, max ?? 0)]);
+    }
+
+    common.log('');
     if (mint) common.log(`Custom Mint address: ${mint.publicKey.toString()}`);
     common.log(common.yellow(`Token Name: ${meta.name} | Symbol: $${meta.symbol}`));
-    common.log(`Token Meta: ${JSON.stringify(meta, null, 2)}`);
+    common.log(common.bold(`Token Meta: ${JSON.stringify(meta, null, 2)}`));
 
     try {
         const [sig, mint_addr] = await trader.create_token(
@@ -113,10 +135,12 @@ export async function create_token(
             meta.symbol,
             meta_cid,
             dev_buy,
-            mint
+            mint,
+            entries,
+            bundle_tip
         );
-        common.log(common.bold(`\nToken created | Signature: ${sig}`));
-        common.log(common.bold(`Mint address: ${mint_addr}`));
+        common.log(common.green(`\nToken created | Signature: ${sig}`));
+        common.log(common.green(`Mint address: ${mint_addr}`));
     } catch (error) {
         throw new Error(`Failed to create token: ${error}`);
     }
@@ -523,23 +547,16 @@ export async function buy_token(
     if (max && min && max < min) throw new Error('Invalid min and max values.');
 
     const trader = get_trader(program);
+    const entries: [common.Wallet, number][] = wallets.map((w) => [
+        w,
+        amount || common.uniform_random(min ?? 0, max ?? 0)
+    ]);
     let mint_meta = await trader.get_mint_meta(mint);
     if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
     common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
 
-    if (!bundle_tip)
-        return await mass_trade.seq_buy(
-            mint_meta,
-            wallets,
-            trader,
-            amount,
-            min,
-            max,
-            SLIPPAGE,
-            priority,
-            protection_tip
-        );
-    return await mass_trade.bundle_buy(mint_meta, wallets, trader, amount, min, max, SLIPPAGE, bundle_tip, priority);
+    if (!bundle_tip) return await mass_trade.seq_buy(mint_meta, entries, trader, SLIPPAGE, priority, protection_tip);
+    return await mass_trade.bundle_buy(mint_meta, entries, trader, SLIPPAGE, bundle_tip, priority);
 }
 
 export async function sell_token(

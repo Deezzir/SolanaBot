@@ -37,7 +37,8 @@ import {
     JITO_TIP_ACCOUNTS,
     JITO_BUNDLE_SIZE,
     TRADE_RETRIES,
-    JITO_BUNDLE_INTERVAL_MS
+    JITO_BUNDLE_INTERVAL_MS,
+    JITO_MIN_TIP
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -113,12 +114,15 @@ export interface IProgramTrader {
         meta_cid: string,
         sol_amount?: number,
         mint?: Keypair,
+        traders?: [Signer, number][],
+        bundle_tip?: number,
         priority?: PriorityLevel
     ): Promise<[String, PublicKey]>;
     create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string>;
     get_random_mints(count: number): Promise<IMintMeta[]>;
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
     update_mint_meta(mint_meta: IMintMeta, sol_price?: number): Promise<IMintMeta>;
+    update_mint_meta_reserves(mint_meta: IMintMeta, amount: number | TokenAmount): IMintMeta;
     default_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta>;
 }
 
@@ -138,6 +142,7 @@ export type MintAsset = {
     token_supply: number;
     price_per_token: number;
     mint: PublicKey;
+    creator: PublicKey;
 };
 
 export type TokenMetrics = {
@@ -269,13 +274,14 @@ export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
     try {
         const result = await global.HELIUS_CONNECTION.rpc.getAsset({ id: mint.toString() });
 
-        if (result.token_info && result.content) {
+        if (result.token_info && result.content && result.creators) {
             return {
                 token_name: result.content.metadata.name,
                 token_symbol: result.content.metadata.symbol,
                 token_decimals: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
                 token_supply: result.token_info.supply || 10 ** 16,
                 price_per_token: result.token_info.price_info?.price_per_token || 0.0,
+                creator: new PublicKey(result.creators[0].address) || null,
                 mint: mint
             };
         }
@@ -378,6 +384,7 @@ async function send_protected_tx(
     tip: number,
     alts?: AddressLookupTableAccount[]
 ): Promise<String> {
+    if (tip < JITO_MIN_TIP) throw new Error(`Tip is too low, minimum is ${JITO_MIN_TIP} `);
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
@@ -413,6 +420,7 @@ export async function send_bundle(
     priority?: PriorityLevel,
     alts?: AddressLookupTableAccount[]
 ): Promise<String> {
+    if (tip < JITO_MIN_TIP) throw new Error(`Tip is too low, minimum is ${JITO_MIN_TIP} `);
     instructions = instructions.filter(Boolean);
     if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
         throw new Error(`Bundle size exceeded or size is 0.`);
@@ -456,13 +464,6 @@ export async function send_bundle(
             );
         }
         const versioned_tx = create_versioned_tx(signers[i], instructions[i], ctx, alts);
-        // simulate the transaction
-        const simulation = await global.CONNECTION.simulateTransaction(versioned_tx, {
-            commitment: COMMITMENT
-        });
-        if (simulation.value.err) {
-            throw new Error(`Simulation failed for transaction ${i}: ${JSON.stringify(simulation.value, null, 2)}`);
-        }
         if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
         serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }

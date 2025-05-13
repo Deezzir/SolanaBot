@@ -75,7 +75,7 @@ export async function execute_fast(
             continue;
         }
 
-        common.log('\Funding the wallets...');
+        common.log('\nFunding the wallets...');
         try {
             await fund_bundles(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
         } catch (error) {
@@ -83,7 +83,7 @@ export async function execute_fast(
             continue;
         }
 
-        common.log(`Trading the tokens...`);
+        common.log(`\nTrading the tokens...`);
         await buy_sell_bundles(keypairs_with_amounts, trader, mint_meta!, volume_config.bundle_tip, lta);
 
         common.log('\nCollecting the funds from the wallets...');

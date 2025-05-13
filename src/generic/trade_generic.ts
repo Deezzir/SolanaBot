@@ -238,9 +238,18 @@ export class Trader {
         _meta_cid: string,
         _sol_amount: number = 0,
         _mint?: Keypair,
+        _traders?: [Signer, number][],
+        _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<[String, PublicKey]> {
         throw new Error('Token creation is not supported by Generic program');
+    }
+
+    public static update_mint_meta_reserves(
+        mint_meta: GenericMintMeta,
+        _amount: number | TokenAmount
+    ): GenericMintMeta {
+        return mint_meta;
     }
 
     public static async update_mint_meta(
