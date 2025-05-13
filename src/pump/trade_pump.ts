@@ -768,7 +768,7 @@ export class Trader {
 
     static async get_amm_state(amm: PublicKey): Promise<AMMState> {
         const info = await global.CONNECTION.getAccountInfo(amm);
-        if (!info || !info.data) throw new Error('Unexpected curve state');
+        if (!info || !info.data) throw new Error('Unexpected AMM state');
 
         const header = common.read_bytes(info.data, 0, PUMP_AMM_STATE_HEADER.byteLength);
         if (header.compare(PUMP_AMM_STATE_HEADER) !== 0) throw new Error('Unexpected amm state IDL signature');

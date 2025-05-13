@@ -4,8 +4,8 @@
 - Add Bump bot
 - Finish Moonshot (without dep)
 
-- Cache for blockhash and priority functions(optimeze)
-- Add more dexes (Meteora, Orca, etc)
+- Cache for blockhash and priority functions(optimize)
+- Add more dexes (Orca, etc)
 
 - Rework snipe logic
 - Add sell by percent to start/snipe command
