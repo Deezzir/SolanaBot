@@ -49,6 +49,7 @@ export async function bundle_buy(
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
 }
@@ -117,6 +118,7 @@ export async function bundle_sell(
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
 }

@@ -23,10 +23,10 @@ class MoonshotMintMeta implements trade.IMintMeta {
         name: string;
         symbol: string;
     } = {
-            address: '',
-            name: '',
-            symbol: ''
-        };
+        address: '',
+        name: '',
+        symbol: ''
+    };
     priceNative: string = '';
     priceUsd: string = '';
     quoteToken: {
@@ -34,21 +34,21 @@ class MoonshotMintMeta implements trade.IMintMeta {
         name: string;
         symbol: string;
     } = {
-            address: '',
-            name: '',
-            symbol: ''
-        };
+        address: '',
+        name: '',
+        symbol: ''
+    };
     profile: {
         icon: string;
         banner: string;
         links: string[];
         description: string;
     } = {
-            icon: '',
-            banner: '',
-            links: [],
-            description: ''
-        };
+        icon: '',
+        banner: '',
+        links: [],
+        description: ''
+    };
     fdv: number = 0;
     marketCap: number = 0;
     createdAt: number = Date.now();
@@ -59,12 +59,12 @@ class MoonshotMintMeta implements trade.IMintMeta {
         curvePosition: string;
         marketcapThreshold: string;
     } = {
-            progress: 0,
-            creator: 0,
-            curveType: '',
-            curvePosition: '',
-            marketcapThreshold: ''
-        };
+        progress: 0,
+        creator: 0,
+        curveType: '',
+        curvePosition: '',
+        marketcapThreshold: ''
+    };
     fee: number = TRADE_RAYDIUM_SWAP_TAX;
 
     constructor(data: Partial<MoonshotMintMeta> = {}) {

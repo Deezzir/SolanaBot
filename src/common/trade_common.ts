@@ -164,7 +164,7 @@ export async function retry_get_tx(
                 commitment: COMMITMENT
             });
             if (transaction) return transaction;
-        } catch (error) { }
+        } catch (error) {}
         retries--;
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
