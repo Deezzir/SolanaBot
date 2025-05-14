@@ -42,7 +42,7 @@ import {
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
-import { SmartTransactionOptions } from 'helius-sdk';
+import { SendSmartTransactionOptions } from 'helius-sdk';
 
 export interface IMintMeta {
     readonly token_name: string;
@@ -544,7 +544,7 @@ async function send_smart_tx(
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
-    const options: SmartTransactionOptions = {
+    const options: SendSmartTransactionOptions = {
         skipPreflight: true,
         preflightCommitment: COMMITMENT,
         maxRetries: TRADE_TX_RETRIES

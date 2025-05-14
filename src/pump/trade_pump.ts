@@ -118,6 +118,7 @@ export class PumpMintMeta implements trade.IMintMeta {
 }
 
 const PUMP_AMM_STATE_SIZE = 0xd3;
+// const PUMP_AMM_STATE_SIZE_V2 = 0x12c;
 const PUMP_AMM_STATE_OFFSETS = {
     POOL_BUMP: 0x08,
     INDEX: 0x09,
@@ -130,7 +131,6 @@ const PUMP_AMM_STATE_OFFSETS = {
     LP_SUPPLY: 0xcb,
     COIN_CREATOR: 0xd3
 };
-
 type PumpAmmState = {
     quote_mint: PublicKey;
     base_vault: PublicKey;
@@ -140,7 +140,8 @@ type PumpAmmState = {
     creator: PublicKey;
 };
 
-const PUMP_STATE_SIZE = 0x51;
+// const PUMP_STATE_SIZE_V1 = 0x100;
+// const PUMP_STATE_SIZE_V2 = 0x96;
 const PUMP_STATE_OFFSETS = {
     VIRTUAL_TOKEN_RESERVES: 0x08,
     VIRTUAL_SOL_RESERVES: 0x10,
@@ -150,7 +151,6 @@ const PUMP_STATE_OFFSETS = {
     COMPLETE: 0x30,
     COIN_CREATOR: 0x31
 };
-
 type PumpState = {
     virtual_token_reserves: bigint;
     virtual_sol_reserves: bigint;
@@ -456,6 +456,7 @@ export class Trader {
             const hasPool = ray_amm || pump_amm;
             if (!hasPool && !mint_meta.complete) {
                 const curve_state = await this.get_state(new PublicKey(mint_meta.base_vault));
+                const [creator_vault, creator_vault_ata] = this.calc_creator_vault(curve_state.creator);
                 const metrics = this.get_token_metrics(curve_state);
                 return new PumpMintMeta({
                     ...mint_meta,
@@ -464,7 +465,10 @@ export class Trader {
                     total_supply: curve_state.supply,
                     token_reserves: curve_state.virtual_token_reserves,
                     sol_reserves: curve_state.virtual_sol_reserves,
-                    complete: curve_state.complete
+                    complete: curve_state.complete,
+                    fee: PUMP_FEE_PERCENTAGE,
+                    creator_vault: creator_vault.toString(),
+                    creator_vault_ata: creator_vault_ata.toString()
                 });
             }
 
@@ -568,9 +572,8 @@ export class Trader {
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.creator_vault) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
+        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.creator_vault)
+            throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
@@ -611,10 +614,9 @@ export class Trader {
         mint_meta: Partial<PumpMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.creator_vault) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
-        if (token_amount.amount === null) throw new Error(`Failed to get the token amount.`);
+        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.creator_vault)
+            throw new Error(`Incomplete mint meta data for sell instructions.`);
+        if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
         const mint = new PublicKey(mint_meta.mint);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
@@ -625,8 +627,7 @@ export class Trader {
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(seller.publicKey, mint);
 
-        let instructions: TransactionInstruction[] = [];
-        instructions.push(
+        return [
             new TransactionInstruction({
                 keys: [
                     { pubkey: PUMP_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
@@ -645,9 +646,7 @@ export class Trader {
                 programId: PUMP_PROGRAM_ID,
                 data: instruction_data
             })
-        );
-
-        return instructions;
+        ];
     }
 
     private static create_data(
@@ -771,8 +770,7 @@ export class Trader {
 
     private static async get_state(bond_curve_addr: PublicKey): Promise<PumpState> {
         const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
-        if (!info || !info.data || info.data.byteLength < PUMP_STATE_HEADER.byteLength + PUMP_STATE_SIZE)
-            throw new Error('Unexpected curve state');
+        if (!info || !info.data) throw new Error('Unexpected curve state');
 
         const header = common.read_bytes(info.data, 0, PUMP_STATE_HEADER.byteLength);
         if (header.compare(PUMP_STATE_HEADER) !== 0) throw new Error('Unexpected curve state IDL signature');
@@ -815,7 +813,7 @@ export class Trader {
 
     static async get_amm_state(amm: PublicKey): Promise<PumpAmmState> {
         const info = await global.CONNECTION.getAccountInfo(amm);
-        if (!info || !info.data) throw new Error('Unexpected amm state');
+        if (!info || !info.data) throw new Error('Unexpected curve state');
 
         const header = common.read_bytes(info.data, 0, PUMP_AMM_STATE_HEADER.byteLength);
         if (header.compare(PUMP_AMM_STATE_HEADER) !== 0) throw new Error('Unexpected amm state IDL signature');
@@ -858,9 +856,8 @@ export class Trader {
             !mint_meta.quote_vault ||
             !mint_meta.creator_vault ||
             !mint_meta.creator_vault_ata
-        ) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
+        )
+            throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
         const amm = new PublicKey(mint_meta.pumpswap_pool);
@@ -926,10 +923,9 @@ export class Trader {
             !mint_meta.pumpswap_pool ||
             !mint_meta.creator_vault ||
             !mint_meta.creator_vault_ata
-        ) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
-        if (token_amount.amount === null) throw new Error(`Failed to get the token amount.`);
+        )
+            throw new Error(`Incomplete mint meta data for sell instructions.`);
+        if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
         const mint = new PublicKey(mint_meta.mint);
         const amm = new PublicKey(mint_meta.pumpswap_pool);
@@ -944,11 +940,8 @@ export class Trader {
         const token_ata = trade.calc_ata(seller.publicKey, mint);
         const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);
 
-        let instructions: TransactionInstruction[] = [];
-        instructions.push(
-            createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT)
-        );
-        instructions.push(
+        return [
+            createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT),
             new TransactionInstruction({
                 keys: [
                     { pubkey: amm, isSigner: false, isWritable: false },
@@ -973,11 +966,9 @@ export class Trader {
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data
-            })
-        );
-        instructions.push(createCloseAccountInstruction(wsol_ata, seller.publicKey, seller.publicKey));
-
-        return instructions;
+            }),
+            createCloseAccountInstruction(wsol_ata, seller.publicKey, seller.publicKey)
+        ];
     }
 
     public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
@@ -1017,31 +1008,27 @@ export class Trader {
         count = Math.min(count, limit);
         const offset = Array.from({ length: 20 }, (_, i) => i * limit).sort(() => 0.5 - Math.random())[0];
 
-        return fetch(
-            `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
-        )
-            .then((response) => response.json())
-            .then((data: any) => {
-                if (!data || data.statusCode !== undefined) return [];
-                return common.pick_random(data, count).map((item: any) => {
-                    const mapped = {
-                        ...item,
-                        base_vault: item.bonding_curve,
-                        quote_vault: item.associated_bonding_curve,
-                        sol_reserves: BigInt(item.virtual_sol_reserves),
-                        token_reserves: BigInt(item.virtual_token_reserves)
-                    };
-                    return new PumpMintMeta(mapped);
-                });
-            })
-            .catch((err) => {
-                common.error(common.red(`Failed fetching the mints: ${err}`));
-                return [];
-            });
+        try {
+            const response = await fetch(
+                `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
+            );
+            const data = await response.json();
+            if (!data || data.statusCode !== undefined) return [];
+
+            const promises = common
+                .pick_random(data, count)
+                .map((item: any) => this.get_mint_meta(new PublicKey(item.mint)));
+
+            const mints = await Promise.all(promises);
+            return mints.filter((mint) => mint !== undefined);
+        } catch (err) {
+            common.error(common.red(`Failed fetching the mints: ${err}`));
+            return [];
+        }
     }
 
     private static graduated_mints_cache: PublicKey[] | null = null;
-    private static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
+    public static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
         if (count <= 0) return [];
         if (!this.graduated_mints_cache) {
             this.graduated_mints_cache = [];

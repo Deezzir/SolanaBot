@@ -49,6 +49,7 @@ export async function bundle_buy(
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
 }
@@ -117,6 +118,7 @@ export async function bundle_sell(
                 .catch((error) => common.error(common.red(`Bundle failed: ${error}`)))
         );
         await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
 }
@@ -132,17 +134,17 @@ export async function seq_buy(
     const transactions: Promise<void>[] = [];
 
     for (const entry of entries) {
-        const [wallet, buy_amount] = entry;
+        const [wallet, amount] = entry;
         const buyer = wallet.keypair;
         try {
             const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
-            if (balance < buy_amount) continue;
+            if (balance < amount) continue;
             common.log(
-                `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                `Buying ${amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
             transactions.push(
                 trader
-                    .buy_token(buy_amount, buyer, mint_meta, slippage, priority, protection_tip)
+                    .buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -152,6 +154,7 @@ export async function seq_buy(
                         )
                     )
             );
+            mint_meta = trader.update_mint_meta_reserves(mint_meta, amount);
             if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
@@ -193,6 +196,7 @@ export async function seq_sell(
                         )
                     )
             );
+            mint_meta = trader.update_mint_meta_reserves(mint_meta, token_amount_to_sell);
             if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
