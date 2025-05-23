@@ -35,8 +35,9 @@ export type IPFSMetadata = {
 
 export enum Program {
     Pump = 'pump',
-    Moonshot = 'moonshot',
-    Generic = 'generic'
+    Moonit = 'moonit',
+    Meteora = 'meteora',
+    Jupiter = 'jupiter'
 }
 
 export function bold(message: string): string {
@@ -315,6 +316,8 @@ export function read_biguint_le(buf: Buffer, offset: number, length: number): bi
             return BigInt(buf.readUint32LE(offset));
         case 8:
             return buf.readBigUint64LE(offset);
+        case 16:
+            return BigInt(buf.readBigUInt64LE(offset) + (buf.readBigUInt64LE(offset + 8) << BigInt(64)));
     }
     throw new Error(`unsupported data size (${length} bytes)`);
 }

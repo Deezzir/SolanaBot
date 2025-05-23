@@ -1,10 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import { COMMITMENT, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_PROGRAM_ID } from '../constants.js';
+import { COMMITMENT, METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import * as snipe from '../common/snipe_common.js';
 
-const WORKER_PATH = './dist/pump/worker_pump.js';
+const WORKER_PATH = './dist/meteora/worker_meteora.js';
 
 export class Runner extends snipe.SniperBase {
     private _subscription_id: number | undefined;
@@ -18,7 +18,7 @@ export class Runner extends snipe.SniperBase {
         try {
             if (data.length < 18) return null;
 
-            const prefix = Uint8Array.from([0x18, 0x1e, 0xc8, 0x28, 0x05, 0x1c, 0x07, 0x77]);
+            const prefix = Uint8Array.from([0x8c, 0x55, 0xd7, 0xb0, 0x66, 0x36, 0x68, 0x4f]);
             const data_prefix = Buffer.from(data.slice(0, 8));
             if (!data_prefix.equals(prefix)) return null;
 
@@ -56,10 +56,10 @@ export class Runner extends snipe.SniperBase {
             common.log('Waiting for the new token drop using Solana logs...');
 
             this._subscription_id = global.CONNECTION.onLogs(
-                PUMP_MINT_AUTHORITY_ACCOUNT,
+                METEORA_DBC_POOL_AUTHORITY,
                 async ({ err, logs, signature }) => {
                     if (err) return;
-                    if (logs && logs.includes('Program log: Instruction: Create')) {
+                    if (logs && logs.includes('Program log: Instruction: InitializeVirtualPoolWithSplToken')) {
                         try {
                             const tx = await trade.retry_get_tx(signature);
                             if (!tx || !tx.meta || !tx.transaction.message) return;
@@ -71,7 +71,7 @@ export class Runner extends snipe.SniperBase {
                                 const program_id = address_lookup.get(instr.programIdIndex);
                                 const mint = address_lookup.get(1);
 
-                                if (!program_id || !program_id.equals(PUMP_PROGRAM_ID)) continue;
+                                if (!program_id || !program_id.equals(METEORA_DBC_PROGRAM_ID)) continue;
                                 const result = this.decode_create_instr(instr.data);
                                 if (!result) continue;
 

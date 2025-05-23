@@ -266,11 +266,11 @@ export class Trader {
                 token_symbol: 'Unknown',
                 token_supply: 10 ** 16,
                 price_per_token: 0.0,
-                token_decimals: 6
+                token_decimal: 6
             };
         });
 
-        const usd_market_cap = meta.price_per_token * (meta.token_supply / 10 ** meta.token_decimals);
+        const usd_market_cap = meta.price_per_token * (meta.token_supply / 10 ** meta.token_decimal);
         const market_cap = sol_price ? usd_market_cap / sol_price : 0;
         return new GenericMintMeta({
             mint,

@@ -45,7 +45,6 @@ import {
     PriorityLevel,
     PUMP_CREATE_DISCRIMINATOR,
     PUMP_IPFS_API_URL,
-    TRADE_RAYDIUM_SWAP_TAX,
     PUMP_AMM_STATE_HEADER,
     PUMP_LTA_ACCOUNT,
     TRADE_MAX_SLIPPAGE,
@@ -56,11 +55,6 @@ import {
     TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
     TRADE_MAX_WALLETS_PER_CREATE_TX
 } from '../constants.js';
-import {
-    get_raydium_amm_from_mint,
-    get_raydium_token_metrics,
-    swap_raydium_instructions
-} from '../common/trade_dex.js';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import base58 from 'bs58';
@@ -73,8 +67,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     quote_vault!: string;
     creator_vault!: string;
     creator_vault_ata!: string;
-    raydium_pool: string | null = null;
-    pumpswap_pool: string | null = null;
+    amm_pool: string | null = null;
     sol_reserves: bigint = BigInt(0);
     token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
@@ -104,7 +97,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 
     public get migrated(): boolean {
-        if (this.raydium_pool || this.pumpswap_pool) return true;
+        if (this.amm_pool) return true;
         return false;
     }
 
@@ -185,15 +178,8 @@ export class Trader {
         mint_meta: PumpMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        const pump_amm = this.get_amm(mint_meta);
-        const ray_amm = this.get_raydium_amm(mint_meta);
-        if (ray_amm) {
-            const sol_token_amount = trade.get_sol_token_amount(sol_amount);
-            const mint = new PublicKey(mint_meta.mint);
-            return swap_raydium_instructions(sol_token_amount, buyer, ray_amm, mint, slippage);
-        }
         const lta = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
-        if (pump_amm) {
+        if (this.get_amm(mint_meta)) {
             const instructions = await this.get_buy_amm_instructions(sol_amount, buyer, mint_meta, slippage);
             return [instructions, lta];
         }
@@ -219,13 +205,8 @@ export class Trader {
         mint_meta: PumpMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        const ray_amm = this.get_raydium_amm(mint_meta);
-        const pump_amm = this.get_amm(mint_meta);
-        if (ray_amm) {
-            return swap_raydium_instructions(token_amount, seller, ray_amm, SOL_MINT, slippage);
-        }
         const lta = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
-        if (pump_amm) {
+        if (this.get_amm(mint_meta)) {
             const instructions = await this.get_sell_amm_instructions(token_amount, seller, mint_meta, slippage);
             return [instructions, lta];
         }
@@ -241,7 +222,7 @@ export class Trader {
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
         const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(mint_meta.fee * 10000))) / 10000n;
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
+        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
         let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
@@ -260,7 +241,6 @@ export class Trader {
         try {
             let mint_meta = await this.default_mint_meta(mint, sol_price);
             mint_meta = await this.update_mint_meta(mint_meta, sol_price);
-
             return mint_meta;
         } catch (error) {
             return undefined;
@@ -354,8 +334,7 @@ export class Trader {
             mint: mint.toString(),
             symbol: meta.token_symbol,
             name: meta.token_name,
-            raydium_pool: null,
-            pumpswap_pool: null,
+            amm_pool: null,
             base_vault: bonding.toString(),
             quote_vault: bonding_ata.toString(),
             market_cap: 27.95,
@@ -446,15 +425,10 @@ export class Trader {
 
     public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number = 0): Promise<PumpMintMeta> {
         try {
-            const mint = new PublicKey(mint_meta.mint);
-            const [ray_amm, pump_amm] = await Promise.all([
-                get_raydium_amm_from_mint(mint),
-                this.get_amm_from_mint(mint)
-            ]);
-            mint_meta.raydium_pool = ray_amm?.toString() ?? null;
-            mint_meta.pumpswap_pool = pump_amm?.toString() ?? null;
-            const hasPool = ray_amm || pump_amm;
-            if (!hasPool && !mint_meta.complete) {
+            const pump_amm = await this.get_amm_from_mint(new PublicKey(mint_meta.mint));
+            mint_meta.amm_pool = pump_amm?.toString() ?? null;
+
+            if (!pump_amm && !mint_meta.complete) {
                 const curve_state = await this.get_state(new PublicKey(mint_meta.base_vault));
                 const [creator_vault, creator_vault_ata] = this.calc_creator_vault(curve_state.creator);
                 const metrics = this.get_token_metrics(curve_state);
@@ -471,7 +445,6 @@ export class Trader {
                     creator_vault_ata: creator_vault_ata.toString()
                 });
             }
-
             if (pump_amm) {
                 const amm_state = await this.get_amm_state(pump_amm);
                 const metrics = await this.get_amm_token_metrics(amm_state);
@@ -491,34 +464,17 @@ export class Trader {
                     creator_vault_ata: creator_vault_ata.toString()
                 });
             }
-
-            if (ray_amm) {
-                const metrics = await get_raydium_token_metrics(ray_amm);
-                return new PumpMintMeta({
-                    ...mint_meta,
-                    usd_market_cap: metrics.mcap_sol * sol_price,
-                    market_cap: metrics.mcap_sol,
-                    total_supply: metrics.supply,
-                    complete: true,
-                    fee: TRADE_RAYDIUM_SWAP_TAX
-                });
-            }
-
             return mint_meta;
         } catch (error) {
             throw new Error(`Failed to update mint meta reserves: ${error}`);
         }
     }
 
-    private static get_raydium_amm(mint_meta: PumpMintMeta): PublicKey | undefined {
-        if (mint_meta.raydium_pool !== null) return new PublicKey(mint_meta.raydium_pool);
-    }
-
     private static get_amm(mint_meta: PumpMintMeta): PublicKey | undefined {
-        if (mint_meta.pumpswap_pool !== null) return new PublicKey(mint_meta.pumpswap_pool);
+        if (mint_meta.amm_pool !== null) return new PublicKey(mint_meta.amm_pool);
     }
 
-    private static get_token_amount_raw(sol_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
+    private static calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
         if (sol_amount_raw <= 0) return 0n;
 
@@ -529,7 +485,7 @@ export class Trader {
         return token.token_reserves - new_token_reserves;
     }
 
-    private static get_sol_amount_raw(token_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
+    private static calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
         if (token_amount_raw <= 0) return 0n;
 
@@ -581,7 +537,7 @@ export class Trader {
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
 
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw, mint_meta);
+        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
 
@@ -623,7 +579,7 @@ export class Trader {
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
-        const sol_amount_raw = this.get_sol_amount_raw(token_amount_raw, mint_meta);
+        const sol_amount_raw = this.calc_sol_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(seller.publicKey, mint);
 
@@ -851,7 +807,7 @@ export class Trader {
     ): Promise<TransactionInstruction[]> {
         if (
             !mint_meta.mint ||
-            !mint_meta.pumpswap_pool ||
+            !mint_meta.amm_pool ||
             !mint_meta.base_vault ||
             !mint_meta.quote_vault ||
             !mint_meta.creator_vault ||
@@ -860,14 +816,14 @@ export class Trader {
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
-        const amm = new PublicKey(mint_meta.pumpswap_pool);
+        const amm = new PublicKey(mint_meta.amm_pool);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
         const creator_vault_ata = new PublicKey(mint_meta.creator_vault_ata);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
 
-        const token_amount_raw = this.get_token_amount_raw(sol_amount_raw, mint_meta);
+        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
@@ -920,7 +876,7 @@ export class Trader {
             !mint_meta.mint ||
             !mint_meta.base_vault ||
             !mint_meta.quote_vault ||
-            !mint_meta.pumpswap_pool ||
+            !mint_meta.amm_pool ||
             !mint_meta.creator_vault ||
             !mint_meta.creator_vault_ata
         )
@@ -928,14 +884,14 @@ export class Trader {
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
         const mint = new PublicKey(mint_meta.mint);
-        const amm = new PublicKey(mint_meta.pumpswap_pool);
+        const amm = new PublicKey(mint_meta.amm_pool);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
         const creator_vault_ata = new PublicKey(mint_meta.creator_vault_ata);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
 
-        const sol_amount_raw = this.get_sol_amount_raw(token_amount_raw, mint_meta);
+        const sol_amount_raw = this.calc_sol_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(seller.publicKey, mint);
         const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);

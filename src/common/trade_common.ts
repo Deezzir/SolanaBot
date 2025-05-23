@@ -138,11 +138,11 @@ type PriorityOptions = {
 export type MintAsset = {
     token_name: string;
     token_symbol: string;
-    token_decimals: number;
+    token_decimal: number;
     token_supply: number;
     price_per_token: number;
     mint: PublicKey;
-    creator: PublicKey;
+    creator?: PublicKey;
 };
 
 export type TokenMetrics = {
@@ -156,12 +156,15 @@ export async function retry_get_tx(
     retries: number = TRADE_RETRIES
 ): Promise<VersionedTransactionResponse | null> {
     while (retries > 0) {
-        const transaction = await global.CONNECTION.getTransaction(signature, {
-            maxSupportedTransactionVersion: 0,
-            commitment: COMMITMENT
-        });
-        if (transaction) return transaction;
+        try {
+            const transaction = await global.CONNECTION.getTransaction(signature, {
+                maxSupportedTransactionVersion: 0,
+                commitment: COMMITMENT
+            });
+            if (transaction) return transaction;
+        } catch (error) { }
         retries--;
+        await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
     return null;
 }
@@ -273,15 +276,15 @@ export async function get_token_balance(
 export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
     try {
         const result = await global.HELIUS_CONNECTION.rpc.getAsset({ id: mint.toString() });
-
         if (result.token_info && result.content && result.creators) {
+            const creator = result.creators.at(0);
             return {
                 token_name: result.content.metadata.name,
                 token_symbol: result.content.metadata.symbol,
-                token_decimals: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
+                token_decimal: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
                 token_supply: result.token_info.supply || 10 ** 16,
                 price_per_token: result.token_info.price_info?.price_per_token || 0.0,
-                creator: new PublicKey(result.creators[0].address) || null,
+                creator: creator ? new PublicKey(creator.address) : undefined,
                 mint: mint
             };
         }

@@ -1,7 +1,7 @@
 import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount, Signer } from '@solana/web3.js';
 import { PumpTrader, PumpRunner } from './pump/pump.js';
-import { MoonTrader, MoonRunner } from './moon/moon.js';
-import { GenericTrader } from './generic/generic.js';
+import { MoonitTrader, MoonitRunner } from './moonit/moonit.js';
+import { JupiterTrader } from './jupiter/jupiter.js';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import bs58 from 'bs58';
 import {
@@ -22,17 +22,21 @@ import * as volume from './subcommands/volume.js';
 import * as token_drop from './subcommands/token_drop.js';
 import * as pnl from './subcommands/pnl.js';
 import * as mass_trade from './subcommands/mass_trade.js';
+import { MeteoraRunner, MeteoraTrader } from './meteora/meteora.js';
 
 function get_trader(program: common.Program): trade.IProgramTrader {
     switch (program) {
         case common.Program.Pump: {
             return PumpTrader;
         }
-        case common.Program.Moonshot: {
-            return MoonTrader;
+        case common.Program.Moonit: {
+            return MoonitTrader;
         }
-        case common.Program.Generic: {
-            return GenericTrader;
+        case common.Program.Meteora: {
+            return MeteoraTrader;
+        }
+        case common.Program.Jupiter: {
+            return JupiterTrader;
         }
         default: {
             throw new Error(`Invalid program received: ${program}`);
@@ -46,10 +50,13 @@ function get_sniper(program: common.Program): snipe_common.ISniper {
         case common.Program.Pump: {
             return new PumpRunner(trader);
         }
-        case common.Program.Moonshot: {
-            return new MoonRunner(trader);
+        case common.Program.Moonit: {
+            return new MoonitRunner(trader);
         }
-        case common.Program.Generic: {
+        case common.Program.Meteora: {
+            return new MeteoraRunner(trader);
+        }
+        case common.Program.Jupiter: {
             throw new Error('Generic program is not supported for sniping.');
         }
         default: {
@@ -276,7 +283,7 @@ export async function transfer_token(
         throw new Error(`Sender balance is not enough to transfer ${amount} $${mint_meta.token_symbol}`);
 
     trade
-        .send_tokens(trade.get_token_amount(amount, mint_meta.token_decimals), mint, sender, receiver)
+        .send_tokens(trade.get_token_amount(amount, mint_meta.token_decimal), mint, sender, receiver)
         .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
         .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
 }
@@ -364,10 +371,11 @@ export async function buy_token_once(
 ): Promise<void> {
     slippage = slippage || COMMANDS_BUY_SLIPPAGE;
     const trader = get_trader(program);
-    const mint_meta = await trader.get_mint_meta(mint);
+    const mint_meta = await trader.get_mint_meta(mint, 175);
     if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
+    console.log(mint_meta);
 
     const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
@@ -673,15 +681,13 @@ export async function distribute_token(
         );
         amounts = common
             .random_amounts(total_amount, wallets.length)
-            .map((amount) => trade.get_token_amount(amount, mint_meta.token_decimals));
+            .map((amount) => trade.get_token_amount(amount, mint_meta.token_decimal));
     } else {
         const amount = total_amount / wallets.length;
         common.log(
             common.yellow(`Distributing ${amount} $${mint_meta.token_symbol} to every ${wallets.length} wallet...`)
         );
-        amounts = Array.from({ length: wallets.length }, () =>
-            trade.get_token_amount(amount, mint_meta.token_decimals)
-        );
+        amounts = Array.from({ length: wallets.length }, () => trade.get_token_amount(amount, mint_meta.token_decimal));
     }
 
     if (depth && bundle_tip) {
@@ -960,11 +966,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         }
