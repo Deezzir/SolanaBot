@@ -595,7 +595,6 @@ export class Trader {
         const base_reserve = await trade.get_vault_balance(base_vault_lp);
         const trade_fee_numerator = common.read_biguint_le(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_NUMERATOR, 8);
         const trade_fee_denominator = common.read_biguint_le(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_DENOMINATOR, 8);
-        console.log(trade_fee_numerator, trade_fee_denominator);
         const trade_fee = Number(trade_fee_numerator) / Number(trade_fee_denominator);
 
         return {
@@ -883,10 +882,6 @@ export class Trader {
             this.calc_token_amount_raw(sol_amount_raw, mint_meta),
             slippage
         );
-        console.log(this.calc_slippage_down(
-            this.calc_token_amount_raw(sol_amount_raw, mint_meta),
-            slippage
-        ));
 
         const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw);
         const token_ata = trade.calc_ata(buyer.publicKey, mint);

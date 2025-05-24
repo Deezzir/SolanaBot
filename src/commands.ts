@@ -375,7 +375,6 @@ export async function buy_token_once(
     if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
-    console.log(mint_meta);
 
     const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));

@@ -221,8 +221,7 @@ export class Trader {
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
-        const sol_amount_raw_after_fee = (sol_amount_raw * (10000n - BigInt(mint_meta.fee * 10000))) / 10000n;
-        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw_after_fee, mint_meta);
+        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
         let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
