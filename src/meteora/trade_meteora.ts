@@ -123,8 +123,7 @@ const METEORA_DAMM_V1_STATE_OFFSETS = {
     A_PROTOCOL_TOKEN_FEE: 0xea,
     B_PROTOCOL_TOKEN_FEE: 0x10a,
     TRADE_FEE_NUMERATOR: 0x14a,
-    TRADE_FEE_DENOMINATOR: 0x152,
-
+    TRADE_FEE_DENOMINATOR: 0x152
 };
 const METEORA_DAMM_V2_STATE_OFFSETS = {
     BASE_MINT: 0xa0
@@ -368,16 +367,16 @@ export class Trader {
     }
 
     public static create_token(
+        _mint: Keypair,
         _creator: Signer,
         _token_name: string,
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount?: number,
-        _mint?: Keypair,
         _traders?: [Signer, number][],
         _bundle_tip?: number,
         _priority?: PriorityLevel
-    ): Promise<[String, PublicKey]> {
+    ): Promise<String> {
         throw new Error('Not implemented');
     }
 
@@ -445,11 +444,11 @@ export class Trader {
                         base_vault_authority: state.base_vault_authority.toString(),
                         quote_vault_authority: state.quote_vault_authority.toString(),
                         base_vault_lp_mint: state.base_vault_lp_mint.toString(),
-                        quote_vault_lp_mint: state.quote_vault_lp_mint.toString(),
+                        quote_vault_lp_mint: state.quote_vault_lp_mint.toString()
                     },
                     usd_market_cap: metrics.mcap_sol * sol_price,
                     market_cap: metrics.mcap_sol,
-                    fee: state.trade_fee,
+                    fee: state.trade_fee
                 });
             } else if (damm?.version === MeteoraDAMMVersion.V2) {
             }
@@ -500,7 +499,7 @@ export class Trader {
 
     private static async get_token_metrics(state: MeteoraDAMMV1State): Promise<trade.TokenMetrics> {
         const token = await trade.get_token_supply(state.base_vault_lp);
-        const price_sol = Number(state.quote_reserve) / Number(state.base_reserve)
+        const price_sol = Number(state.quote_reserve) / Number(state.base_reserve);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
         return { price_sol, mcap_sol, supply: token.supply };
     }
@@ -591,10 +590,18 @@ export class Trader {
         const quote_vault_lp = new PublicKey(
             common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.B_VAULT_LP, 32)
         );
-        const quote_reserve = await trade.get_vault_balance(quote_vault_lp)
+        const quote_reserve = await trade.get_vault_balance(quote_vault_lp);
         const base_reserve = await trade.get_vault_balance(base_vault_lp);
-        const trade_fee_numerator = common.read_biguint_le(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_NUMERATOR, 8);
-        const trade_fee_denominator = common.read_biguint_le(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_DENOMINATOR, 8);
+        const trade_fee_numerator = common.read_biguint_le(
+            pool_info.account.data,
+            METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_NUMERATOR,
+            8
+        );
+        const trade_fee_denominator = common.read_biguint_le(
+            pool_info.account.data,
+            METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_DENOMINATOR,
+            8
+        );
         const trade_fee = Number(trade_fee_numerator) / Number(trade_fee_denominator);
 
         return {

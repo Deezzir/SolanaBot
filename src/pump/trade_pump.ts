@@ -258,22 +258,21 @@ export class Trader {
     }
 
     public static async create_token(
+        mint: Keypair,
         creator: Signer,
         token_name: string,
         token_symbol: string,
         meta_cid: string,
         sol_amount: number = 0.0,
-        mint?: Keypair,
         traders?: [Signer, number][],
         bundle_tip?: number,
         priority?: PriorityLevel
-    ): Promise<[String, PublicKey]> {
+    ): Promise<String> {
         if ((traders && !bundle_tip) || (!traders && bundle_tip))
             throw new Error(`Invalid parameters: traders and bundle_tip must be set together`);
         if (traders && (traders.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE || traders.length < 1))
             throw new Error(`Invalid parameters: traders must be less than ${TRADE_MAX_WALLETS_PER_CREATE_BUNDLE}`);
 
-        if (!mint) mint = Keypair.generate();
         let mint_meta = await this.default_mint_meta(mint.publicKey);
         mint_meta.creator_vault = this.calc_creator_vault(creator.publicKey)[0].toString();
 
@@ -290,11 +289,13 @@ export class Trader {
         }
 
         const ltas = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
-        if (!traders) {
-            const sig = await trade.send_tx(create_instructions, [creator, mint], priority, undefined, ltas);
-            return [sig, mint.publicKey];
-        }
+        if (!traders) return await trade.retry_send_tx(create_instructions, [creator, mint], priority, undefined, ltas);
 
+        const generated_lta = await trade.generate_trade_lta(
+            creator,
+            traders.map((tr) => Keypair.fromSecretKey(tr[0].secretKey)),
+            mint.publicKey
+        );
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
         const txs = common.chunks(traders, TRADE_MAX_WALLETS_PER_CREATE_TX);
         const buy_instructions: TransactionInstruction[][] = [];
@@ -309,14 +310,13 @@ export class Trader {
             buy_instructions.push(instructions);
             bundle_signers.push(tx.map((trader) => trader[0]));
         }
-        const sig = await trade.send_bundle(
+        return await trade.retry_send_bundle(
             [create_instructions, ...buy_instructions],
             [[creator, mint], ...bundle_signers],
             bundle_tip!,
             priority,
-            ltas
+            [generated_lta, ...ltas]
         );
-        return [sig, mint.publicKey];
     }
 
     public static async default_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta> {

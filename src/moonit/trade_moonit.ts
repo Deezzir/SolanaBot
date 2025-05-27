@@ -232,16 +232,16 @@ export class Trader {
     }
 
     public static async create_token(
+        _mint: Keypair,
         _creator: Signer,
         _token_name: string,
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount: number = 0,
-        _mint?: Keypair,
         _traders?: [Signer, number][],
         _bundle_tip?: number,
         _priority?: PriorityLevel
-    ): Promise<[String, PublicKey]> {
+    ): Promise<String> {
         throw new Error('Not implemented');
     }
 

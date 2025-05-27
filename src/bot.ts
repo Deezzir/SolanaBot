@@ -306,6 +306,41 @@ async function main() {
         .action(async () => await commands.clean(wallets));
 
     program
+        .command('token-burn')
+        .alias('tburn')
+        .description('Burn the tokens by mint from a wallet')
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<burner_index>', 'Index of the burner wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const burner_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!burner_wallet) throw new InvalidArgumentError('Invalid index.');
+            return burner_wallet.keypair;
+        })
+        .option('-a, --amount <number>', 'Amount of tokens to burn', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0) throw new InvalidOptionArgumentError('Invalid amount. Must be greater than 0.0');
+            return parsed_value;
+        })
+        .addOption(get_percent_option())
+        .action(async (mint, burner, options) => {
+            const { amount, percent } = options;
+            if (amount && percent) {
+                throw new InvalidOptionArgumentError(
+                    'Cannot use both --amount and --percent options at the same time.'
+                );
+            }
+            if (!amount && !percent) {
+                throw new InvalidOptionArgumentError('You must specify either --amount or --percent option.');
+            }
+            await commands.burn_token(mint, burner, amount, percent);
+        });
+
+    program
         .command('collect')
         .alias('c')
         .description('Collect all the SOL from the wallets to the provided address')

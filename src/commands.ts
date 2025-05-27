@@ -65,6 +65,38 @@ function get_sniper(program: common.Program): snipe_common.ISniper {
     }
 }
 
+export async function burn_token(mint: PublicKey, burner: Signer, amount?: number, percent?: number): Promise<void> {
+    if (!amount && !percent) throw new Error('Either amount or percent should be provided.');
+    if (amount && percent) throw new Error('Only one of amount or percent should be provided.');
+    if (amount && amount <= 0) throw new Error('Amount should be greater than 0.');
+    if (percent && (percent <= 0 || percent > 1)) throw new Error('Percent should be between 0 and 1.');
+
+    const mint_meta = await trade.get_token_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found for the mint: ${mint.toString()}.`);
+
+    common.log(common.yellow(`Burning the token by the mint ${mint.toString()}...`));
+    common.log(
+        common.yellow(`Burning ${amount ? `${amount} tokens` : `${percent! * 100}% of $${mint_meta.token_symbol}`}...`)
+    );
+
+    const token_amount = await trade.get_token_balance(burner.publicKey, mint, COMMITMENT);
+    common.log(
+        common.bold(
+            `\nBurner address: ${burner.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
+        )
+    );
+    if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) throw new Error('No tokens to burn');
+
+    const amount_to_burn = amount
+        ? trade.get_token_amount(amount, mint_meta.token_decimal)
+        : trade.get_token_amount_by_percent(token_amount, percent!);
+
+    trade
+        .burn_token(amount_to_burn, burner, mint)
+        .then((signature) => common.log(common.green(`Transaction completed, signature: ${signature}`)))
+        .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)));
+}
+
 export async function clean(wallets: common.Wallet[]): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
 
@@ -130,24 +162,24 @@ export async function create_token(
         entries = wallets.map((w) => [w.keypair, common.uniform_random(min ?? 0, max ?? 0)]);
     }
 
-    common.log('');
-    if (mint) common.log(`Custom Mint address: ${mint.publicKey.toString()}`);
+    mint = mint || Keypair.generate();
+    common.log(common.yellow(`\nMint address: ${mint.publicKey.toString()}`));
     common.log(common.yellow(`Token Name: ${meta.name} | Symbol: $${meta.symbol}`));
     common.log(common.bold(`Token Meta: ${JSON.stringify(meta, null, 2)}`));
 
     try {
-        const [sig, mint_addr] = await trader.create_token(
+        const sig = await trader.create_token(
+            mint,
             dev.keypair,
             meta.name,
             meta.symbol,
             meta_cid,
             dev_buy,
-            mint,
             entries,
             bundle_tip
         );
         common.log(common.green(`\nToken created | Signature: ${sig}`));
-        common.log(common.green(`Mint address: ${mint_addr}`));
+        common.log(common.green(`Mint address: ${mint.publicKey.toBase58()}`));
     } catch (error) {
         throw new Error(`Failed to create token: ${error}`);
     }
@@ -171,15 +203,15 @@ export async function promote(
     const transactions = [];
 
     while (times > 0) {
+        const mint = Keypair.generate();
         transactions.push(
             trader
-                .create_token(dev, meta.name, meta.symbol, meta_cid)
+                .create_token(mint, dev, meta.name, meta.symbol, meta_cid)
                 .then(([sig, mint]) =>
                     common.log(common.green(`Signature: ${sig.toString().padEnd(88, ' ')} | Mint: ${mint}`))
                 )
                 .catch((error) => common.error(common.red(`Transaction failed: ${error.message}`)))
         );
-
         times--;
         await common.sleep(COMMANDS_INTERVAL_MS);
     }
@@ -965,11 +997,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                    `Errors: ${errors} | ` +
-                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                    `Min Time: ${min_time.toFixed(2)} ms | ` +
-                    `Max Time: ${max_time.toFixed(2)} ms | ` +
-                    `TPS: ${tps.toFixed(2)}`
+                        `Errors: ${errors} | ` +
+                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                        `Min Time: ${min_time.toFixed(2)} ms | ` +
+                        `Max Time: ${max_time.toFixed(2)} ms | ` +
+                        `TPS: ${tps.toFixed(2)}`
                 );
             }
         }

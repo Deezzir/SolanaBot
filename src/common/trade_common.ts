@@ -21,6 +21,7 @@ import {
     AccountLayout,
     TOKEN_PROGRAM_ID,
     createAssociatedTokenAccountIdempotentInstruction,
+    createBurnInstruction,
     createCloseAccountInstruction,
     createTransferInstruction,
     getAssociatedTokenAddressSync,
@@ -38,7 +39,8 @@ import {
     JITO_BUNDLE_SIZE,
     TRADE_RETRIES,
     JITO_BUNDLE_INTERVAL_MS,
-    JITO_MIN_TIP
+    JITO_MIN_TIP,
+    SOL_MINT
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -108,16 +110,16 @@ export interface IProgramTrader {
         protection_tip?: number
     ): Promise<[String, String]>;
     create_token(
+        mint: Keypair,
         creator: Signer,
         token_name: string,
         token_symbol: string,
         meta_cid: string,
         sol_amount?: number,
-        mint?: Keypair,
         traders?: [Signer, number][],
         bundle_tip?: number,
         priority?: PriorityLevel
-    ): Promise<[String, PublicKey]>;
+    ): Promise<String>;
     create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string>;
     get_random_mints(count: number): Promise<IMintMeta[]>;
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
@@ -162,7 +164,7 @@ export async function retry_get_tx(
                 commitment: COMMITMENT
             });
             if (transaction) return transaction;
-        } catch (error) { }
+        } catch (error) {}
         retries--;
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
@@ -908,4 +910,36 @@ export async function deactivate_ltas(
     );
     const txs: Promise<String>[] = common.chunks(instructions, 10).map((chunk) => send_tx(chunk, [authority]));
     return Promise.all(txs);
+}
+
+export async function generate_trade_lta(
+    funder: Signer,
+    wallets: Keypair[],
+    mint: PublicKey
+): Promise<AddressLookupTableAccount> {
+    try {
+        const [created_lt] = await create_lta(funder);
+        const token_atas = wallets.map((keypair) => calc_ata(keypair.publicKey, mint));
+        const wsol_atas = wallets.map((keypair) => calc_ata(keypair.publicKey, SOL_MINT));
+        const keys = [
+            ...wallets.map((keypair) => keypair.publicKey),
+            mint,
+            ...token_atas,
+            ...wsol_atas,
+            funder.publicKey
+        ];
+        await extend_lta(created_lt, funder, keys);
+
+        const [lta] = await get_ltas([created_lt]);
+        return lta;
+    } catch (error) {
+        throw new Error(`Failed to generate trade LTA: ${error}`);
+    }
+}
+
+export async function burn_token(amount: TokenAmount, owner: Signer, mint: PublicKey): Promise<String> {
+    if (amount.uiAmount === null) throw new Error(`Invalid token amount.`);
+    const ata = calc_ata(owner.publicKey, mint);
+    const instructions = [createBurnInstruction(ata, mint, owner.publicKey, BigInt(amount.amount))];
+    return await send_tx(instructions, [owner]);
 }

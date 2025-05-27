@@ -16,7 +16,6 @@ import {
     VOLUME_TRADE_SLIPPAGE,
     JITO_BUNDLE_INTERVAL_MS,
     VOLUME_MAX_WALLETS_PER_COLLECT_TX,
-    SOL_MINT,
     VOLUME_MAX_WALLETS_PER_FUND_TX,
     VOLUME_MAX_WALLETS_PER_TRADE_TX,
     VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE,
@@ -69,7 +68,8 @@ export async function execute_fast(
         common.log(`\nCreating Address Lookup Table Account...`);
         let lta: AddressLookupTableAccount;
         try {
-            lta = await prepare_lta(funder, keypairs, volume_config.mint);
+            lta = await trade.generate_trade_lta(funder, keypairs, volume_config.mint);
+            common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
         } catch (error) {
             common.error(common.red(`LTA creation failed: ${error}, skipping execution...`));
             continue;
@@ -322,18 +322,6 @@ async function buy_sell_bundles(
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.all(promises);
-}
-
-async function prepare_lta(funder: Signer, wallets: Keypair[], mint: PublicKey): Promise<AddressLookupTableAccount> {
-    const [created_lt] = await trade.create_lta(funder);
-    const token_atas = wallets.map((keypair) => trade.calc_ata(keypair.publicKey, mint));
-    const wsol_atas = wallets.map((keypair) => trade.calc_ata(keypair.publicKey, SOL_MINT));
-    const keys = [...wallets.map((keypair) => keypair.publicKey), mint, ...token_atas, ...wsol_atas, funder.publicKey];
-    await trade.extend_lta(created_lt, funder, keys);
-
-    const [lta] = await trade.get_ltas([created_lt]);
-    common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
-    return lta;
 }
 
 async function get_config() {
