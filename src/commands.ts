@@ -470,7 +470,7 @@ export async function warmup(
             )
         );
         for (const mint of mints) {
-            let amount = Math.max(0.005, parseFloat(common.normal_random(0.01, 0.01).toFixed(4)));
+            let amount = parseFloat(common.uniform_random(0.05, 0.25).toFixed(4));
             common.log(
                 `Warming up with ${amount} SOL of the token '${mint.token_name}' with mint ${mint.token_mint}...`
             );

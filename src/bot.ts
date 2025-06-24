@@ -329,14 +329,6 @@ async function main() {
         .addOption(get_percent_option())
         .action(async (mint, burner, options) => {
             const { amount, percent } = options;
-            if (amount && percent) {
-                throw new InvalidOptionArgumentError(
-                    'Cannot use both --amount and --percent options at the same time.'
-                );
-            }
-            if (!amount && !percent) {
-                throw new InvalidOptionArgumentError('You must specify either --amount or --percent option.');
-            }
             await commands.burn_token(mint, burner, amount, percent);
         });
 
