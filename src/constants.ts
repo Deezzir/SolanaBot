@@ -38,11 +38,12 @@ export const TRADE_TX_RETRIES = 0;
 export const TRADE_RETRIES = 5;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
 export const TRADE_MAX_SLIPPAGE = 5.0;
-export const TRADE_DEFAULT_CURVE_DECIMALS = 6;
+export const TRADE_DEFAULT_TOKEN_DECIMALS = 6;
 export const TRADE_SWAP_SEED = 'swap';
 export const TRADE_MAX_WALLETS_PER_CREATE_BUNDLE = 20;
 export const TRADE_MAX_WALLETS_PER_CREATE_TX = 5;
 export const METAPLEX_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+export const METAPLEX_META_SEED = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
 export const RENT_PROGRAM_ID = new PublicKey('SysvarRent111111111111111111111111111111111');
 export const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
@@ -79,10 +80,33 @@ export enum PriorityLevel {
 
 // TRADE DEX CONSTANTS
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
-export const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+export const RAYDIUM_AMM4_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+export const RAYDIUM_LAUNCHPAD_PROGRAM_ID = new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj');
+export const RAYDIUM_LAUNCHPAD_AUTHORITY = new PublicKey('WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh');
+export const RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR = new Uint8Array([175, 175, 109, 31, 13, 152, 155, 237]);
+export const RAYDIUM_LAUNCHPAD_POOL_SEED = new Uint8Array([112, 111, 111, 108]);
+export const RAYDIUM_LAUNCHPAD_VAULT_SEED = new Uint8Array([112, 111, 111, 108, 95, 118, 97, 117, 108, 116]);
+export const RAYDIUM_LAUNCHPAD_POOL_HEADER = new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]);
+export const RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY = new PublicKey('2DPAtwB8L12vrMRExbLuyGnC7n2J5LNoZQSejeQGpwkr');
+export const RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG = new PublicKey('6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX');
+export const RAYDIUM_LAUNCHPAD_SELL_DISCRIMINATOR = new Uint8Array([149, 39, 222, 155, 211, 124, 152, 26]);
+export const RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR = new Uint8Array([250, 234, 13, 123, 213, 156, 19, 236]);
+export const RAYDIUM_CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
+export const RAYDIUM_CPMM_POOL_STATE_HEADER = new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]);
+export const RAYDIUM_CPMM_AUTHORITY = new PublicKey('GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL');
+export const RAYDIUM_CPMM_CONFIG = new PublicKey('D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2');
+export const RAYDIUM_CPMM_SWAP_DISCRIMINATOR = new Uint8Array([143, 190, 90, 218, 196, 30, 51, 222]);
+export const RAYDIUM_LTA_ACCOUNT = new PublicKey('EUuZUuXoWciUQdtkw8wzJHh4F3GRuCT2FAJ9ZhzFtNPM');
+export const RAYDIUM_LTA_ACCOUNT_EXTRA = new PublicKey('Ep7d1e5ZUbHvtr5WQfgrZWEKJFBSyUfNxLcvrpsQo4at');
 
 // MOON CONSTANTS
 export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');
+
+// BONK CONSTANTS
+export const BONK_IPFS_META_API_URL = 'https://storage.letsbonk.fun/upload/meta';
+export const BONK_IPFS_IMAGE_API_URL = 'https://storage.letsbonk.fun/upload/img';
+export const BONK_SWAP_TAX = 0.0125; // 1.25%
+export const BONK_CONFIG = new PublicKey('FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1');
 
 // METEORA CONSTANTS
 export const METEORA_DBC_PROGRAM_ID = new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN');
@@ -104,7 +128,7 @@ export const METEORA_SWAP_DISCRIMINATOR = new Uint8Array([248, 198, 158, 145, 22
 // PUMP CONSTANTS
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_IPFS_API_URL = 'https://frontend-api-v3.pump.fun/ipfs/token-metadata';
-export const PUMP_CURVE_TOKEN_DECIMALS = 6;
+export const PUMP_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
 export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%
 export const PUMP_LTA_ACCOUNT_EXTRA = new PublicKey('FNbKyKh4LjC1kSmhMahZ2gJPwt1anynVUdaCNmmuxzac');
@@ -119,10 +143,9 @@ export const PUMP_AMM_GLOBAL_ACCOUNT = new PublicKey('ADyA8hdefvWN2dbGGWFotbzWxr
 export const PUMP_AMM_EVENT_AUTHORITY_ACCOUNT = new PublicKey('GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR');
 export const PUMP_AMM_FEE_ACCOUNT = new PublicKey('62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV');
 export const PUMP_AMM_FEE_TOKEN_ACCOUNT = new PublicKey('94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb');
-export const PUMP_STATE_HEADER = new Uint8Array([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60]);
+export const PUMP_STATE_HEADER = new Uint8Array([23, 183, 248, 55, 96, 216, 172, 96]);
 export const PUMP_AMM_STATE_HEADER = new Uint8Array([241, 154, 109, 4, 17, 177, 109, 188]);
 export const PUMP_BONDING_SEED = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
-export const PUMP_META_SEED = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
 export const PUMP_CREATOR_VAULT_SEED = new Uint8Array([99, 114, 101, 97, 116, 111, 114, 45, 118, 97, 117, 108, 116]);
 export const PUMP_AMM_CREATOR_VAULT_SEED = new Uint8Array([
     99, 114, 101, 97, 116, 111, 114, 95, 118, 97, 117, 108, 116

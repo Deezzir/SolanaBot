@@ -3,9 +3,29 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { parse } from 'csv-parse/sync';
-import { IPFS, PUMP_FETCH_API_URL, WALLETS_FILE_HEADERS, WALLETS_RESCUE_DIR_PATH } from '../constants.js';
+import {
+    IPFS,
+    IPFS_API,
+    IPFS_JWT,
+    PUMP_FETCH_API_URL,
+    WALLETS_FILE_HEADERS,
+    WALLETS_RESCUE_DIR_PATH
+} from '../constants.js';
 import base58 from 'bs58';
-import path from 'path';
+import path, { basename } from 'path';
+
+type IPFSResponse = {
+    id: string;
+    name: string;
+    cid: string;
+    created_at: string;
+    size: number;
+    number_of_files: number;
+    mime_type: string;
+    user_id: string;
+    group_id: string;
+    is_duplicate: boolean;
+};
 
 export function staticImplements<T>() {
     return <U extends T>(constructor: U) => {
@@ -37,6 +57,7 @@ export enum Program {
     Pump = 'pump',
     Moonit = 'moonit',
     Meteora = 'meteora',
+    Bonk = 'bonk',
     Jupiter = 'jupiter'
 }
 
@@ -323,10 +344,10 @@ export function read_biguint_le(buf: Buffer, offset: number, length: number): bi
     throw new Error(`unsupported data size (${length} bytes)`);
 }
 
-export function read_bool(buf: Buffer, offset: number, length: number): boolean {
-    const data = read_bytes(buf, offset, length);
-    for (const b of data) if (b) return true;
-    return false;
+export function read_bool(buf: Buffer, offset: number): boolean {
+    const byte = buf.readUint8(offset);
+    if (byte !== 0 && byte !== 1) throw new Error(`invalid boolean value: ${byte}`);
+    return byte === 1;
 }
 
 export const COLUMN_WIDTHS = {
@@ -444,4 +465,46 @@ export function read_pubkeys(address_file_path: string): PublicKey[] {
         throw new Error(`Failed to read addresses from ${address_file_path}: ${error}`);
     }
     return pubkeys;
+}
+
+async function upload_ipfs(file: File): Promise<IPFSResponse> {
+    const form_data = new FormData();
+
+    form_data.append('file', file);
+    form_data.append('network', 'public');
+    form_data.append('name', file.name);
+
+    const request: RequestInit = {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${IPFS_JWT}` },
+        body: form_data
+    };
+
+    try {
+        const response = await fetch(IPFS_API, request);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        return data.data as IPFSResponse;
+    } catch (error) {
+        throw new Error(`Failed to upload to IPFS: ${error}`);
+    }
+}
+
+export async function upload_metadata_ipfs(meta: IPFSMetadata, image_path: string) {
+    try {
+        const uuid = crypto.randomUUID();
+        const image_file = new File([readFileSync(image_path)], `${uuid}-${basename(image_path)}`, {
+            type: 'image/png'
+        });
+        const image_resp = await upload_ipfs(image_file);
+        meta.image = `${IPFS}${image_resp.cid}`;
+
+        const json = JSON.stringify(meta);
+        const json_blob = new Blob([json]);
+        const json_file = new File([json_blob], `${uuid}-metadata.json`, { type: 'application/json' });
+        const meta_resp = await upload_ipfs(json_file);
+        return meta_resp.cid;
+    } catch (error) {
+        throw new Error(`Failed to create metadata: ${error}`);
+    }
 }

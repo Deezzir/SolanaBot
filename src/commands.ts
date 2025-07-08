@@ -1,7 +1,4 @@
 import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount, Signer } from '@solana/web3.js';
-import { PumpTrader, PumpRunner } from './pump/pump.js';
-import { MoonitTrader, MoonitRunner } from './moonit/moonit.js';
-import { JupiterTrader } from './jupiter/jupiter.js';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import bs58 from 'bs58';
 import {
@@ -16,54 +13,12 @@ import {
 } from './constants.js';
 import * as common from './common/common.js';
 import * as trade from './common/trade_common.js';
-import * as snipe_common from './common/snipe_common.js';
 import * as transfers from './subcommands/transfers.js';
 import * as volume from './subcommands/volume.js';
 import * as token_drop from './subcommands/token_drop.js';
 import * as pnl from './subcommands/pnl.js';
 import * as mass_trade from './subcommands/mass_trade.js';
-import { MeteoraRunner, MeteoraTrader } from './meteora/meteora.js';
-
-function get_trader(program: common.Program): trade.IProgramTrader {
-    switch (program) {
-        case common.Program.Pump: {
-            return PumpTrader;
-        }
-        case common.Program.Moonit: {
-            return MoonitTrader;
-        }
-        case common.Program.Meteora: {
-            return MeteoraTrader;
-        }
-        case common.Program.Jupiter: {
-            return JupiterTrader;
-        }
-        default: {
-            throw new Error(`Invalid program received: ${program}`);
-        }
-    }
-}
-
-function get_sniper(program: common.Program): snipe_common.ISniper {
-    const trader = get_trader(program);
-    switch (program) {
-        case common.Program.Pump: {
-            return new PumpRunner(trader);
-        }
-        case common.Program.Moonit: {
-            return new MoonitRunner(trader);
-        }
-        case common.Program.Meteora: {
-            return new MeteoraRunner(trader);
-        }
-        case common.Program.Jupiter: {
-            throw new Error('Generic program is not supported for sniping.');
-        }
-        default: {
-            throw new Error(`Invalid program received: ${program}`);
-        }
-    }
-}
+import { get_trader, get_sniper } from './common/get_trader.js';
 
 export async function burn_token(mint: PublicKey, burner: Signer, amount?: number, percent?: number): Promise<void> {
     if (!amount && !percent) throw new Error('Either amount or percent should be provided.');
@@ -117,9 +72,14 @@ export async function clean(wallets: common.Wallet[]): Promise<void> {
     }
 }
 
-export async function create_token_metadata(json: common.IPFSMetadata, image_path: string) {
-    const trader = get_trader(common.Program.Pump);
+export async function create_token_metadata(
+    json: common.IPFSMetadata,
+    image_path: string,
+    program = common.Program.Pump
+) {
+    const trader = get_trader(program);
     common.log(common.yellow('Uploading metadata...'));
+    common.log(JSON.stringify(json, null, 2));
     const cid = await trader.create_token_metadata(json, image_path);
     common.log(`CID: ${common.bold(cid)}`);
 }

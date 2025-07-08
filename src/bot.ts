@@ -149,7 +149,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('4.0.0').description('Solana Bot CLI');
+    program.version('5.0.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -677,7 +677,8 @@ async function main() {
             return value;
         })
         .action(async (json, image_path) => {
-            await commands.create_token_metadata(json, image_path);
+            const pg = program.opts().program;
+            await commands.create_token_metadata(json, image_path, pg);
         });
 
     program

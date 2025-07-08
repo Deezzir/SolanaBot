@@ -27,13 +27,13 @@ import {
     PUMP_AMM_PROGRAM_ID,
     PUMP_BONDING_SEED,
     PUMP_STATE_HEADER,
-    PUMP_CURVE_TOKEN_DECIMALS,
+    PUMP_TOKEN_DECIMALS,
     PUMP_EVENT_AUTHORITUY_ACCOUNT,
     PUMP_FEE_PERCENTAGE,
     PUMP_FEE_ACCOUNT,
     PUMP_FETCH_API_URL,
     PUMP_GLOBAL_ACCOUNT,
-    PUMP_META_SEED,
+    METAPLEX_META_SEED,
     PUMP_MINT_AUTHORITY_ACCOUNT,
     PUMP_PROGRAM_ID,
     SOL_MINT,
@@ -110,9 +110,9 @@ export class PumpMintMeta implements trade.IMintMeta {
     }
 }
 
-const PUMP_AMM_STATE_SIZE = 0xd3;
+const AMM_STATE_SIZE = 0xd3;
 // const PUMP_AMM_STATE_SIZE_V2 = 0x12c;
-const PUMP_AMM_STATE_OFFSETS = {
+const AMM_STATE_OFFSETS = {
     POOL_BUMP: 0x08,
     INDEX: 0x09,
     CREATOR: 0x0b,
@@ -124,7 +124,7 @@ const PUMP_AMM_STATE_OFFSETS = {
     LP_SUPPLY: 0xcb,
     COIN_CREATOR: 0xd3
 };
-type PumpAmmState = {
+type AMMState = {
     quote_mint: PublicKey;
     base_vault: PublicKey;
     quote_vault: PublicKey;
@@ -135,7 +135,7 @@ type PumpAmmState = {
 
 // const PUMP_STATE_SIZE_V1 = 0x100;
 // const PUMP_STATE_SIZE_V2 = 0x96;
-const PUMP_STATE_OFFSETS = {
+const STATE_OFFSETS = {
     VIRTUAL_TOKEN_RESERVES: 0x08,
     VIRTUAL_SOL_RESERVES: 0x10,
     REAL_TOKEN_RESERVES: 0x18,
@@ -144,7 +144,7 @@ const PUMP_STATE_OFFSETS = {
     COMPLETE: 0x30,
     COIN_CREATOR: 0x31
 };
-type PumpState = {
+type State = {
     virtual_token_reserves: bigint;
     virtual_sol_reserves: bigint;
     real_token_reserves: bigint;
@@ -157,7 +157,7 @@ type PumpState = {
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
     public static get_name(): string {
-        return 'Pump';
+        return common.Program.Pump;
     }
 
     public static async buy_token(
@@ -225,9 +225,9 @@ export class Trader {
         let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
-                uiAmount: Number(token_amount_raw) / 10 ** PUMP_CURVE_TOKEN_DECIMALS,
+                uiAmount: Number(token_amount_raw) / 10 ** PUMP_TOKEN_DECIMALS,
                 amount: token_amount_raw.toString(),
-                decimals: PUMP_CURVE_TOKEN_DECIMALS
+                decimals: PUMP_TOKEN_DECIMALS
             },
             trader,
             mint_meta,
@@ -640,7 +640,7 @@ export class Trader {
         const instruction_data = this.create_data(token_name, token_symbol, meta_link, creator.publicKey);
         const [bonding, assoc_ata] = this.calc_bonding_curve(mint.publicKey);
         const [metaplex] = PublicKey.findProgramAddressSync(
-            [PUMP_META_SEED, METAPLEX_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()],
+            [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()],
             METAPLEX_PROGRAM_ID
         );
 
@@ -712,18 +712,18 @@ export class Trader {
         return (
             Number(virtual_sol_reserves) /
             LAMPORTS_PER_SOL /
-            (Number(virtual_token_reserves) / 10 ** PUMP_CURVE_TOKEN_DECIMALS)
+            (Number(virtual_token_reserves) / 10 ** PUMP_TOKEN_DECIMALS)
         );
     }
 
-    private static get_token_metrics(state: PumpState): trade.TokenMetrics {
+    private static get_token_metrics(state: State): trade.TokenMetrics {
         const price_sol = this.calculate_curve_price(state.virtual_sol_reserves, state.virtual_token_reserves);
 
-        const mcap_sol = (price_sol * Number(state.supply)) / 10 ** PUMP_CURVE_TOKEN_DECIMALS;
+        const mcap_sol = (price_sol * Number(state.supply)) / 10 ** PUMP_TOKEN_DECIMALS;
         return { price_sol, mcap_sol, supply: state.supply };
     }
 
-    private static async get_state(bond_curve_addr: PublicKey): Promise<PumpState> {
+    private static async get_state(bond_curve_addr: PublicKey): Promise<State> {
         const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
         if (!info || !info.data) throw new Error('Unexpected curve state');
 
@@ -731,13 +731,13 @@ export class Trader {
         if (header.compare(PUMP_STATE_HEADER) !== 0) throw new Error('Unexpected curve state IDL signature');
 
         return {
-            virtual_token_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
-            virtual_sol_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
-            real_token_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
-            real_sol_reserves: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.REAL_SOL_RESERVES, 8),
-            supply: common.read_biguint_le(info.data, PUMP_STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
-            complete: common.read_bool(info.data, PUMP_STATE_OFFSETS.COMPLETE, 1),
-            creator: new PublicKey(common.read_bytes(info.data, PUMP_STATE_OFFSETS.COIN_CREATOR, 32))
+            virtual_token_reserves: common.read_biguint_le(info.data, STATE_OFFSETS.VIRTUAL_TOKEN_RESERVES, 8),
+            virtual_sol_reserves: common.read_biguint_le(info.data, STATE_OFFSETS.VIRTUAL_SOL_RESERVES, 8),
+            real_token_reserves: common.read_biguint_le(info.data, STATE_OFFSETS.REAL_TOKEN_RESERVES, 8),
+            real_sol_reserves: common.read_biguint_le(info.data, STATE_OFFSETS.REAL_SOL_RESERVES, 8),
+            supply: common.read_biguint_le(info.data, STATE_OFFSETS.TOKEN_TOTAL_SUPPLY, 8),
+            complete: common.read_bool(info.data, STATE_OFFSETS.COMPLETE),
+            creator: new PublicKey(common.read_bytes(info.data, STATE_OFFSETS.COIN_CREATOR, 32))
         };
     }
 
@@ -747,7 +747,7 @@ export class Trader {
                 filters: [
                     {
                         memcmp: {
-                            offset: PUMP_AMM_STATE_OFFSETS.BASE_MINT,
+                            offset: AMM_STATE_OFFSETS.BASE_MINT,
                             bytes: mint.toBase58()
                         }
                     },
@@ -766,33 +766,33 @@ export class Trader {
         }
     }
 
-    static async get_amm_state(amm: PublicKey): Promise<PumpAmmState> {
+    static async get_amm_state(amm: PublicKey): Promise<AMMState> {
         const info = await global.CONNECTION.getAccountInfo(amm);
         if (!info || !info.data) throw new Error('Unexpected curve state');
 
         const header = common.read_bytes(info.data, 0, PUMP_AMM_STATE_HEADER.byteLength);
         if (header.compare(PUMP_AMM_STATE_HEADER) !== 0) throw new Error('Unexpected amm state IDL signature');
 
-        const base_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_VAULT, 32));
-        const quote_vault = new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
+        const base_vault = new PublicKey(common.read_bytes(info.data, AMM_STATE_OFFSETS.BASE_VAULT, 32));
+        const quote_vault = new PublicKey(common.read_bytes(info.data, AMM_STATE_OFFSETS.QUOTE_VAULT, 32));
         const base_vault_balance = await trade.get_vault_balance(base_vault);
         const quote_vault_balance = await trade.get_vault_balance(quote_vault);
 
         return {
             base_vault,
             quote_vault,
-            quote_mint: new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.BASE_MINT, 32)),
-            creator: new PublicKey(common.read_bytes(info.data, PUMP_AMM_STATE_OFFSETS.COIN_CREATOR, 32)),
+            quote_mint: new PublicKey(common.read_bytes(info.data, AMM_STATE_OFFSETS.BASE_MINT, 32)),
+            creator: new PublicKey(common.read_bytes(info.data, AMM_STATE_OFFSETS.COIN_CREATOR, 32)),
             base_vault_balance: base_vault_balance.balance,
             quote_vault_balance: quote_vault_balance.balance
         };
     }
 
-    static async get_amm_token_metrics(amm_state: PumpAmmState): Promise<trade.TokenMetrics> {
+    static async get_amm_token_metrics(amm_state: AMMState): Promise<trade.TokenMetrics> {
         const price_sol =
             Number(amm_state.quote_vault_balance) /
             LAMPORTS_PER_SOL /
-            (Number(amm_state.base_vault_balance) / Math.pow(10, PUMP_CURVE_TOKEN_DECIMALS));
+            (Number(amm_state.base_vault_balance) / Math.pow(10, PUMP_TOKEN_DECIMALS));
         const token = await trade.get_token_supply(amm_state.quote_mint);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
         return { price_sol: price_sol, mcap_sol, supply: token.supply };
@@ -997,8 +997,8 @@ export class Trader {
                         }
                     ],
                     dataSlice: {
-                        offset: PUMP_AMM_STATE_OFFSETS.BASE_MINT,
-                        length: PUMP_AMM_STATE_SIZE - PUMP_AMM_STATE_OFFSETS.BASE_MINT
+                        offset: AMM_STATE_OFFSETS.BASE_MINT,
+                        length: AMM_STATE_SIZE - AMM_STATE_OFFSETS.BASE_MINT
                     },
                     commitment: COMMITMENT
                 });
@@ -1009,7 +1009,7 @@ export class Trader {
                             if (
                                 common.read_biguint_le(
                                     acc.account.data,
-                                    PUMP_AMM_STATE_OFFSETS.LP_SUPPLY - PUMP_AMM_STATE_OFFSETS.BASE_MINT,
+                                    AMM_STATE_OFFSETS.LP_SUPPLY - AMM_STATE_OFFSETS.BASE_MINT,
                                     8
                                 ) < 4000000000000n
                             )

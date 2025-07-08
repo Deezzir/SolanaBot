@@ -11,11 +11,11 @@ import {
     RpcResponseAndContext,
     ComputeBudgetProgram,
     Commitment,
-    VersionedTransactionResponse,
     Finality,
     AddressLookupTableAccount,
     Transaction,
-    AddressLookupTableProgram
+    AddressLookupTableProgram,
+    ParsedTransactionWithMeta
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -32,7 +32,7 @@ import {
     COMMITMENT,
     JITO_ENDPOINTS,
     PriorityLevel,
-    TRADE_DEFAULT_CURVE_DECIMALS,
+    TRADE_DEFAULT_TOKEN_DECIMALS,
     TRADE_TX_RETRIES,
     TRADE_RETRY_INTERVAL_MS,
     JITO_TIP_ACCOUNTS,
@@ -156,10 +156,10 @@ export type TokenMetrics = {
 export async function retry_get_tx(
     signature: string,
     retries: number = TRADE_RETRIES
-): Promise<VersionedTransactionResponse | null> {
+): Promise<ParsedTransactionWithMeta | null> {
     while (retries > 0) {
         try {
-            const transaction = await global.CONNECTION.getTransaction(signature, {
+            const transaction = await global.CONNECTION.getParsedTransaction(signature, {
                 maxSupportedTransactionVersion: 0,
                 commitment: COMMITMENT
             });
@@ -242,8 +242,8 @@ export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigin
         return { supply: mint_data.supply, decimals: mint_data.decimals };
     } catch (err) {
         return {
-            supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_CURVE_DECIMALS),
-            decimals: TRADE_DEFAULT_CURVE_DECIMALS
+            supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_TOKEN_DECIMALS),
+            decimals: TRADE_DEFAULT_TOKEN_DECIMALS
         };
     }
 }
@@ -283,7 +283,7 @@ export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
             return {
                 token_name: result.content.metadata.name,
                 token_symbol: result.content.metadata.symbol,
-                token_decimal: result.token_info.decimals || TRADE_DEFAULT_CURVE_DECIMALS,
+                token_decimal: result.token_info.decimals || TRADE_DEFAULT_TOKEN_DECIMALS,
                 token_supply: result.token_info.supply || 10 ** 16,
                 price_per_token: result.token_info.price_info?.price_per_token || 0.0,
                 creator: creator ? new PublicKey(creator.address) : undefined,

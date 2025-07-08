@@ -1,30 +1,15 @@
-import * as snipe from '../common/snipe_common.js';
-import * as common from '../common/common.js';
 import { PublicKey } from '@solana/web3.js';
-
-const WORKER_PATH = './dist/moon_worker.js';
+import * as snipe from '../common/snipe_common.js';
 
 export class Runner extends snipe.SniperBase {
-    private _subscription_id: number | undefined;
-    private _logs_stop_func: (() => void) | null = null;
-    private _fetch_stop_func: (() => void) | null = null;
+    protected mint_authority = new PublicKey('Placeholder');
+    protected program_id = new PublicKey('Placeholder');
 
-    protected get_worker_path(): string {
-        throw new Error('Not Implemented');
-        return WORKER_PATH;
+    protected is_create_tx(_logs: string[]): boolean {
+        throw new Error('is_create_tx not implemented');
     }
 
-    protected async wait_drop_unsub(): Promise<void> {
-        if (this._subscription_id !== undefined) {
-            if (this._logs_stop_func) this._logs_stop_func();
-            if (this._fetch_stop_func) this._fetch_stop_func();
-            global.CONNECTION.removeOnLogsListener(this._subscription_id)
-                .then(() => (this._subscription_id = undefined))
-                .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
-        }
-    }
-
-    protected async wait_drop_sub(_token_name: string, _token_ticker: string): Promise<PublicKey | null> {
-        throw new Error('Not Implemented');
+    protected decode_create_instr(_data: Uint8Array): { name: string; symbol: string } | null {
+        throw new Error('decode_create_instr not implemented');
     }
 }

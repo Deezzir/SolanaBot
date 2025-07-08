@@ -21,7 +21,7 @@ import {
 import {
     PriorityLevel,
     JUPITER_API_URL,
-    RAYDIUM_AMM_PROGRAM_ID,
+    RAYDIUM_AMM4_PROGRAM_ID,
     RAYDIUM_AUTHORITY,
     SOL_MINT,
     TRADE_SWAP_SEED,
@@ -374,7 +374,7 @@ export async function get_raydium_token_metrics(amm: PublicKey): Promise<TokenMe
 
 export async function get_raydium_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
     try {
-        const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM_PROGRAM_ID, {
+        const [marketAccount] = await CONNECTION.getProgramAccounts(RAYDIUM_AMM4_PROGRAM_ID, {
             commitment: COMMITMENT,
             filters: [
                 { dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },

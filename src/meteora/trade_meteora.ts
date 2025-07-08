@@ -38,7 +38,7 @@ import {
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 
-type MeteoraDAMMV1Info = {
+type DAMMV1Data = {
     base_vault: string;
     quote_vault: string;
     base_vault_authority: string;
@@ -51,9 +51,9 @@ type MeteoraDAMMV1Info = {
     quote_protocol_token_fee: string;
 };
 
-type MeteoraDAMMV2Info = {};
+type DAMMV2Data = {};
 
-type MeteoraDBCInfo = {
+type DBCData = {
     sqrt_price: bigint;
     config: string;
     base_vault: string;
@@ -75,9 +75,9 @@ export class MeteoraMintMeta implements trade.IMintMeta {
     token_decimal: number = 9;
     fee: number = 0;
 
-    dbc_info?: MeteoraDBCInfo;
-    damm_v1_info?: MeteoraDAMMV1Info;
-    damm_v2_info?: MeteoraDAMMV2Info;
+    dbc_data?: DBCData;
+    damm_v1_data?: DAMMV1Data;
+    damm_v2_data?: DAMMV2Data;
 
     constructor(data: Partial<MeteoraMintMeta> = {}) {
         Object.assign(this, data);
@@ -113,7 +113,7 @@ export class MeteoraMintMeta implements trade.IMintMeta {
     }
 }
 
-const METEORA_DAMM_V1_STATE_OFFSETS = {
+const DAMM_V1_STATE_OFFSETS = {
     BASE_MINT: 0x28,
     QUOTE_MINT: 0x48,
     A_VAULT: 0x68,
@@ -125,10 +125,10 @@ const METEORA_DAMM_V1_STATE_OFFSETS = {
     TRADE_FEE_NUMERATOR: 0x14a,
     TRADE_FEE_DENOMINATOR: 0x152
 };
-const METEORA_DAMM_V2_STATE_OFFSETS = {
+const DAMM_V2_STATE_OFFSETS = {
     BASE_MINT: 0xa0
 };
-const METEORA_CONFIG_OFFSETS = {
+const CONFIG_OFFSETS = {
     QUOTE_MINT: 0x08,
     FEE_CLAIMER: 0x28,
     LEFTOVER_RECEIVER: 0x48,
@@ -154,7 +154,7 @@ const METEORA_CONFIG_OFFSETS = {
     POST_MIGRATION_TOKEN_SUPPLY: 0x160,
     SQRT_START_PRICE: 0x188
 };
-const METEORA_DBC_STATE_OFFSETS = {
+const DBC_STATE_OFFSETS = {
     CONFIG: 0x48,
     CREATOR: 0x68,
     BASE_MINT: 0x88,
@@ -179,16 +179,16 @@ const METEORA_DBC_STATE_OFFSETS = {
     CREATOR_BASE_FEE: 0x160,
     CREATOR_QUOTE_FEE: 0x168
 };
-const METEORA_VAULT_STATE_OFFSETS = {
+const VAULT_STATE_OFFSETS = {
     TOTAL_AMOUNT: 0xb,
     TOKEN_VAULT: 0x13,
     TOKEN_VAULT_LP_MINT: 0x73
 };
-enum MeteoraDAMMVersion {
+enum DAMMVersion {
     V1 = 1,
     V2 = 2
 }
-type MeteoraDBCState = {
+type DBCState = {
     pool: PublicKey;
     token_decimals: number;
     total_supply: bigint;
@@ -202,9 +202,9 @@ type MeteoraDBCState = {
     sqrt_price: bigint;
     creator: PublicKey;
     is_migrated: boolean;
-    migration_option: MeteoraDAMMVersion;
+    migration_option: DAMMVersion;
 };
-type MeteoraDAMMV1State = {
+type DAMMV1State = {
     pool: PublicKey;
     base_vault_authority: PublicKey;
     quote_vault_authority: PublicKey;
@@ -220,7 +220,7 @@ type MeteoraDAMMV1State = {
     quote_reserve: bigint;
     trade_fee: number;
 };
-type MeteoraVaultState = {
+type VaultState = {
     token_vault: PublicKey;
     token_vault_lp_mint: PublicKey;
     token_reserve: bigint;
@@ -229,7 +229,7 @@ type MeteoraVaultState = {
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
     public static get_name(): string {
-        return 'Meteora';
+        return common.Program.Meteora;
     }
 
     public static async buy_token(
@@ -264,9 +264,9 @@ export class Trader {
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         if (mint_meta.migrated) {
-            if (mint_meta.damm_v1_info)
+            if (mint_meta.damm_v1_data)
                 return [await this.get_buy_damm_v1_instructions(sol_amount, buyer, mint_meta, slippage), lta];
-            if (mint_meta.damm_v2_info) throw new Error('V2 not implemented');
+            if (mint_meta.damm_v2_data) throw new Error('V2 not implemented');
             else throw new Error('Unknown migration option');
         }
         return [await this.get_buy_dbc_instructions(sol_amount, buyer, mint_meta, slippage), lta];
@@ -280,9 +280,9 @@ export class Trader {
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         if (mint_meta.migrated) {
-            if (mint_meta.damm_v1_info)
+            if (mint_meta.damm_v1_data)
                 return [await this.get_sell_damm_v1_instructions(token_amount, seller, mint_meta, slippage), lta];
-            if (mint_meta.damm_v2_info) throw new Error('V2 not implemented');
+            if (mint_meta.damm_v2_data) throw new Error('V2 not implemented');
             else throw new Error('Unknown migration option');
         }
         return [await this.get_sell_dbc_instructions(token_amount, seller, mint_meta, slippage), lta];
@@ -295,7 +295,7 @@ export class Trader {
         slippage: number
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
-        let token_amount_raw = this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_info!); // TODO: fix type
+        let token_amount_raw = this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_data!); // TODO: fix type
         let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
             {
@@ -405,10 +405,10 @@ export class Trader {
 
             if (damm === null) {
                 const state = await this.get_dbc_state(new PublicKey(mint_meta.mint));
-                const metrics = this.get_token_dbc_metrics(state);
+                const metrics = this.get_dbc_token_metrics(state);
                 return new MeteoraMintMeta({
                     ...mint_meta,
-                    dbc_info: {
+                    dbc_data: {
                         sqrt_price: state.sqrt_price,
                         base_vault: state.base_vault.toString(),
                         quote_vault: state.quote_vault.toString(),
@@ -425,7 +425,7 @@ export class Trader {
                 });
             }
 
-            if (damm?.version === MeteoraDAMMVersion.V1) {
+            if (damm?.version === DAMMVersion.V1) {
                 const state = await this.get_damm_v1_state(damm.damm_info);
                 const metrics = await this.get_token_metrics(state);
                 return new MeteoraMintMeta({
@@ -434,7 +434,7 @@ export class Trader {
                     token_reserves: state.base_reserve,
                     pool: state.pool.toString(),
                     complete: true,
-                    damm_v1_info: {
+                    damm_v1_data: {
                         base_vault: state.base_vault.toString(),
                         quote_vault: state.quote_vault.toString(),
                         base_vault_lp: state.base_vault_lp.toString(),
@@ -450,7 +450,7 @@ export class Trader {
                     market_cap: metrics.mcap_sol,
                     fee: state.trade_fee
                 });
-            } else if (damm?.version === MeteoraDAMMVersion.V2) {
+            } else if (damm?.version === DAMMVersion.V2) {
             }
 
             return mint_meta;
@@ -491,13 +491,13 @@ export class Trader {
         });
     }
 
-    private static get_token_dbc_metrics(state: MeteoraDBCState): trade.TokenMetrics {
+    private static get_dbc_token_metrics(state: DBCState): trade.TokenMetrics {
         const price_sol = this.calc_token_price(state.sqrt_price);
         const mcap_sol = price_sol * Number(state.base_reserve / 10n ** BigInt(state.token_decimals));
         return { price_sol, mcap_sol, supply: state.base_reserve };
     }
 
-    private static async get_token_metrics(state: MeteoraDAMMV1State): Promise<trade.TokenMetrics> {
+    private static async get_token_metrics(state: DAMMV1State): Promise<trade.TokenMetrics> {
         const token = await trade.get_token_supply(state.base_vault_lp);
         const price_sol = Number(state.quote_reserve) / Number(state.base_reserve);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
@@ -521,12 +521,12 @@ export class Trader {
     //     return base_vault;
     // }
 
-    private static async get_dbc_state(mint: PublicKey): Promise<MeteoraDBCState> {
+    private static async get_dbc_state(mint: PublicKey): Promise<DBCState> {
         const pool = await this.get_dbc_pool_from_mint(mint);
         if (!pool) throw new Error('Pool not found');
         const pool_info = pool.account;
 
-        const config = new PublicKey(common.read_bytes(pool_info.data, METEORA_DBC_STATE_OFFSETS.CONFIG, 32));
+        const config = new PublicKey(common.read_bytes(pool_info.data, DBC_STATE_OFFSETS.CONFIG, 32));
         const config_info = await global.CONNECTION.getAccountInfo(config, COMMITMENT);
         if (!config_info || !config_info.data) throw new Error('Unexpected config state');
         const config_header = common.read_bytes(config_info.data, 0, METEORA_CONFIG_HEADER.byteLength);
@@ -537,36 +537,30 @@ export class Trader {
             base_mint: mint,
             quote_mint: SOL_MINT,
             config,
-            token_decimals: config_info.data[METEORA_CONFIG_OFFSETS.TOKEN_DECIMAL],
-            total_supply: common.read_biguint_le(
-                config_info.data,
-                METEORA_CONFIG_OFFSETS.PRE_MIGRATION_TOKEN_SUPPLY,
-                8
-            ),
-            base_vault: new PublicKey(common.read_bytes(pool_info.data, METEORA_DBC_STATE_OFFSETS.BASE_VAULT, 32)),
-            quote_vault: new PublicKey(common.read_bytes(pool_info.data, METEORA_DBC_STATE_OFFSETS.QUOTE_VAULT, 32)),
-            base_reserve: common.read_biguint_le(pool_info.data, METEORA_DBC_STATE_OFFSETS.BASE_RESERVE, 8),
-            quote_reserve: common.read_biguint_le(pool_info.data, METEORA_DBC_STATE_OFFSETS.QUOTE_RESERVE, 8),
-            sqrt_price: common.read_biguint_le(pool_info.data, METEORA_DBC_STATE_OFFSETS.SQRT_PRICE, 16),
-            is_migrated: pool_info.data[METEORA_DBC_STATE_OFFSETS.IS_MIGRATED] === 1,
-            migration_option: pool_info.data[METEORA_DBC_STATE_OFFSETS.POOL_TYPE] as MeteoraDAMMVersion,
-            creator: new PublicKey(common.read_bytes(pool_info.data, METEORA_DBC_STATE_OFFSETS.CREATOR, 32))
+            token_decimals: config_info.data[CONFIG_OFFSETS.TOKEN_DECIMAL],
+            total_supply: common.read_biguint_le(config_info.data, CONFIG_OFFSETS.PRE_MIGRATION_TOKEN_SUPPLY, 8),
+            base_vault: new PublicKey(common.read_bytes(pool_info.data, DBC_STATE_OFFSETS.BASE_VAULT, 32)),
+            quote_vault: new PublicKey(common.read_bytes(pool_info.data, DBC_STATE_OFFSETS.QUOTE_VAULT, 32)),
+            base_reserve: common.read_biguint_le(pool_info.data, DBC_STATE_OFFSETS.BASE_RESERVE, 8),
+            quote_reserve: common.read_biguint_le(pool_info.data, DBC_STATE_OFFSETS.QUOTE_RESERVE, 8),
+            sqrt_price: common.read_biguint_le(pool_info.data, DBC_STATE_OFFSETS.SQRT_PRICE, 16),
+            is_migrated: pool_info.data[DBC_STATE_OFFSETS.IS_MIGRATED] === 1,
+            migration_option: pool_info.data[DBC_STATE_OFFSETS.POOL_TYPE] as DAMMVersion,
+            creator: new PublicKey(common.read_bytes(pool_info.data, DBC_STATE_OFFSETS.CREATOR, 32))
         };
     }
 
-    private static async get_vault_state(vault: PublicKey): Promise<MeteoraVaultState> {
+    private static async get_vault_state(vault: PublicKey): Promise<VaultState> {
         const vault_state = await global.CONNECTION.getAccountInfo(vault, COMMITMENT);
         if (!vault_state) throw new Error('Unexpected vault state');
         const vault_header = common.read_bytes(vault_state.data, 0, METEORA_VAULT_HEADER.byteLength);
         if (vault_header.compare(METEORA_VAULT_HEADER) !== 0) throw new Error('Unexpected vault state IDL signature');
         return {
-            token_vault: new PublicKey(
-                common.read_bytes(vault_state.data, METEORA_VAULT_STATE_OFFSETS.TOKEN_VAULT, 32)
-            ),
+            token_vault: new PublicKey(common.read_bytes(vault_state.data, VAULT_STATE_OFFSETS.TOKEN_VAULT, 32)),
             token_vault_lp_mint: new PublicKey(
-                common.read_bytes(vault_state.data, METEORA_VAULT_STATE_OFFSETS.TOKEN_VAULT_LP_MINT, 32)
+                common.read_bytes(vault_state.data, VAULT_STATE_OFFSETS.TOKEN_VAULT_LP_MINT, 32)
             ),
-            token_reserve: common.read_biguint_le(vault_state.data, METEORA_VAULT_STATE_OFFSETS.TOTAL_AMOUNT, 8)
+            token_reserve: common.read_biguint_le(vault_state.data, VAULT_STATE_OFFSETS.TOTAL_AMOUNT, 8)
         };
     }
 
@@ -575,31 +569,31 @@ export class Trader {
             account: AccountInfo<Buffer>;
             pubkey: PublicKey;
         }>
-    ): Promise<MeteoraDAMMV1State> {
+    ): Promise<DAMMV1State> {
         const base_vault_authority = new PublicKey(
-            common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.A_VAULT, 32)
+            common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.A_VAULT, 32)
         );
         const quote_vault_authority = new PublicKey(
-            common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.B_VAULT, 32)
+            common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.B_VAULT, 32)
         );
         const base_vault_state = await this.get_vault_state(base_vault_authority);
         const quote_vault_state = await this.get_vault_state(quote_vault_authority);
         const base_vault_lp = new PublicKey(
-            common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.A_VAULT_LP, 32)
+            common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.A_VAULT_LP, 32)
         );
         const quote_vault_lp = new PublicKey(
-            common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.B_VAULT_LP, 32)
+            common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.B_VAULT_LP, 32)
         );
         const quote_reserve = await trade.get_vault_balance(quote_vault_lp);
         const base_reserve = await trade.get_vault_balance(base_vault_lp);
         const trade_fee_numerator = common.read_biguint_le(
             pool_info.account.data,
-            METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_NUMERATOR,
+            DAMM_V1_STATE_OFFSETS.TRADE_FEE_NUMERATOR,
             8
         );
         const trade_fee_denominator = common.read_biguint_le(
             pool_info.account.data,
-            METEORA_DAMM_V1_STATE_OFFSETS.TRADE_FEE_DENOMINATOR,
+            DAMM_V1_STATE_OFFSETS.TRADE_FEE_DENOMINATOR,
             8
         );
         const trade_fee = Number(trade_fee_numerator) / Number(trade_fee_denominator);
@@ -609,10 +603,10 @@ export class Trader {
             base_vault_lp,
             quote_vault_lp,
             base_protocol_token_fee: new PublicKey(
-                common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.A_PROTOCOL_TOKEN_FEE, 32)
+                common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.A_PROTOCOL_TOKEN_FEE, 32)
             ),
             quote_protocol_token_fee: new PublicKey(
-                common.read_bytes(pool_info.account.data, METEORA_DAMM_V1_STATE_OFFSETS.B_PROTOCOL_TOKEN_FEE, 32)
+                common.read_bytes(pool_info.account.data, DAMM_V1_STATE_OFFSETS.B_PROTOCOL_TOKEN_FEE, 32)
             ),
             base_vault: base_vault_state.token_vault,
             quote_vault: quote_vault_state.token_vault,
@@ -634,7 +628,7 @@ export class Trader {
                 filters: [
                     {
                         memcmp: {
-                            offset: METEORA_DBC_STATE_OFFSETS.BASE_MINT,
+                            offset: DBC_STATE_OFFSETS.BASE_MINT,
                             bytes: mint.toBase58()
                         }
                     },
@@ -681,7 +675,7 @@ export class Trader {
         return (token_amount_raw * token.sol_reserves) / (token.token_reserves + token_amount_raw);
     }
 
-    private static calc_dbc_token_amount_raw(sol_amount_raw: bigint, info: MeteoraDBCInfo): bigint {
+    private static calc_dbc_token_amount_raw(sol_amount_raw: bigint, info: DBCData): bigint {
         if (sol_amount_raw <= 0) return 0n;
 
         const SCALE_FACTOR = BigInt(2) ** BigInt(128);
@@ -689,7 +683,7 @@ export class Trader {
         return (sol_amount_raw * SCALE_FACTOR) / price;
     }
 
-    private static calc_dbc_sol_amount_raw(token_amount_raw: bigint, info: MeteoraDBCInfo): bigint {
+    private static calc_dbc_sol_amount_raw(token_amount_raw: bigint, info: DBCData): bigint {
         if (token_amount_raw <= 0) return 0n;
 
         const SCALE_FACTOR = BigInt(2) ** BigInt(128);
@@ -712,18 +706,18 @@ export class Trader {
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.dbc_info || !mint_meta.pool)
+        if (!mint_meta.mint || !mint_meta.dbc_data || !mint_meta.pool)
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
         const pool = new PublicKey(mint_meta.pool);
-        const config = new PublicKey(mint_meta.dbc_info.config);
-        const base_vault = new PublicKey(mint_meta.dbc_info.base_vault);
-        const quote_vault = new PublicKey(mint_meta.dbc_info.quote_vault);
+        const config = new PublicKey(mint_meta.dbc_data.config);
+        const base_vault = new PublicKey(mint_meta.dbc_data.base_vault);
+        const quote_vault = new PublicKey(mint_meta.dbc_data.quote_vault);
 
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
         const token_amount_raw = this.calc_slippage_down(
-            this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_info),
+            this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_data),
             slippage
         );
 
@@ -771,19 +765,19 @@ export class Trader {
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.dbc_info || !mint_meta.pool)
+        if (!mint_meta.mint || !mint_meta.dbc_data || !mint_meta.pool)
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
         const mint = new PublicKey(mint_meta.mint);
         const pool = new PublicKey(mint_meta.pool);
-        const config = new PublicKey(mint_meta.dbc_info.config);
-        const base_vault = new PublicKey(mint_meta.dbc_info.base_vault);
-        const quote_vault = new PublicKey(mint_meta.dbc_info.quote_vault);
+        const config = new PublicKey(mint_meta.dbc_data.config);
+        const base_vault = new PublicKey(mint_meta.dbc_data.base_vault);
+        const quote_vault = new PublicKey(mint_meta.dbc_data.quote_vault);
 
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.calc_slippage_down(
-            this.calc_dbc_sol_amount_raw(token_amount_raw, mint_meta.dbc_info),
+            this.calc_dbc_sol_amount_raw(token_amount_raw, mint_meta.dbc_data),
             slippage
         );
 
@@ -820,7 +814,7 @@ export class Trader {
 
     private static async get_damm_from_mint(mint: PublicKey): Promise<{
         damm_info: Readonly<{ account: AccountInfo<Buffer>; pubkey: PublicKey }>;
-        version: MeteoraDAMMVersion;
+        version: DAMMVersion;
     } | null> {
         try {
             const result = await Promise.all([
@@ -828,13 +822,13 @@ export class Trader {
                     filters: [
                         {
                             memcmp: {
-                                offset: METEORA_DAMM_V1_STATE_OFFSETS.BASE_MINT,
+                                offset: DAMM_V1_STATE_OFFSETS.BASE_MINT,
                                 bytes: mint.toBase58()
                             }
                         },
                         {
                             memcmp: {
-                                offset: METEORA_DAMM_V1_STATE_OFFSETS.QUOTE_MINT,
+                                offset: DAMM_V1_STATE_OFFSETS.QUOTE_MINT,
                                 bytes: SOL_MINT.toBase58()
                             }
                         },
@@ -851,7 +845,7 @@ export class Trader {
                     filters: [
                         {
                             memcmp: {
-                                offset: METEORA_DAMM_V2_STATE_OFFSETS.BASE_MINT,
+                                offset: DAMM_V2_STATE_OFFSETS.BASE_MINT,
                                 bytes: mint.toBase58()
                             }
                         },
@@ -865,8 +859,8 @@ export class Trader {
                     commitment: COMMITMENT
                 })
             ]);
-            if (result[0].length > 0) return { damm_info: result[0][0], version: MeteoraDAMMVersion.V1 };
-            if (result[1].length > 0) return { damm_info: result[1][0], version: MeteoraDAMMVersion.V2 };
+            if (result[0].length > 0) return { damm_info: result[0][0], version: DAMMVersion.V1 };
+            if (result[1].length > 0) return { damm_info: result[1][0], version: DAMMVersion.V2 };
             return null;
         } catch (error) {
             return null;
@@ -879,10 +873,20 @@ export class Trader {
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.pool || !mint_meta.damm_v1_info)
+        if (!mint_meta.mint || !mint_meta.pool || !mint_meta.damm_v1_data)
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
+        const pool = new PublicKey(mint_meta.pool);
+        const base_vault_authority = new PublicKey(mint_meta.damm_v1_data.base_vault_authority);
+        const quote_vault_authority = new PublicKey(mint_meta.damm_v1_data.quote_vault_authority);
+        const base_vault = new PublicKey(mint_meta.damm_v1_data.base_vault);
+        const quote_vault = new PublicKey(mint_meta.damm_v1_data.quote_vault);
+        const base_vault_lp_mint = new PublicKey(mint_meta.damm_v1_data.base_vault_lp_mint);
+        const quote_vault_lp_mint = new PublicKey(mint_meta.damm_v1_data.quote_vault_lp_mint);
+        const base_vault_lp = new PublicKey(mint_meta.damm_v1_data.base_vault_lp);
+        const quote_vault_lp = new PublicKey(mint_meta.damm_v1_data.quote_vault_lp);
+        const quote_protocol_token_fee = new PublicKey(mint_meta.damm_v1_data.quote_protocol_token_fee);
 
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
         const token_amount_raw = this.calc_slippage_down(
@@ -905,38 +909,18 @@ export class Trader {
             createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({
                 keys: [
-                    { pubkey: new PublicKey(mint_meta.pool), isSigner: false, isWritable: true },
+                    { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_authority),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_authority),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault), isSigner: false, isWritable: true },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault), isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_lp_mint),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_lp_mint),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_lp), isSigner: false, isWritable: true },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_lp), isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.quote_protocol_token_fee),
-                        isSigner: false,
-                        isWritable: true
-                    },
+                    { pubkey: base_vault_authority, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_authority, isSigner: false, isWritable: true },
+                    { pubkey: base_vault, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault, isSigner: false, isWritable: true },
+                    { pubkey: base_vault_lp_mint, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_lp_mint, isSigner: false, isWritable: true },
+                    { pubkey: base_vault_lp, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_lp, isSigner: false, isWritable: true },
+                    { pubkey: quote_protocol_token_fee, isSigner: false, isWritable: true },
                     { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
                     { pubkey: METEORA_VAULT_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
@@ -954,53 +938,46 @@ export class Trader {
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.damm_v1_info || !mint_meta.pool)
+        if (!mint_meta.mint || !mint_meta.damm_v1_data || !mint_meta.pool)
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
-        const token_amount_raw = BigInt(token_amount.amount);
-        const sol_amount_raw = this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage);
+        const mint = new PublicKey(mint_meta.mint);
+        const pool = new PublicKey(mint_meta.pool);
+        const base_vault_authority = new PublicKey(mint_meta.damm_v1_data.base_vault_authority);
+        const quote_vault_authority = new PublicKey(mint_meta.damm_v1_data.quote_vault_authority);
+        const base_vault = new PublicKey(mint_meta.damm_v1_data.base_vault);
+        const quote_vault = new PublicKey(mint_meta.damm_v1_data.quote_vault);
+        const base_vault_lp_mint = new PublicKey(mint_meta.damm_v1_data.base_vault_lp_mint);
+        const quote_vault_lp_mint = new PublicKey(mint_meta.damm_v1_data.quote_vault_lp_mint);
+        const base_vault_lp = new PublicKey(mint_meta.damm_v1_data.base_vault_lp);
+        const quote_vault_lp = new PublicKey(mint_meta.damm_v1_data.quote_vault_lp);
+        const base_protocol_token_fee = new PublicKey(mint_meta.damm_v1_data.base_protocol_token_fee);
 
-        const instruction_data = this.swap_data(token_amount_raw, sol_amount_raw);
-        const token_ata = trade.calc_ata(seller.publicKey, new PublicKey(mint_meta.mint));
+        const token_amount_raw = BigInt(token_amount.amount);
+        const instruction_data = this.swap_data(
+            token_amount_raw,
+            this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage)
+        );
+        const token_ata = trade.calc_ata(seller.publicKey, mint);
         const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);
 
         return [
             createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT),
             new TransactionInstruction({
                 keys: [
-                    { pubkey: new PublicKey(mint_meta.pool), isSigner: false, isWritable: true },
+                    { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_authority),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_authority),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault), isSigner: false, isWritable: true },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault), isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_lp_mint),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_lp_mint),
-                        isSigner: false,
-                        isWritable: true
-                    },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.base_vault_lp), isSigner: false, isWritable: true },
-                    { pubkey: new PublicKey(mint_meta.damm_v1_info.quote_vault_lp), isSigner: false, isWritable: true },
-                    {
-                        pubkey: new PublicKey(mint_meta.damm_v1_info.base_protocol_token_fee),
-                        isSigner: false,
-                        isWritable: true
-                    },
+                    { pubkey: base_vault_authority, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_authority, isSigner: false, isWritable: true },
+                    { pubkey: base_vault, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault, isSigner: false, isWritable: true },
+                    { pubkey: base_vault_lp_mint, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_lp_mint, isSigner: false, isWritable: true },
+                    { pubkey: base_vault_lp, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault_lp, isSigner: false, isWritable: true },
+                    { pubkey: base_protocol_token_fee, isSigner: false, isWritable: true },
                     { pubkey: seller.publicKey, isSigner: true, isWritable: true },
                     { pubkey: METEORA_VAULT_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }

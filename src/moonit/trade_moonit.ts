@@ -116,7 +116,7 @@ function isMoonMeta(obj: any): obj is MoonshotMintMeta {
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
     public static get_name(): string {
-        return 'Moonshot';
+        return common.Program.Moonit;
     }
 
     public static async buy_token(

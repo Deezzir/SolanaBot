@@ -1,20 +1,15 @@
-import { PublicKey } from '@solana/web3.js';
-import { COMMITMENT, METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants.js';
-import * as common from '../common/common.js';
-import * as trade from '../common/trade_common.js';
+import { METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants.js';
 import * as snipe from '../common/snipe_common.js';
 
-const WORKER_PATH = './dist/meteora/worker_meteora.js';
-
 export class Runner extends snipe.SniperBase {
-    private _subscription_id: number | undefined;
-    private _logs_stop_func: (() => void) | null = null;
+    protected mint_authority = METEORA_DBC_POOL_AUTHORITY;
+    protected program_id = METEORA_DBC_PROGRAM_ID;
 
-    protected get_worker_path(): string {
-        return WORKER_PATH;
+    protected is_create_tx(logs: string[]): boolean {
+        return logs.some((log) => log.includes('Program log: Instruction: InitializeVirtualPoolWithSplToken'));
     }
 
-    decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null {
+    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null {
         try {
             if (data.length < 18) return null;
 
@@ -36,69 +31,5 @@ export class Runner extends snipe.SniperBase {
         } catch (err) {
             return null;
         }
-    }
-
-    async wait_drop_unsub(): Promise<void> {
-        if (this._subscription_id !== undefined) {
-            if (this._logs_stop_func) this._logs_stop_func();
-            global.CONNECTION.removeOnLogsListener(this._subscription_id)
-                .then(() => (this._subscription_id = undefined))
-                .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
-        }
-    }
-
-    async wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
-        const name = token_name.toLowerCase();
-        const ticker = token_ticker.toLowerCase();
-
-        return new Promise<PublicKey | null>((resolve, reject) => {
-            this._logs_stop_func = () => reject(new Error('User stopped the process'));
-            common.log('Waiting for the new token drop using Solana logs...');
-
-            this._subscription_id = global.CONNECTION.onLogs(
-                METEORA_DBC_POOL_AUTHORITY,
-                async ({ err, logs, signature }) => {
-                    if (err) return;
-                    if (logs && logs.includes('Program log: Instruction: InitializeVirtualPoolWithSplToken')) {
-                        try {
-                            const tx = await trade.retry_get_tx(signature);
-                            if (!tx || !tx.meta || !tx.transaction.message) return;
-
-                            const instructions = tx.transaction.message.compiledInstructions;
-                            const address_lookup = tx.transaction.message.getAccountKeys();
-
-                            for (const instr of instructions) {
-                                const program_id = address_lookup.get(instr.programIdIndex);
-                                const mint = address_lookup.get(1);
-
-                                if (!program_id || !program_id.equals(METEORA_DBC_PROGRAM_ID)) continue;
-                                const result = this.decode_create_instr(instr.data);
-                                if (!result) continue;
-
-                                if (
-                                    result.name.toLowerCase() === name &&
-                                    result.symbol.toLowerCase() === ticker &&
-                                    mint
-                                ) {
-                                    this._logs_stop_func = null;
-                                    await this.wait_drop_unsub();
-                                    common.log(`Found the mint using Solana logs`);
-                                    resolve(mint);
-                                }
-                            }
-                        } catch (err) {
-                            common.error(common.red(`Failed fetching the parsed transaction: ${err}`));
-                        }
-                    }
-                },
-                COMMITMENT
-            );
-
-            if (this._subscription_id === undefined) {
-                reject(new Error('Failed to subscribe to logs'));
-            }
-        }).catch(() => {
-            return null;
-        });
     }
 }
