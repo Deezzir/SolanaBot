@@ -116,7 +116,7 @@ function isMoonMeta(obj: any): obj is MoonshotMintMeta {
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
     public static get_name(): string {
-        return 'Moonshot';
+        return common.Program.Moonit;
     }
 
     public static async buy_token(
@@ -232,14 +232,16 @@ export class Trader {
     }
 
     public static async create_token(
+        _mint: Keypair,
         _creator: Signer,
         _token_name: string,
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount: number = 0,
-        _mint?: Keypair,
+        _traders?: [Signer, number][],
+        _bundle_tip?: number,
         _priority?: PriorityLevel
-    ): Promise<[String, PublicKey]> {
+    ): Promise<String> {
         throw new Error('Not implemented');
     }
 
@@ -248,6 +250,13 @@ export class Trader {
     }
 
     public static async default_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
+        throw new Error('Not Implemented');
+    }
+
+    public static update_mint_meta_reserves(
+        _mint_meta: MoonshotMintMeta,
+        _amount: number | TokenAmount
+    ): MoonshotMintMeta {
         throw new Error('Not Implemented');
     }
 

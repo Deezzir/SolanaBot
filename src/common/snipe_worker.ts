@@ -1,9 +1,8 @@
 import { parentPort, workerData } from 'worker_threads';
-import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey, TokenAmount } from '@solana/web3.js';
-import * as common from '../common/common.js';
-import * as snipe from '../common/snipe_common.js';
-import * as trade from '../common/trade_common.js';
-import * as pump from './trade_pump.js';
+import { Keypair, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
+import * as common from './common.js';
+import * as snipe from './snipe_common.js';
+import * as trade from './trade_common.js';
 import { Helius } from 'helius-sdk';
 import {
     COMMITMENT,
@@ -15,13 +14,15 @@ import {
     SNIPE_RETRIES,
     SNIPE_RETRY_INTERVAL_MS
 } from '../constants.js';
+import { get_trader } from './get_trader.js';
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));
+const TRADER: trade.IProgramTrader = get_trader(WORKER_CONF.program);
 global.CONNECTION = new Connection(HELIUS_RPC, COMMITMENT);
 global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
 
-var MINT_METADATA: pump.PumpMintMeta;
+var MINT_METADATA: trade.IMintMeta;
 var IS_DONE = false;
 var START_BUY = false;
 var START_SELL = false;
@@ -85,7 +86,7 @@ const buy = async () => {
         let transactions = [];
         let count = SNIPE_TRADE_BATCH;
         while (count > 0) {
-            const buy_promise = pump.Trader.buy_token(
+            const buy_promise = TRADER.buy_token(
                 amount,
                 WORKER_KEYPAIR,
                 MINT_METADATA,
@@ -138,7 +139,7 @@ const sell = async () => {
             try {
                 balance = await trade.get_token_balance(
                     WORKER_KEYPAIR.publicKey,
-                    new PublicKey(MINT_METADATA.mint),
+                    MINT_METADATA.mint_pubkey,
                     COMMITMENT
                 );
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
@@ -163,7 +164,7 @@ const sell = async () => {
         let count = SNIPE_TRADE_BATCH;
         parentPort?.postMessage(`[Worker ${WORKER_CONF.id}] Selling ${balance?.uiAmount} tokens`);
         while (count > 0 && balance !== undefined) {
-            const sell_promise = pump.Trader.sell_token(
+            const sell_promise = TRADER.sell_token(
                 balance,
                 WORKER_KEYPAIR,
                 MINT_METADATA,
@@ -186,7 +187,7 @@ const sell = async () => {
 
 const control_loop = async () =>
     new Promise<void>(async (resolve) => {
-        const should_sell = () => MINT_METADATA.usd_market_cap >= WORKER_CONF.mcap_threshold || START_SELL;
+        const should_sell = () => MINT_METADATA.token_usd_mc >= WORKER_CONF.mcap_threshold || START_SELL;
         const should_buy = () =>
             CURRENT_SPENDINGS < WORKER_CONF.spend_limit && CURRENT_BUY_AMOUNT > SNIPE_MIN_BUY_THRESHOLD && START_BUY;
         const process = async () => {
