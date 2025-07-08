@@ -103,7 +103,7 @@ export const METEORA_SWAP_DISCRIMINATOR = new Uint8Array([248, 198, 158, 145, 22
 
 // PUMP CONSTANTS
 export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
-export const PUMP_IPFS_API_URL = 'https://pump.fun/api/ipfs';
+export const PUMP_IPFS_API_URL = 'https://frontend-api-v3.pump.fun/ipfs/token-metadata';
 export const PUMP_CURVE_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
 export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%

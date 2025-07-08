@@ -149,6 +149,7 @@ export function get_wallets(keys_csv_path: string): Wallet[] {
         const records = parse(content, {
             delimiter: ',',
             trim: true,
+            comment: '#',
             columns: WALLETS_FILE_HEADERS,
             skip_empty_lines: true,
             from_line: 2

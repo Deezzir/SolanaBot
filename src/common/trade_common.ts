@@ -745,7 +745,7 @@ export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; uns
 export function get_sol_token_amount(amount: number): TokenAmount {
     return {
         uiAmount: amount,
-        amount: (amount * LAMPORTS_PER_SOL).toString(),
+        amount: Math.floor(amount * LAMPORTS_PER_SOL).toString(),
         decimals: Math.log10(LAMPORTS_PER_SOL)
     } as TokenAmount;
 }

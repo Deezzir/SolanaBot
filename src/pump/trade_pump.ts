@@ -946,8 +946,7 @@ export class Trader {
                 headers: {
                     Accept: 'application/json'
                 },
-                body: formData,
-                credentials: 'same-origin'
+                body: formData
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
