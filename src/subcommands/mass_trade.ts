@@ -5,37 +5,35 @@ import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel } 
 
 export async function bundle_buy(
     mint_meta: trade.IMintMeta,
-    wallets: common.Wallet[],
+    entries: [common.Wallet, number][],
     trader: trade.IProgramTrader,
-    amount: number | undefined,
-    min: number | undefined,
-    max: number | undefined,
     slippage: number,
     bundle_tip: number,
     priority: PriorityLevel
 ): Promise<void> {
-    const wallet_bundles = common.chunks(wallets, JITO_BUNDLE_SIZE);
+    const wallet_bundles = common.chunks(entries, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];
     const ltas: AddressLookupTableAccount[] = [];
 
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
         const signers: Signer[][] = [];
-        for (const wallet of wallet_bundle) {
+        for (const entry of wallet_bundle) {
+            const [wallet, amount] = entry;
             const buyer = wallet.keypair;
-            let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
             try {
                 const balance = await trade.get_balance(buyer.publicKey, COMMITMENT);
-                if (balance < buy_amount) continue;
+                if (balance < amount) continue;
                 common.log(
-                    `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                    `Buying ${amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
                 );
                 const [buy_instructions, buy_ltas] = await trader.buy_token_instructions(
-                    buy_amount,
+                    amount,
                     buyer,
                     mint_meta,
                     slippage
                 );
+                mint_meta = trader.update_mint_meta_reserves(mint_meta, amount);
                 instructions.push(buy_instructions);
                 signers.push([buyer]);
                 if (ltas.length === 0) ltas.push(...(buy_ltas || []));
@@ -93,17 +91,18 @@ export async function bundle_sell(
         const signers: Signer[][] = [];
         for (const wallet of wallet_bundle) {
             const seller = wallet.keypair;
-            const token_amount_to_sell = trade.get_token_amount_by_percent(wallet.token_amount, percent);
+            const token_amount = trade.get_token_amount_by_percent(wallet.token_amount, percent);
             try {
                 common.log(
-                    `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                    `Selling ${token_amount.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
                 );
                 const [sell_instructions, sell_ltas] = await trader.sell_token_instructions(
-                    token_amount_to_sell,
+                    token_amount,
                     seller,
                     mint_meta,
                     slippage
                 );
+                mint_meta = trader.update_mint_meta_reserves(mint_meta, token_amount);
                 instructions.push(sell_instructions);
                 signers.push([seller]);
                 if (ltas.length === 0) ltas.push(...(sell_ltas || []));
@@ -126,29 +125,26 @@ export async function bundle_sell(
 
 export async function seq_buy(
     mint_meta: trade.IMintMeta,
-    wallets: common.Wallet[],
+    entries: [common.Wallet, number][],
     trader: trade.IProgramTrader,
-    amount: number | undefined,
-    min: number | undefined,
-    max: number | undefined,
     slippage: number,
     priority: PriorityLevel,
     protection_tip?: number
 ): Promise<void> {
     const transactions: Promise<void>[] = [];
 
-    for (const wallet of wallets) {
+    for (const entry of entries) {
+        const [wallet, amount] = entry;
         const buyer = wallet.keypair;
-        let buy_amount = amount || common.uniform_random(min ?? 0, max ?? 0);
         try {
             const balance = (await trade.get_balance(buyer.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
-            if (balance < buy_amount) continue;
+            if (balance < amount) continue;
             common.log(
-                `Buying ${buy_amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
+                `Buying ${amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
             transactions.push(
                 trader
-                    .buy_token(buy_amount, buyer, mint_meta, slippage, priority, protection_tip)
+                    .buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip)
                     .then((signature) =>
                         common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                     )
@@ -158,6 +154,7 @@ export async function seq_buy(
                         )
                     )
             );
+            mint_meta = trader.update_mint_meta_reserves(mint_meta, amount);
             if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
@@ -199,6 +196,7 @@ export async function seq_sell(
                         )
                     )
             );
+            mint_meta = trader.update_mint_meta_reserves(mint_meta, token_amount_to_sell);
             if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {

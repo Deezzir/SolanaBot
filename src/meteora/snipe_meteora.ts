@@ -1,19 +1,19 @@
-import { PUMP_CREATE_DISCRIMINATOR, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_PROGRAM_ID } from '../constants.js';
+import { METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants.js';
 import * as snipe from '../common/snipe_common.js';
 
 export class Runner extends snipe.SniperBase {
-    protected mint_authority = PUMP_MINT_AUTHORITY_ACCOUNT;
-    protected program_id = PUMP_PROGRAM_ID;
+    protected mint_authority = METEORA_DBC_POOL_AUTHORITY;
+    protected program_id = METEORA_DBC_PROGRAM_ID;
 
     protected is_create_tx(logs: string[]): boolean {
-        return logs.some((log) => log.includes('Program log: Instruction: Create'));
+        return logs.some((log) => log.includes('Program log: Instruction: InitializeVirtualPoolWithSplToken'));
     }
 
     protected decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null {
         try {
             if (data.length < 18) return null;
 
-            const prefix = Uint8Array.from(PUMP_CREATE_DISCRIMINATOR);
+            const prefix = Uint8Array.from([0x8c, 0x55, 0xd7, 0xb0, 0x66, 0x36, 0x68, 0x4f]);
             const data_prefix = Buffer.from(data.slice(0, 8));
             if (!data_prefix.equals(prefix)) return null;
 

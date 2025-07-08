@@ -120,7 +120,7 @@ async function drop_tokens_csv<T extends AirdropUser | PresaleUser>(
         common.log(common.yellow(`Processing ${pending.length} records...`));
         const promises = pending.map(async (record: any) => {
             const receiver = new PublicKey(record.wallet);
-            const token_amount = trade.get_token_amount(record.tokensToSend, mint_meta.token_decimals);
+            const token_amount = trade.get_token_amount(record.tokensToSend, mint_meta.token_decimal);
 
             try {
                 await trade.send_tokens(token_amount, mint_meta.mint, drop, receiver).then((sig) => {

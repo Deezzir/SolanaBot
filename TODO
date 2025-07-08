@@ -1,16 +1,13 @@
 # TODO
 
-- Add Bump bot
-- Create token with bundle buy
 - Remove raydium sdk dependancy
+- Add Bump bot
 - Finish Moonshot (without dep)
 
 - Cache for blockhash and priority functions(optimeze)
 - Add more dexes (Meteora, Orca, etc)
-- Add more programs
 
 - Rework snipe logic
-- Add bundle snipe
 - Add sell by percent to start/snipe command
 
-- Interactive mode
+- GUI

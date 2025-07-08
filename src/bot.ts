@@ -13,6 +13,7 @@ import {
     DROP_PRESALE_CSV,
     HELIUS_API_KEY,
     HELIUS_RPC,
+    JITO_MIN_TIP,
     PriorityLevel,
     TRADE_MAX_SLIPPAGE,
     TRANSFER_MAX_DEPTH,
@@ -77,8 +78,8 @@ function get_list_option(wallet_cnt: number): Option {
 
 function get_bundle_tip_option(): Option {
     return new Option('-b, --bundle <tip>', 'Enable bundles by providing tip amount').argParser((value) => {
-        if (!common.validate_float(value, 0))
-            throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
+        if (!common.validate_float(value, JITO_MIN_TIP))
+            throw new InvalidOptionArgumentError(`Not a valid tip amount. Must be greater than ${JITO_MIN_TIP}.`);
         return parseFloat(value);
     });
 }
@@ -148,7 +149,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('4.0.0').description('Solana Bot CLI');
+    program.version('5.0.0').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');
@@ -303,6 +304,33 @@ async function main() {
         .alias('cl')
         .description('Clean the wallets by closing zero balance token accounts')
         .action(async () => await commands.clean(wallets));
+
+    program
+        .command('token-burn')
+        .alias('tburn')
+        .description('Burn the tokens by mint from a wallet')
+        .argument('<mint>', 'Public address of the mint', (value) => {
+            if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
+            return new PublicKey(value);
+        })
+        .argument('<burner_index>', 'Index of the burner wallet', (value) => {
+            if (!common.validate_int(value, 0, wallet_cnt))
+                throw new InvalidArgumentError(`Not a valid range (0 - ${wallet_cnt}).`);
+            const burner_wallet = common.get_wallet(parseInt(value, 10), wallets);
+            if (!burner_wallet) throw new InvalidArgumentError('Invalid index.');
+            return burner_wallet.keypair;
+        })
+        .option('-a, --amount <number>', 'Amount of tokens to burn', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value < 0.0) throw new InvalidOptionArgumentError('Invalid amount. Must be greater than 0.0');
+            return parsed_value;
+        })
+        .addOption(get_percent_option())
+        .action(async (mint, burner, options) => {
+            const { amount, percent } = options;
+            await commands.burn_token(mint, burner, amount, percent);
+        });
 
     program
         .command('collect')
@@ -487,7 +515,7 @@ async function main() {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .option('-a --amount <amount>', 'Amount to buy in SOL', (value) => {
+        .option('-a, --amount <amount>', 'Amount to buy in SOL', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidArgumentError('Not a number.');
             return parsed_value;
@@ -649,7 +677,8 @@ async function main() {
             return value;
         })
         .action(async (json, image_path) => {
-            await commands.create_token_metadata(json, image_path);
+            const pg = program.opts().program;
+            await commands.create_token_metadata(json, image_path, pg);
         });
 
     program
@@ -694,15 +723,36 @@ async function main() {
                 throw new InvalidOptionArgumentError(`Invalid private key provided`);
             }
         })
-        .option('-b, --buy <number>', 'Amount of SOL to buy the token', (value) => {
+        .option('-a, --amount <number>', 'Amount of SOL to buy the token', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value) || parsed_value <= 0) throw new InvalidOptionArgumentError('Not a number.');
             return parsed_value;
         })
+        .option('--min <number>', 'Minimum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value <= 0.0)
+                throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
+            return parsed_value;
+        })
+        .option('--max <number>', 'Maximum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
+            const parsed_value = parseFloat(value);
+            if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
+            if (parsed_value <= 0.0)
+                throw new InvalidOptionArgumentError('Invalid maximum amount. Must be greater than 0.0.');
+            return parsed_value;
+        })
+        .addOption(get_from_option(wallet_cnt))
+        .addOption(get_to_option(wallet_cnt))
+        .addOption(get_list_option(wallet_cnt))
+        .addOption(get_bundle_tip_option())
         .action(async (cid, creator, options) => {
-            const { mint, buy } = options;
+            const { mint, amount, from, to, list, bundle, min, max } = options;
             const pg = program.opts().program;
-            await commands.create_token(cid, creator, pg, buy, mint);
+            let buyers: common.Wallet[] | undefined = undefined;
+            if (from !== undefined || to !== undefined || list !== undefined)
+                buyers = common.filter_wallets(wallets, from, to, list);
+            await commands.create_token(cid, creator, pg, amount, mint, buyers, min, max, bundle);
         });
 
     program

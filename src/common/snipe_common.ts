@@ -1,7 +1,7 @@
 import { Worker } from 'worker_threads';
 import inquirer from 'inquirer';
 import { clearLine, moveCursor } from 'readline';
-import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
 import {
     COMMITMENT,
     PriorityLevel,
@@ -13,7 +13,8 @@ import {
     TRADE_MAX_SLIPPAGE
 } from '../constants.js';
 import * as common from './common.js';
-import * as trade from './trade_common.js';
+import { IProgramTrader, get_balance, retry_get_tx } from './trade_common.js';
+import bs58 from 'bs58';
 
 export type BotConfig = {
     thread_cnt: number;
@@ -33,6 +34,7 @@ export type BotConfig = {
 };
 
 export type WorkerConfig = {
+    program: common.Program;
     secret: Uint8Array;
     id: number;
     buy_interval: number;
@@ -66,18 +68,91 @@ export interface ISniper {
 
 export abstract class SniperBase implements ISniper {
     protected bot_config: BotConfig | null;
-    protected trader: trade.IProgramTrader;
+    protected trader: IProgramTrader;
     protected workers: WorkerJob[];
 
-    constructor(trader: trade.IProgramTrader) {
+    protected mint_authority!: PublicKey;
+    protected program_id!: PublicKey;
+
+    private subscription_id: number | undefined;
+    private logs_stop_func: (() => void) | null = null;
+
+    constructor(trader: IProgramTrader) {
         this.workers = new Array<WorkerJob>();
         this.trader = trader;
         this.bot_config = null;
     }
 
-    protected abstract wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null>;
-    protected abstract wait_drop_unsub(): Promise<void>;
-    protected abstract get_worker_path(): string;
+    protected abstract decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null;
+    protected abstract is_create_tx(logs: string[]): boolean;
+
+    private get_worker_path(): string {
+        return './dist/common/snipe_worker.js';
+    }
+
+    private async wait_drop_unsub(): Promise<void> {
+        if (this.subscription_id !== undefined) {
+            if (this.logs_stop_func) this.logs_stop_func();
+            global.CONNECTION.removeOnLogsListener(this.subscription_id)
+                .then(() => (this.subscription_id = undefined))
+                .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
+        }
+    }
+
+    public async wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
+        const name = token_name.toLowerCase();
+        const ticker = token_ticker.toLowerCase();
+        common.log(`Waiting for the new token drop for the '${this.trader.get_name()}' program...`);
+
+        return new Promise<PublicKey | null>((resolve, reject) => {
+            this.logs_stop_func = () => reject(new Error('User stopped the process'));
+
+            this.subscription_id = global.CONNECTION.onLogs(
+                this.mint_authority,
+                async ({ err, logs, signature }) => {
+                    if (err) return;
+                    if (logs && this.is_create_tx(logs)) {
+                        console.log(`Found a new token drop using Solana logs: ${signature}`);
+                        try {
+                            const tx = await retry_get_tx(signature);
+                            if (!tx || !tx.meta || !tx.transaction.message) return;
+
+                            const instructions = tx.transaction.message.instructions as PartiallyDecodedInstruction[];
+
+                            for (const instr of instructions) {
+                                const program_id = instr.programId;
+                                const mint = tx.transaction.message.accountKeys[1];
+
+                                if (!program_id.equals(this.program_id)) continue;
+                                const result = this.decode_create_instr(bs58.decode(instr.data));
+                                if (!result) continue;
+
+                                if (
+                                    result.name.toLowerCase() === name &&
+                                    result.symbol.toLowerCase() === ticker &&
+                                    mint
+                                ) {
+                                    this.logs_stop_func = null;
+                                    await this.wait_drop_unsub();
+                                    common.log(`Found the mint using Solana logs`);
+                                    resolve(mint.pubkey);
+                                }
+                            }
+                        } catch (err) {
+                            common.error(common.red(`Failed fetching the parsed transaction: ${err}`));
+                        }
+                    }
+                },
+                COMMITMENT
+            );
+
+            if (this.subscription_id === undefined) {
+                reject(new Error('Failed to subscribe to logs'));
+            }
+        }).catch(() => {
+            return null;
+        });
+    }
 
     public async setup_config(keys_cnt: number, json_config?: object): Promise<void> {
         if (json_config) {
@@ -179,7 +254,7 @@ export abstract class SniperBase implements ISniper {
         const balance_checks = wallets.map(async (wallet) => {
             const holder = wallet.keypair;
             try {
-                const sol_balance = (await trade.get_balance(holder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
+                const sol_balance = (await get_balance(holder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
                 if (sol_balance <= min_balance) {
                     common.error(
                         `Address: ${holder.publicKey.toString().padEnd(44, ' ')} has no balance. (wallet ${wallet.id})`
@@ -227,6 +302,7 @@ export abstract class SniperBase implements ISniper {
 
         for (const wallet of wallets) {
             const worker_data: WorkerConfig = {
+                program: this.trader.get_name() as common.Program,
                 secret: wallet.keypair.secretKey,
                 id: wallet.id,
                 buy_interval: this.bot_config!.buy_interval,
