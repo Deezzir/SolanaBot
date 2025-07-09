@@ -327,9 +327,8 @@ export class Trader {
             meta_cid,
             mint
         );
-        console.log(mint_meta);
         if (sol_amount > 0) {
-            const buy_instructions = await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.0005);
+            const buy_instructions = await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.005);
             create_instructions.push(...buy_instructions);
         }
 
@@ -403,7 +402,6 @@ export class Trader {
             }
 
             if (cpmm_pool) {
-                console.log(cpmm_pool.toString());
                 const state = await this.get_cpmm_state(cpmm_pool);
                 const metrics = this.get_cpmm_token_metrics(state);
                 return new BonkMintMeta({
@@ -548,8 +546,10 @@ export class Trader {
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
 
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
-        const token_amount_raw = this.calc_slippage_up(this.calc_token_amount_raw(sol_amount_raw, mint_meta), slippage);
-        console.log(token_amount_raw);
+        const token_amount_raw = this.calc_slippage_down(
+            this.calc_token_amount_raw(sol_amount_raw, mint_meta),
+            slippage
+        );
         const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw, 'buy');
 
         return [
