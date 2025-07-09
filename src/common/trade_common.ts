@@ -40,7 +40,9 @@ import {
     TRADE_RETRIES,
     JITO_BUNDLE_INTERVAL_MS,
     JITO_MIN_TIP,
-    SOL_MINT
+    SOL_MINT,
+    SENDER_ENDPOINTS,
+    SENDER_TIP_ACCOUNTS
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -301,6 +303,11 @@ function get_random_jito_tip_account(): PublicKey {
     return new PublicKey(random_tip_account);
 }
 
+function get_random_sender_tip_account(): PublicKey {
+    const random_tip_account = SENDER_TIP_ACCOUNTS[Math.floor(Math.random() * SENDER_TIP_ACCOUNTS.length)];
+    return new PublicKey(random_tip_account);
+}
+
 function create_versioned_tx(
     signers: Signer[],
     instructions: TransactionInstruction[],
@@ -383,23 +390,55 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
+async function send_sender_tx(serialized_tx: string): Promise<string[]> {
+    const requests = SENDER_ENDPOINTS.map((endpoint) =>
+        fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now().toString(),
+                method: 'sendTransaction',
+                params: [
+                    serialized_tx,
+                    {
+                        encoding: 'base64',
+                        skipPreflight: true, // Required for Sender
+                        maxRetries: 0
+                    }
+                ]
+            })
+        })
+    );
+    const responses = await Promise.all(
+        requests.map((resp) =>
+            resp
+                .then((resp) => resp.json())
+                .then((data) => data.result as string)
+                .catch((err) => err)
+        )
+    );
+    return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
+}
+
 async function send_protected_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
     tip: number,
-    alts?: AddressLookupTableAccount[]
+    alts?: AddressLookupTableAccount[],
+    provider: 'sender' | 'jito' = 'sender'
 ): Promise<String> {
     if (tip < JITO_MIN_TIP) throw new Error(`Tip is too low, minimum is ${JITO_MIN_TIP} `);
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
-    const jito_tip_account = get_random_jito_tip_account();
+    const tip_account = provider === 'sender' ? get_random_sender_tip_account() : get_random_jito_tip_account();
 
     instructions.push(
         SystemProgram.transfer({
             fromPubkey: signers[0].publicKey,
-            toPubkey: jito_tip_account,
+            toPubkey: tip_account,
             lamports: tip * LAMPORTS_PER_SOL
         })
     );
@@ -409,7 +448,7 @@ async function send_protected_tx(
     const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
     const serialized_tx = Buffer.from(versioned_tx.serialize()).toString('base64');
 
-    const responses = await send_jito_tx(serialized_tx);
+    const responses = provider === 'sender' ? await send_sender_tx(serialized_tx) : await send_jito_tx(serialized_tx);
     if (responses.length > 0) {
         await check_transaction_status(jito_tx_signature, ctx);
         return responses[0];

@@ -112,7 +112,6 @@ export abstract class SniperBase implements ISniper {
                 async ({ err, logs, signature }) => {
                     if (err) return;
                     if (logs && this.is_create_tx(logs)) {
-                        console.log(`Found a new token drop using Solana logs: ${signature}`);
                         try {
                             const tx = await retry_get_tx(signature);
                             if (!tx || !tx.meta || !tx.transaction.message) return;

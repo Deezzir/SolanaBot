@@ -48,7 +48,7 @@ export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111
 export const RENT_PROGRAM_ID = new PublicKey('SysvarRent111111111111111111111111111111111');
 export const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
-export const JITO_MIN_TIP = 1000 / LAMPORTS_PER_SOL;
+export const JITO_MIN_TIP = 1000000 / LAMPORTS_PER_SOL;
 export const JITO_BUNDLE_SIZE = 5;
 export const JITO_BUNDLE_INTERVAL_MS = 1000;
 export const JITO_TIP_ACCOUNTS = [
@@ -61,12 +61,33 @@ export const JITO_TIP_ACCOUNTS = [
     'DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL',
     '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT'
 ];
+export const SENDER_TIP_ACCOUNTS = [
+    '4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE',
+    'D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ',
+    '9bnz4RShgq1hAnLnZbP8kbgBg1kEmcJBYQq3gQbmnSta',
+    '5VY91ws6B2hMmBFRsXkoAAdsPHBJwRfBht4DXox3xkwn',
+    '2nyhqdwKcJZR2vcqCyrYsaPVdAnFoJjiksCXJ7hfEYgD',
+    '2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ',
+    'wyvPkWjVZz1M8fHQnMMCDTQDbkManefNNhweYk5WkcF',
+    '3KCKozbAaF75qEU33jtzozcJ29yJuaLJTy2jFdzUY8bT',
+    '4vieeGHPYPG2MmyPRcYjdiDmmhN3ww7hsFNap8pVN3Ey',
+    '4TQLFNWK8AovT1gFvda5jfw2oJeRMKEmw7aH6MGBJ3or'
+];
 export const JITO_ENDPOINTS = [
     'https://mainnet.block-engine.jito.wtf/api/v1',
     'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1',
     'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1',
     'https://ny.mainnet.block-engine.jito.wtf/api/v1',
     'https://tokyo.mainnet.block-engine.jito.wtf/api/v1'
+];
+export const SENDER_ENDPOINTS = [
+    'http://slc-sender.helius-rpc.com/fast',
+    'http://ewr-sender.helius-rpc.com/fast',
+    'http://lon-sender.helius-rpc.com/fast',
+    'http://fra-sender.helius-rpc.com/fast',
+    'http://ams-sender.helius-rpc.com/fast',
+    'http://sg-sender.helius-rpc.com/fast ',
+    'http://tyo-sender.helius-rpc.com/fast'
 ];
 export enum PriorityLevel {
     MIN = 'Min',
