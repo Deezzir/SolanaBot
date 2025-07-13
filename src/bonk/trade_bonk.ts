@@ -394,8 +394,8 @@ export class Trader {
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
                     market_cap: metrics.mcap_sol,
-                    sol_reserves: state.real_quote,
-                    token_reserves: state.real_base,
+                    sol_reserves: state.real_quote + state.virtual_quote,
+                    token_reserves: state.virtual_base - state.real_base,
                     total_supply: state.supply,
                     complete: state.status !== 0
                 });
