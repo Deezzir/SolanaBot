@@ -1,7 +1,7 @@
 import { AddressLookupTableAccount, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
-import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel } from '../constants.js';
+import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel, SENDER_INTERVAL_MS } from '../constants.js';
 
 export async function bundle_buy(
     mint_meta: trade.IMintMeta,
@@ -155,7 +155,7 @@ export async function seq_buy(
                     )
             );
             mint_meta = trader.update_mint_meta_reserves(mint_meta, amount);
-            if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+            if (protection_tip) await common.sleep(SENDER_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
@@ -197,7 +197,7 @@ export async function seq_sell(
                     )
             );
             mint_meta = trader.update_mint_meta_reserves(mint_meta, token_amount_to_sell);
-            if (protection_tip) await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+            if (protection_tip) await common.sleep(SENDER_INTERVAL_MS);
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));

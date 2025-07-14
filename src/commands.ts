@@ -181,6 +181,7 @@ export async function promote(
 
 export async function token_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
+    const sol_price = await common.fetch_sol_price();
 
     common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
 
@@ -201,27 +202,41 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         { title: 'Name', width: common.COLUMN_WIDTHS.name },
         { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
         { title: 'Allocation', width: common.COLUMN_WIDTHS.allocation, align: 'right' },
-        { title: `$${token_symbol} Balance`, width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' }
+        { title: `$${token_symbol} Balance`, width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
+        { title: `Entry MC`, width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
     ]);
 
-    let total = 0;
+    let total_tokens = 0;
+    let total_spendings = 0;
+    let total_fees = 0;
     let wallet_count = 0;
 
     for (const wallet of wallets) {
         const balance = await trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT);
         const ui_balance = balance.uiAmount || 0;
         if (ui_balance === 0) continue;
+        const cost_basis = await trade.get_cost_basis(mint, wallet.keypair.publicKey, COMMITMENT);
+        if (!cost_basis) throw new Error(`Failed to get the cost basis for the mint: ${mint.toString()}`);
 
-        wallet_count++;
+        const entry_mcap = (((cost_basis.average_cost_basis * supply) / 10 ** decimals) * sol_price) / 1000;
         const alloc = (ui_balance / (supply / 10 ** decimals)) * 100;
-        total += ui_balance;
+
+        total_tokens += ui_balance;
+        total_spendings += cost_basis.total_spendings;
+        total_fees += cost_basis.total_fees;
+        wallet_count++;
 
         common.print_row([
             { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
             { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
             { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
             { content: `${alloc.toFixed(2)}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
-            { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' }
+            { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
+            {
+                content: `${entry_mcap.toFixed(1)}K$`,
+                width: common.COLUMN_WIDTHS.entryMcap,
+                align: 'right'
+            }
         ]);
     }
 
@@ -230,14 +245,19 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         { width: common.COLUMN_WIDTHS.name },
         { width: common.COLUMN_WIDTHS.publicKey },
         { width: common.COLUMN_WIDTHS.allocation },
-        { width: common.COLUMN_WIDTHS.tokenBalance }
+        { width: common.COLUMN_WIDTHS.tokenBalance },
+        { width: common.COLUMN_WIDTHS.entryMcap }
     ]);
 
-    const allocation = (total / (supply / 10 ** decimals)) * 100;
+    const allocation = (total_tokens / (supply / 10 ** decimals)) * 100;
+    const average_entry_mcap =
+        (((((total_spendings - total_fees) / total_tokens) * supply) / 10 ** decimals) * sol_price) / 1000;
 
-    common.log(common.green(`\nWallets with balance: ${wallet_count}`));
-    common.log(`Total balance: ${common.format_currency(total)} ${token_symbol}`);
-    common.log(common.bold(`Total allocation: ${allocation.toFixed(2)}%\n`));
+    common.log(common.green(`\nWallet Count: ${wallet_count}`));
+    common.log(`Average Entry MC: ${common.bold(average_entry_mcap.toFixed(1) + 'K$')}`);
+    common.log(`Total Balance: ${common.bold(common.format_currency(total_tokens))} ${token_symbol}`);
+    common.log(`Total Allocation: ${common.bold(allocation.toFixed(2) + '%')}`);
+    common.log(`Total Cost: ${common.red(common.format_currency(total_spendings) + ' SOL')}\n`);
 }
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
@@ -285,7 +305,7 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
 
     let total = 0;
     common.log(common.yellow('Getting the balance of the wallets...'));
-    common.log(common.yellow(`Wallet count: ${wallets.length}\n`));
+    common.log(common.yellow(`Wallet Count: ${wallets.length}\n`));
 
     common.print_header([
         { title: 'Id', width: common.COLUMN_WIDTHS.id },
@@ -313,7 +333,7 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
         { width: common.COLUMN_WIDTHS.solBalance }
     ]);
 
-    common.log(common.bold(`\nTotal balance: ${common.format_currency(total)} SOL\n`));
+    common.log(`\nTotal balance: ${common.bold(common.format_currency(total) + ' SOL')}\n`);
 }
 
 export async function sell_token_once(
@@ -846,9 +866,9 @@ export async function wallet_pnl(public_key: PublicKey): Promise<void> {
     accent = total_unrealized > 0 ? common.green : common.red;
     common.log(`Total Unrealized: ${accent('$' + common.format_currency(total_unrealized))}`);
 
-    accent = total > 0 ? common.green : common.red;
+    accent = total >= 0 ? common.green : common.red;
     common.log(
-        `Total Profit: ${accent('$' + common.format_currency(total))} | ${accent(common.format_currency(total / sol_price) + 'SOL')}`
+        `Total Profit: ${accent('$' + common.format_currency(total))} | ${accent(common.format_currency(total / sol_price) + ' SOL')}`
     );
 
     accent = total_pnl > 0 ? common.green : common.red;

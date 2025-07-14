@@ -1,33 +1,24 @@
-import { PublicKey, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, ConfirmedSignatureInfo } from '@solana/web3.js';
+import { PublicKey, ParsedTransactionWithMeta, ConfirmedSignatureInfo } from '@solana/web3.js';
 import * as common from '../common/common.js';
 import { PNL_BATCH_DELAY_MS, PNL_BATCH_SIZE, SOL_MINT, TRADE_RETRY_INTERVAL_MS } from '../constants.js';
-import { get_token_meta } from '../common/trade_common.js';
+import { calc_token_balance_changes, get_token_meta, TxBalanceChanges } from '../common/trade_common.js';
 
-interface TransactionBalanceChanges {
-    pre_sol_balance: number;
-    post_sol_balance: number;
-    pre_token_balance: number;
-    post_token_balance: number;
-    change_sol: number;
-    change_tokens: number;
-}
-
-interface TransactionWithBalances extends ParsedTransactionWithMeta {
-    balance_changes: TransactionBalanceChanges;
+type TransactionWithBalances = ParsedTransactionWithMeta & {
+    balance_changes: TxBalanceChanges;
     transaction_data: {
         mint?: string;
         signature: string;
     };
-}
+};
 
-interface ProfitLossTX {
+type ProfitLossTX = {
     signature: string;
     change_sol: number;
     change_tokens: number;
     timestamp?: number;
-}
+};
 
-interface ProfitLoss {
+type ProfitLoss = {
     mint: string;
     name: string;
     symbol: string;
@@ -35,14 +26,14 @@ interface ProfitLoss {
     unrealized_pnl: number;
     token_balance: number;
     transactions: ProfitLossTX[];
-}
+};
 
-interface WalletPNL {
+type WalletPNL = {
     address: PublicKey;
     profit_loss: ProfitLoss[];
     total_realized_pnl: number;
     total_unrealized_pnl: number;
-}
+};
 
 async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSignatureInfo[]> {
     const all_signatures: ConfirmedSignatureInfo[] = [];
@@ -64,57 +55,6 @@ async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSigna
     }
 
     return all_signatures;
-}
-
-function get_default_transaction_balance_changes(): TransactionBalanceChanges {
-    return {
-        pre_sol_balance: 0.0,
-        post_sol_balance: 0.0,
-        pre_token_balance: 0.0,
-        post_token_balance: 0.0,
-        change_sol: 0.0,
-        change_tokens: 0.0
-    };
-}
-
-function calculate_balance_changes(tx: ParsedTransactionWithMeta, public_key: PublicKey): TransactionBalanceChanges {
-    if (!tx.meta || !tx.meta.postTokenBalances || !tx.meta.preTokenBalances) {
-        return get_default_transaction_balance_changes();
-    }
-
-    const change_sol_index = tx.transaction.message.accountKeys.findIndex((account) =>
-        account.pubkey.equals(public_key)
-    );
-    const pre_token_balance_index = tx.meta.preTokenBalances.findIndex(
-        (change) => change.owner === public_key.toString()
-    );
-    const post_token_balance_index = tx.meta.postTokenBalances.findIndex(
-        (change) => change.owner === public_key.toString()
-    );
-
-    const pre_sol_balance = tx.meta.preBalances[change_sol_index] / LAMPORTS_PER_SOL;
-    const post_sol_balance = tx.meta.postBalances[change_sol_index] / LAMPORTS_PER_SOL;
-
-    let pre_token_balance = 0.0;
-    let post_token_balance = 0.0;
-
-    if (pre_token_balance_index !== -1)
-        pre_token_balance = tx.meta.preTokenBalances[pre_token_balance_index].uiTokenAmount.uiAmount || 0.0;
-
-    if (post_token_balance_index !== -1)
-        post_token_balance = tx.meta.postTokenBalances[post_token_balance_index].uiTokenAmount.uiAmount || 0.0;
-
-    const change_sol = post_sol_balance - pre_sol_balance;
-    const change_tokens = post_token_balance - pre_token_balance;
-
-    return {
-        pre_sol_balance,
-        post_sol_balance,
-        pre_token_balance,
-        post_token_balance,
-        change_sol,
-        change_tokens
-    };
 }
 
 async function get_transactions(signatures: string[]): Promise<(ParsedTransactionWithMeta | null)[]> {
@@ -210,7 +150,8 @@ async function calculate_profit_loss(
     for (const tx of transactions) {
         if (!tx.transaction_data.mint) continue;
         const mint = tx.transaction_data.mint;
-        const change_sol = tx.balance_changes.change_sol;
+        const fees = tx.balance_changes.fees;
+        const change_sol = tx.balance_changes.change_sol - Math.sign(tx.balance_changes.change_sol) * fees;
         const change_tokens = tx.balance_changes.change_tokens;
 
         if (change_sol > 0 && change_tokens == 0) continue;
@@ -228,8 +169,8 @@ async function calculate_profit_loss(
         mint_entry.total_tokens_change += change_tokens;
         mint_entry.transactions.push({
             signature: tx.transaction_data.signature,
-            change_sol: tx.balance_changes.change_sol,
-            change_tokens: tx.balance_changes.change_tokens,
+            change_sol: change_sol,
+            change_tokens: change_tokens,
             timestamp: tx.blockTime || undefined
         });
     }
@@ -286,9 +227,11 @@ export async function get_wallet_pnl(public_key: PublicKey, sol_price: number): 
                 if (!tx) return;
                 const tx_data = extract_transaction_data(tx);
                 if (!tx_data.mint) return;
+                const balance_changes = calc_token_balance_changes(tx, public_key);
+                if (!balance_changes) return;
 
                 return {
-                    balance_changes: calculate_balance_changes(tx, public_key),
+                    balance_changes: balance_changes,
                     transaction_data: tx_data,
                     ...tx
                 };
