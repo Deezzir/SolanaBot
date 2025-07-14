@@ -31,7 +31,7 @@ import {
     PUMP_EVENT_AUTHORITUY_ACCOUNT,
     PUMP_FEE_PERCENTAGE,
     PUMP_FEE_ACCOUNT,
-    PUMP_FETCH_API_URL,
+    PUMP_API_URL,
     PUMP_GLOBAL_ACCOUNT,
     METAPLEX_META_SEED,
     PUMP_MINT_AUTHORITY_ACCOUNT,
@@ -964,7 +964,7 @@ export class Trader {
 
         try {
             const response = await fetch(
-                `${PUMP_FETCH_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
+                `${PUMP_API_URL}/coins?offset=${offset}&limit=${limit}&sort=last_trade_timestamp&order=DESC&includeNsfw=false`
             );
             const data = await response.json();
             if (!data || data.statusCode !== undefined) return [];
@@ -982,7 +982,7 @@ export class Trader {
     }
 
     private static graduated_mints_cache: PublicKey[] | null = null;
-    public static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
+    private static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
         if (count <= 0) return [];
         if (!this.graduated_mints_cache) {
             this.graduated_mints_cache = [];

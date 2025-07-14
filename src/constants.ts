@@ -102,6 +102,7 @@ export enum PriorityLevel {
 }
 
 // TRADE DEX CONSTANTS
+export const RAYDIUM_LAUNCHPAD_API_URL = 'https://launch-mint-v1.raydium.io';
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 export const RAYDIUM_AMM4_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 export const RAYDIUM_LAUNCHPAD_PROGRAM_ID = new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj');
@@ -130,6 +131,8 @@ export const BONK_IPFS_META_API_URL = 'https://storage.letsbonk.fun/upload/meta'
 export const BONK_IPFS_IMAGE_API_URL = 'https://storage.letsbonk.fun/upload/img';
 export const BONK_SWAP_TAX = 0.0125; // 1.25%
 export const BONK_CONFIG = new PublicKey('FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1');
+export const BONK_CONFIG_2 = new PublicKey('BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4');
+export const BONK_CONFIG_3 = new PublicKey('8pCtbn9iatQ8493mDQax4xfEUjhoVBpUWYVQoRU18333');
 
 // METEORA CONSTANTS
 export const METEORA_DBC_PROGRAM_ID = new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN');
@@ -149,7 +152,7 @@ export const METEORA_VAULT_HEADER = new Uint8Array([211, 8, 232, 43, 2, 152, 117
 export const METEORA_SWAP_DISCRIMINATOR = new Uint8Array([248, 198, 158, 145, 225, 117, 135, 200]);
 
 // PUMP CONSTANTS
-export const PUMP_FETCH_API_URL = 'https://frontend-api-v3.pump.fun';
+export const PUMP_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_IPFS_API_URL = 'https://frontend-api-v3.pump.fun/ipfs/token-metadata';
 export const PUMP_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%

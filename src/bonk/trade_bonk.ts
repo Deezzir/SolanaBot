@@ -12,6 +12,8 @@ import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import {
     BONK_CONFIG,
+    BONK_CONFIG_2,
+    BONK_CONFIG_3,
     BONK_IPFS_IMAGE_API_URL,
     BONK_IPFS_META_API_URL,
     BONK_SWAP_TAX,
@@ -25,6 +27,7 @@ import {
     RAYDIUM_CPMM_POOL_STATE_HEADER,
     RAYDIUM_CPMM_PROGRAM_ID,
     RAYDIUM_CPMM_SWAP_DISCRIMINATOR,
+    RAYDIUM_LAUNCHPAD_API_URL,
     RAYDIUM_LAUNCHPAD_AUTHORITY,
     RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR,
@@ -298,8 +301,15 @@ export class Trader {
         }
     }
 
-    public static async get_random_mints(_count: number): Promise<BonkMintMeta[]> {
-        throw new Error('Not implemented');
+    public static async get_random_mints(count: number): Promise<BonkMintMeta[]> {
+        const graduated_length = Math.floor(count * Math.random());
+        const ungraduated_length = count - graduated_length;
+        return (
+            await Promise.all([
+                this.get_random_mints_type(graduated_length, true),
+                this.get_random_mints_type(ungraduated_length, false)
+            ])
+        ).flat();
     }
 
     public static async create_token(
@@ -959,5 +969,32 @@ export class Trader {
             token_1_reserves: token_1_reserves.balance,
             supply: supply.supply
         };
+    }
+
+    private static async get_random_mints_type(
+        count: number,
+        graduated: boolean,
+        sort: 'new' | 'lastTrade' | 'hotToken' | 'marketCap' = 'new'
+    ): Promise<BonkMintMeta[]> {
+        if (count <= 0) return [];
+        count = Math.min(count, 100);
+        const type = graduated ? 'graduated' : 'default';
+        const url = `${RAYDIUM_LAUNCHPAD_API_URL}/get/list?sort=${sort}&size=${count}&mintType=${type}&platformId=${BONK_CONFIG_2.toBase58()},${BONK_CONFIG_3.toBase58()},${BONK_CONFIG.toBase58()}`;
+
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            if (!data || data.success !== true) return [];
+
+            const promises = common
+                .pick_random(data.data.rows, count)
+                .map((item: any) => this.get_mint_meta(new PublicKey(item.mint)));
+
+            const mints = await Promise.all(promises);
+            return mints.filter((mint) => mint !== undefined);
+        } catch (err) {
+            common.error(common.red(`Failed fetching the mints: ${err}`));
+            return [];
+        }
     }
 }
