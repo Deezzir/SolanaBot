@@ -219,7 +219,7 @@ export class Trader {
         _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<String> {
-        throw new Error('Token creation is not supported by Generic program');
+        throw new Error('Not implemented');
     }
 
     public static update_mint_meta_reserves(

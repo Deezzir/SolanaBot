@@ -3,14 +3,7 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { parse } from 'csv-parse/sync';
-import {
-    IPFS,
-    IPFS_API,
-    IPFS_JWT,
-    PUMP_FETCH_API_URL,
-    WALLETS_FILE_HEADERS,
-    WALLETS_RESCUE_DIR_PATH
-} from '../constants.js';
+import { IPFS, IPFS_API, IPFS_JWT, PUMP_API_URL, WALLETS_FILE_HEADERS, WALLETS_RESCUE_DIR_PATH } from '../constants.js';
 import base58 from 'bs58';
 import path, { basename } from 'path';
 
@@ -310,7 +303,7 @@ export function round_two(num: number): number {
 }
 
 export const fetch_sol_price = async (): Promise<number> => {
-    return fetch(`${PUMP_FETCH_API_URL}/sol-price`)
+    return fetch(`${PUMP_API_URL}/sol-price`)
         .then((response) => response.json())
         .then((data) => {
             if (!data || data.statusCode !== undefined) return 0.0;
