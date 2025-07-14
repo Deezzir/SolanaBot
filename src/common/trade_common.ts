@@ -15,7 +15,9 @@ import {
     AddressLookupTableAccount,
     Transaction,
     AddressLookupTableProgram,
-    ParsedTransactionWithMeta
+    ParsedTransactionWithMeta,
+    ParsedInstruction,
+    PartiallyDecodedInstruction
 } from '@solana/web3.js';
 import {
     AccountLayout,
@@ -42,7 +44,9 @@ import {
     JITO_MIN_TIP,
     SOL_MINT,
     SENDER_ENDPOINTS,
-    SENDER_TIP_ACCOUNTS
+    SENDER_TIP_ACCOUNTS,
+    SYSTEM_PROGRAM_ID,
+    COMPUTE_BUDGET_PROGRAM_ID
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -155,6 +159,23 @@ export type TokenMetrics = {
     supply: bigint;
 };
 
+export type TxBalanceChanges = {
+    pre_sol_balance: number;
+    post_sol_balance: number;
+    pre_token_balance: number;
+    post_token_balance: number;
+    change_sol: number;
+    change_tokens: number;
+    fees: number;
+};
+
+export type CostBasis = {
+    average_cost_basis: number;
+    total_spendings: number;
+    total_tokens: number;
+    total_fees: number;
+};
+
 export async function retry_get_tx(
     signature: string,
     retries: number = TRADE_RETRIES
@@ -236,6 +257,104 @@ export async function retry_send_tx(
 
 export function calc_ata(owner: PublicKey, mint: PublicKey): PublicKey {
     return getAssociatedTokenAddressSync(mint, owner, true);
+}
+
+export function calc_token_balance_changes(tx: ParsedTransactionWithMeta, account: PublicKey): TxBalanceChanges | null {
+    if (!tx.meta || !tx.meta.postTokenBalances || !tx.meta.preTokenBalances) return null;
+
+    const change_sol_index = tx.transaction.message.accountKeys.findIndex((acc) => acc.pubkey.equals(account));
+    const pre_token_balance_index = tx.meta.preTokenBalances.findIndex((change) => change.owner === account.toString());
+    const post_token_balance_index = tx.meta.postTokenBalances.findIndex(
+        (change) => change.owner === account.toString()
+    );
+
+    const pre_sol_balance = tx.meta.preBalances[change_sol_index] / LAMPORTS_PER_SOL;
+    const post_sol_balance = tx.meta.postBalances[change_sol_index] / LAMPORTS_PER_SOL;
+
+    let pre_token_balance = 0.0;
+    let post_token_balance = 0.0;
+
+    if (pre_token_balance_index !== -1)
+        pre_token_balance = tx.meta.preTokenBalances[pre_token_balance_index].uiTokenAmount.uiAmount || 0.0;
+
+    if (post_token_balance_index !== -1)
+        post_token_balance = tx.meta.postTokenBalances[post_token_balance_index].uiTokenAmount.uiAmount || 0.0;
+
+    const change_sol = post_sol_balance - pre_sol_balance;
+    const change_tokens = post_token_balance - pre_token_balance;
+
+    const tips_instructions: ParsedInstruction[] = [];
+    for (let i = tx.transaction.message.instructions.length - 1; i >= 0; i--) {
+        const instr = tx.transaction.message.instructions[i];
+        if ('parsed' in instr && instr.programId.equals(SYSTEM_PROGRAM_ID) && instr.parsed.type === 'transfer') {
+            tips_instructions.push(instr);
+        }
+        break;
+    }
+    const tips =
+        tips_instructions.reduce((sum: number, cur: ParsedInstruction) => sum + cur.parsed.info.lamports, 0) /
+        LAMPORTS_PER_SOL;
+
+    let tx_fees = 0;
+    const compute_budget_data = tx.transaction.message.instructions
+        .filter(
+            (instr): instr is PartiallyDecodedInstruction =>
+                'data' in instr && instr.programId.equals(COMPUTE_BUDGET_PROGRAM_ID)
+        )
+        .map((instr) => {
+            const buff = Buffer.from(bs58.decode(instr.data));
+            if (buff.length === 5) return common.read_biguint_le(buff, 1, 4);
+            if (buff.length === 9) return common.read_biguint_le(buff, 1, 8);
+            throw new Error(`Invalid compute budget instruction data length: ${buff.length}`);
+        });
+    if (compute_budget_data.length === 2) {
+        tx_fees = Number(compute_budget_data[0] * compute_budget_data[1]) / (LAMPORTS_PER_SOL * 10 ** 6);
+    }
+
+    return {
+        pre_sol_balance,
+        post_sol_balance,
+        pre_token_balance,
+        post_token_balance,
+        change_sol,
+        change_tokens,
+        fees: tips + tx_fees
+    };
+}
+
+export async function get_cost_basis(
+    mint: PublicKey,
+    account: PublicKey,
+    commitment: Finality = 'finalized'
+): Promise<CostBasis | null> {
+    const token_ata = calc_ata(account, mint);
+
+    const signatures = (await global.CONNECTION.getSignaturesForAddress(token_ata, {}, commitment)).map(
+        (info) => info.signature
+    );
+    const txs = await global.CONNECTION.getParsedTransactions(signatures, {
+        maxSupportedTransactionVersion: 0,
+        commitment: commitment
+    });
+
+    if (txs.length === 0) return null;
+
+    const changes = txs
+        .filter((tx) => tx !== null)
+        .map((tx) => calc_token_balance_changes(tx, account))
+        .filter((change) => change !== null)
+        .filter((change) => change.change_tokens > 0);
+
+    const total_tokens = changes.reduce((sum: number, cur: TxBalanceChanges) => sum + Math.abs(cur.change_tokens), 0);
+    const total_fees = changes.reduce((sum: number, cur: TxBalanceChanges) => sum + Math.abs(cur.fees), 0);
+    const total_spendings = changes.reduce((sum: number, cur: TxBalanceChanges) => sum + Math.abs(cur.change_sol), 0);
+
+    return {
+        average_cost_basis: (total_spendings - total_fees) / total_tokens,
+        total_spendings,
+        total_tokens,
+        total_fees
+    };
 }
 
 export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint; decimals: number }> {
