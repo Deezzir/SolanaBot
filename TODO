@@ -2,9 +2,8 @@
 
 - Remove raydium sdk dependancy (AMMV4 left to implement)
 - Add Bump bot
-- Finish Moonshot (without dep)
-
-- Add more dexes (Orca, etc)
+- Finish Moonit (without dep)
+- Fix Meteora
 
 - Rework snipe logic, more options and smart logic
 - Add sell by percent to start/snipe command

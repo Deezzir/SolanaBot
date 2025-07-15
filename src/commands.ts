@@ -192,10 +192,17 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         ({ token_name, token_symbol } = await trade.get_token_meta(mint));
         ({ supply: supply_raw, decimals } = await trade.get_token_supply(mint));
         supply = Number(supply_raw);
-        common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}\n`));
     } catch (error) {
         throw new Error(`Failed to get the token information: ${error}`);
     }
+    const [token_balances, cost_basiss] = await Promise.all([
+        Promise.all(wallets.map((wallet) => trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT))),
+        Promise.all(wallets.map((wallet) => trade.get_cost_basis(wallet.keypair.publicKey, mint, COMMITMENT)))
+    ]);
+
+    const wallet_count = cost_basiss.filter((cb) => cb).length;
+    common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}`));
+    common.log(common.green(`Wallet Count: ${wallet_count}\n`));
 
     common.print_header([
         { title: 'Id', width: common.COLUMN_WIDTHS.id },
@@ -209,22 +216,19 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
     let total_tokens = 0;
     let total_spendings = 0;
     let total_fees = 0;
-    let wallet_count = 0;
 
-    for (const wallet of wallets) {
-        const balance = await trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT);
-        const ui_balance = balance.uiAmount || 0;
-        if (ui_balance === 0) continue;
-        const cost_basis = await trade.get_cost_basis(mint, wallet.keypair.publicKey, COMMITMENT);
-        if (!cost_basis) throw new Error(`Failed to get the cost basis for the mint: ${mint.toString()}`);
+    for (let i = 0; i < wallets.length; i++) {
+        const wallet = wallets[i];
+        const cost_basis = cost_basiss[i];
+        const ui_balance = token_balances[i].uiAmount || 0;
+        if (!cost_basis) continue;
 
         const entry_mcap = (((cost_basis.average_cost_basis * supply) / 10 ** decimals) * sol_price) / 1000;
         const alloc = (ui_balance / (supply / 10 ** decimals)) * 100;
 
-        total_tokens += ui_balance;
+        total_tokens += cost_basis.total_tokens;
         total_spendings += cost_basis.total_spendings;
         total_fees += cost_basis.total_fees;
-        wallet_count++;
 
         common.print_row([
             { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
@@ -251,10 +255,9 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
 
     const allocation = (total_tokens / (supply / 10 ** decimals)) * 100;
     const average_entry_mcap =
-        (((((total_spendings - total_fees) / total_tokens) * supply) / 10 ** decimals) * sol_price) / 1000;
+        (((((total_spendings - total_fees) / total_tokens) * supply) / 10 ** decimals) * sol_price) / 1000 || 0;
 
-    common.log(common.green(`\nWallet Count: ${wallet_count}`));
-    common.log(`Average Entry MC: ${common.bold(average_entry_mcap.toFixed(1) + 'K$')}`);
+    common.log(`\nAverage Entry MC: ${common.bold(average_entry_mcap.toFixed(1) + 'K$')}`);
     common.log(`Total Balance: ${common.bold(common.format_currency(total_tokens))} ${token_symbol}`);
     common.log(`Total Allocation: ${common.bold(allocation.toFixed(2) + '%')}`);
     common.log(`Total Cost: ${common.red(common.format_currency(total_spendings) + ' SOL')}\n`);
@@ -307,6 +310,10 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
     common.log(common.yellow('Getting the balance of the wallets...'));
     common.log(common.yellow(`Wallet Count: ${wallets.length}\n`));
 
+    const balances = await Promise.all(
+        wallets.map((wallet) => trade.get_balance(wallet.keypair.publicKey, COMMITMENT))
+    );
+
     common.print_header([
         { title: 'Id', width: common.COLUMN_WIDTHS.id },
         { title: 'Name', width: common.COLUMN_WIDTHS.name },
@@ -314,8 +321,9 @@ export async function balance(wallets: common.Wallet[]): Promise<void> {
         { title: 'SOL Balance', width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
     ]);
 
-    for (const wallet of wallets) {
-        const balance = (await trade.get_balance(wallet.keypair.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
+    for (let i = 0; i < wallets.length; i++) {
+        const wallet = wallets[i];
+        const balance = balances[i] / LAMPORTS_PER_SOL;
         total += balance;
 
         common.print_row([
@@ -977,11 +985,11 @@ export async function benchmark(
 
                 process.stdout.write(
                     `\r[${i + 1}/${NUM_REQUESTS}] | ` +
-                        `Errors: ${errors} | ` +
-                        `Avg Time: ${avgTime.toFixed(2)} ms | ` +
-                        `Min Time: ${min_time.toFixed(2)} ms | ` +
-                        `Max Time: ${max_time.toFixed(2)} ms | ` +
-                        `TPS: ${tps.toFixed(2)}`
+                    `Errors: ${errors} | ` +
+                    `Avg Time: ${avgTime.toFixed(2)} ms | ` +
+                    `Min Time: ${min_time.toFixed(2)} ms | ` +
+                    `Max Time: ${max_time.toFixed(2)} ms | ` +
+                    `TPS: ${tps.toFixed(2)}`
                 );
             }
         }
