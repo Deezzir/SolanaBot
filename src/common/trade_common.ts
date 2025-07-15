@@ -323,8 +323,8 @@ export function calc_token_balance_changes(tx: ParsedTransactionWithMeta, accoun
 }
 
 export async function get_cost_basis(
-    mint: PublicKey,
     account: PublicKey,
+    mint: PublicKey,
     commitment: Finality = 'finalized'
 ): Promise<CostBasis | null> {
     const token_ata = calc_ata(account, mint);
@@ -332,11 +332,12 @@ export async function get_cost_basis(
     const signatures = (await global.CONNECTION.getSignaturesForAddress(token_ata, {}, commitment)).map(
         (info) => info.signature
     );
+    if (signatures.length === 0) return null;
+
     const txs = await global.CONNECTION.getParsedTransactions(signatures, {
         maxSupportedTransactionVersion: 0,
         commitment: commitment
     });
-
     if (txs.length === 0) return null;
 
     const changes = txs
