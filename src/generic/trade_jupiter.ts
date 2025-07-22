@@ -56,7 +56,7 @@ class GenericMintMeta implements trade.IMintMeta {
 @common.staticImplements<trade.IProgramTrader>()
 export class Trader {
     public static get_name(): string {
-        return common.Program.Jupiter;
+        return common.Program.Generic;
     }
 
     public static async buy_token(

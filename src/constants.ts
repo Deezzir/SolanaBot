@@ -120,8 +120,8 @@ export const RAYDIUM_CPMM_POOL_STATE_HEADER = new Uint8Array([247, 237, 227, 245
 export const RAYDIUM_CPMM_AUTHORITY = new PublicKey('GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL');
 export const RAYDIUM_CPMM_CONFIG = new PublicKey('D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2');
 export const RAYDIUM_CPMM_SWAP_DISCRIMINATOR = new Uint8Array([143, 190, 90, 218, 196, 30, 51, 222]);
-export const RAYDIUM_LTA_ACCOUNT = new PublicKey('EUuZUuXoWciUQdtkw8wzJHh4F3GRuCT2FAJ9ZhzFtNPM');
-export const RAYDIUM_LTA_ACCOUNT_EXTRA = new PublicKey('Ep7d1e5ZUbHvtr5WQfgrZWEKJFBSyUfNxLcvrpsQo4at');
+export const RAYDIUM_LTA_ACCOUNT = new PublicKey('DiVZACwhLuhxtVDm7tXqcTBch9WrvUkraHLWwcTPEura');
+export const RAYDIUM_LTA_ACCOUNT_EXTRA = new PublicKey('39TSYuyedPtTakGJdUpx7Qp9EHTuA93Yx2vGiRqyuYKD');
 
 // MOON CONSTANTS
 export const MOONSHOT_TRADE_PROGRAM_ID = new PublicKey('MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG');

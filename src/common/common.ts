@@ -51,7 +51,7 @@ export enum Program {
     Moonit = 'moonit',
     Meteora = 'meteora',
     Bonk = 'bonk',
-    Jupiter = 'jupiter'
+    Generic = 'generic'
 }
 
 export function bold(message: string): string {
@@ -335,12 +335,6 @@ export function read_biguint_le(buf: Buffer, offset: number, length: number): bi
             return BigInt(buf.readBigUInt64LE(offset) + (buf.readBigUInt64LE(offset + 8) << BigInt(64)));
     }
     throw new Error(`unsupported data size (${length} bytes)`);
-}
-
-export function read_bool(buf: Buffer, offset: number): boolean {
-    const byte = buf.readUint8(offset);
-    if (byte !== 0 && byte !== 1) throw new Error(`invalid boolean value: ${byte}`);
-    return byte === 1;
 }
 
 export const COLUMN_WIDTHS = {

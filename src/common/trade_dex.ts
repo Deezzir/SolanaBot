@@ -354,7 +354,7 @@ async function get_swap_acc_intsruction(
 export async function get_raydium_token_metrics(amm: PublicKey): Promise<TokenMetrics> {
     try {
         const info = await global.CONNECTION.getAccountInfo(amm);
-        if (!info) return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
+        if (!info) return { price_sol: 0.0, mcap_sol: 0.0 };
         const pool_state = LIQUIDITY_STATE_LAYOUT_V4.decode(info.data);
 
         const base_token_balance = await get_vault_balance(pool_state.baseVault);
@@ -366,9 +366,9 @@ export async function get_raydium_token_metrics(amm: PublicKey): Promise<TokenMe
             (Number(quote_token_balance.balance) / Math.pow(10, quote_token_balance.decimals));
         const token = await get_token_supply(pool_state.quoteMint);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
-        return { price_sol: Number(price_sol) / Math.pow(10, token.decimals), mcap_sol, supply: token.supply };
+        return { price_sol: Number(price_sol) / Math.pow(10, token.decimals), mcap_sol };
     } catch (err) {
-        return { price_sol: 0.0, mcap_sol: 0.0, supply: BigInt(0) };
+        return { price_sol: 0.0, mcap_sol: 0.0 };
     }
 }
 

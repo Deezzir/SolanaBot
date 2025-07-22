@@ -136,7 +136,8 @@ export async function create_token(
             meta_cid,
             dev_buy,
             entries,
-            bundle_tip
+            bundle_tip,
+            PriorityLevel.HIGH
         );
         common.log(common.green(`\nToken created | Signature: ${sig}`));
         common.log(common.green(`Mint address: ${mint.publicKey.toBase58()}`));
@@ -213,9 +214,12 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         { title: `Entry MC`, width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
     ]);
 
-    let total_tokens = 0;
-    let total_spendings = 0;
-    let total_fees = 0;
+    let total_tokens_all = 0;
+    let total_tokens_cur = 0;
+    let total_spendings_all = 0;
+    let total_spendings_cur = 0;
+    let total_fees_all = 0;
+    let total_fees_cur = 0;
 
     for (let i = 0; i < wallets.length; i++) {
         const wallet = wallets[i];
@@ -226,9 +230,12 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         const entry_mcap = (((cost_basis.average_cost_basis * supply) / 10 ** decimals) * sol_price) / 1000;
         const alloc = (ui_balance / (supply / 10 ** decimals)) * 100;
 
-        total_tokens += cost_basis.total_tokens;
-        total_spendings += cost_basis.total_spendings;
-        total_fees += cost_basis.total_fees;
+        total_tokens_cur += ui_balance;
+        total_tokens_all += cost_basis.total_tokens;
+        total_spendings_all += cost_basis.total_spendings;
+        if (ui_balance > 0) total_spendings_cur += cost_basis.total_spendings;
+        total_fees_all += cost_basis.total_fees;
+        if (ui_balance > 0) total_fees_cur += cost_basis.total_fees;
 
         common.print_row([
             { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
@@ -253,14 +260,26 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         { width: common.COLUMN_WIDTHS.entryMcap }
     ]);
 
-    const allocation = (total_tokens / (supply / 10 ** decimals)) * 100;
-    const average_entry_mcap =
-        (((((total_spendings - total_fees) / total_tokens) * supply) / 10 ** decimals) * sol_price) / 1000 || 0;
+    const allocation_all = (total_tokens_all / (supply / 10 ** decimals)) * 100;
+    const allocation_cur = (total_tokens_cur / (supply / 10 ** decimals)) * 100;
+    const average_entry_mcap_all =
+        (((((total_spendings_all - total_fees_all) / total_tokens_all) * supply) / 10 ** decimals) * sol_price) /
+        1000 || 0;
+    const average_entry_mcap_cur =
+        (((((total_spendings_cur - total_fees_cur) / total_tokens_cur) * supply) / 10 ** decimals) * sol_price) /
+        1000 || 0;
 
-    common.log(`\nAverage Entry MC: ${common.bold(average_entry_mcap.toFixed(1) + 'K$')}`);
-    common.log(`Total Balance: ${common.bold(common.format_currency(total_tokens))} ${token_symbol}`);
-    common.log(`Total Allocation: ${common.bold(allocation.toFixed(2) + '%')}`);
-    common.log(`Total Cost: ${common.red(common.format_currency(total_spendings) + ' SOL')}\n`);
+    common.log('\nALL:');
+    common.log(`    Average Entry MC: ${common.bold(average_entry_mcap_all.toFixed(1) + 'K$')}`);
+    common.log(`    Total Balance: ${common.bold(common.format_currency(total_tokens_all))} ${token_symbol}`);
+    common.log(`    Total Cost: ${common.red(common.format_currency(total_spendings_all) + ' SOL')}`);
+    common.log(`    Total Allocation: ${common.bold(allocation_all.toFixed(2) + '%')}`);
+
+    common.log('\nCURRENT:');
+    common.log(`    Average Entry MC: ${common.bold(average_entry_mcap_cur.toFixed(1) + 'K$')}`);
+    common.log(`    Total Balance: ${common.bold(common.format_currency(total_tokens_cur))} ${token_symbol}`);
+    common.log(`    Total Cost: ${common.red(common.format_currency(total_spendings_cur) + ' SOL')}`);
+    common.log(`    Total Allocation: ${common.bold(allocation_cur.toFixed(2) + '%')}\n`);
 }
 
 export async function transfer_sol(amount: number, receiver: PublicKey, sender: Keypair): Promise<void> {
