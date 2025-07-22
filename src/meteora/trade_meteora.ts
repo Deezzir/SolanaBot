@@ -38,28 +38,6 @@ import {
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 
-type DAMMV1Data = {
-    base_vault: string;
-    quote_vault: string;
-    base_vault_authority: string;
-    quote_vault_authority: string;
-    base_vault_lp: string;
-    quote_vault_lp: string;
-    base_vault_lp_mint: string;
-    quote_vault_lp_mint: string;
-    base_protocol_token_fee: string;
-    quote_protocol_token_fee: string;
-};
-
-type DAMMV2Data = {};
-
-type DBCData = {
-    sqrt_price: bigint;
-    config: string;
-    base_vault: string;
-    quote_vault: string;
-};
-
 export class MeteoraMintMeta implements trade.IMintMeta {
     mint!: string;
     name: string = 'Unknown';
@@ -224,6 +202,28 @@ type VaultState = {
     token_vault: PublicKey;
     token_vault_lp_mint: PublicKey;
     token_reserve: bigint;
+};
+
+type DAMMV1Data = {
+    base_vault: string;
+    quote_vault: string;
+    base_vault_authority: string;
+    quote_vault_authority: string;
+    base_vault_lp: string;
+    quote_vault_lp: string;
+    base_vault_lp_mint: string;
+    quote_vault_lp_mint: string;
+    base_protocol_token_fee: string;
+    quote_protocol_token_fee: string;
+};
+
+type DAMMV2Data = {};
+
+type DBCData = {
+    sqrt_price: bigint;
+    config: string;
+    base_vault: string;
+    quote_vault: string;
 };
 
 @common.staticImplements<trade.IProgramTrader>()
@@ -494,14 +494,14 @@ export class Trader {
     private static get_dbc_token_metrics(state: DBCState): trade.TokenMetrics {
         const price_sol = this.calc_token_price(state.sqrt_price);
         const mcap_sol = price_sol * Number(state.base_reserve / 10n ** BigInt(state.token_decimals));
-        return { price_sol, mcap_sol, supply: state.base_reserve };
+        return { price_sol, mcap_sol };
     }
 
     private static async get_token_metrics(state: DAMMV1State): Promise<trade.TokenMetrics> {
         const token = await trade.get_token_supply(state.base_vault_lp);
         const price_sol = Number(state.quote_reserve) / Number(state.base_reserve);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
-        return { price_sol, mcap_sol, supply: token.supply };
+        return { price_sol, mcap_sol };
     }
 
     private static calc_token_price(sqrt_price: bigint): number {

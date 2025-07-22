@@ -1,6 +1,6 @@
 import { PumpTrader, PumpRunner } from '../pump/pump.js';
 import { MoonitTrader, MoonitRunner } from '../moonit/moonit.js';
-import { JupiterTrader } from '../jupiter/jupiter.js';
+import { JupiterTrader } from '../generic/jupiter.js';
 import { MeteoraRunner, MeteoraTrader } from '../meteora/meteora.js';
 import { Program } from './common.js';
 import { IProgramTrader } from './trade_common.js';
@@ -18,7 +18,7 @@ export function get_trader(program: Program): IProgramTrader {
         case Program.Meteora: {
             return MeteoraTrader;
         }
-        case Program.Jupiter: {
+        case Program.Generic: {
             return JupiterTrader;
         }
         case Program.Bonk: {
@@ -45,7 +45,7 @@ export function get_sniper(program: Program): ISniper {
         case Program.Bonk: {
             return new BonkRunner(trader);
         }
-        case Program.Jupiter: {
+        case Program.Generic: {
             throw new Error('Generic program is not supported for sniping.');
         }
         default: {

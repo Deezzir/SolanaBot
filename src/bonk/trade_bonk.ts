@@ -56,43 +56,91 @@ import {
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import base58 from 'bs58';
+import { define_decoder_struct, skip, u8, u64, discriminator, pubkey } from '../common/struct_decoder.js';
 
-const STATE_OFFSETS = {
-    STATUS: 0x11,
-    SUPPLY: 0x15,
-    VIRTUAL_BASE: 0x25,
-    VIRTUAL_QUOTE: 0x2d,
-    REAL_BASE: 0x35,
-    REAL_QUOTE: 0x3d
-};
-type State = {
-    status: number;
-    supply: bigint;
-    virtual_base: bigint;
-    virtual_quote: bigint;
-    real_base: bigint;
-    real_quote: bigint;
-};
+const StateStruct = define_decoder_struct({
+    discriminator: discriminator(Buffer.from(RAYDIUM_LAUNCHPAD_POOL_HEADER)),
+    epoch: skip(u64().size),
+    auth_bump: skip(u8().size),
+    status: u8(),
+    base_decimals: skip(u8().size),
+    quote_decimals: skip(u8().size),
+    migrate_type: skip(u8().size),
+    supply: u64(),
+    total_base_sell: skip(u64().size),
+    virtual_base: u64(),
+    virtual_quote: u64(),
+    real_base: u64(),
+    real_quote: u64(),
+    total_quote_fund_raising: skip(u64().size),
+    quote_protocol_fee: skip(u64().size),
+    platform_fee: skip(u64().size),
+    migrate_fee: skip(u64().size),
+    vesting_schedule: skip(5 * u64().size),
+    global_config: skip(pubkey().size),
+    platform_config: skip(pubkey().size),
+    base_mint: skip(pubkey().size),
+    quote_mint: skip(pubkey().size),
+    base_vault: skip(pubkey().size),
+    quote_vault: skip(pubkey().size),
+    creator: skip(pubkey().size),
+    padding: skip(8 * u64().size)
+});
 
-const CPMM_STATE_OFFSETS = {
-    AMM_CONFIG: 0x08,
-    POOL_CREATOR: 0x28,
-    TOKEN_0_VAULT: 0x48,
-    TOKEN_1_VAULT: 0x68,
-    LP_MINT: 0x88,
-    TOKEN_0_MINT: 0xa8,
-    TOKEN_1_MINT: 0xc8,
-    OBSERVATION_KEY: 0x128
-};
-type CPMMState = {
-    amm_config: PublicKey;
-    pool_creator: PublicKey;
-    token_0_vault: PublicKey;
-    token_1_vault: PublicKey;
-    lp_mint: PublicKey;
-    token_0_mint: PublicKey;
-    token_1_mint: PublicKey;
-    observation_key: PublicKey;
+type State = ReturnType<typeof StateStruct.decode>;
+
+// const CPMM_STATE_OFFSETS = {
+//     AMM_CONFIG: 0x08,
+//     POOL_CREATOR: 0x28,
+//     TOKEN_0_VAULT: 0x48,
+//     TOKEN_1_VAULT: 0x68,
+//     LP_MINT: 0x88,
+//     TOKEN_0_MINT: 0xa8,
+//     TOKEN_1_MINT: 0xc8,
+//     OBSERVATION_KEY: 0x128
+// };
+// type CPMMState = {
+//     amm_config: PublicKey;
+//     pool_creator: PublicKey;
+//     token_0_vault: PublicKey;
+//     token_1_vault: PublicKey;
+//     lp_mint: PublicKey;
+//     token_0_mint: PublicKey;
+//     token_1_mint: PublicKey;
+//     observation_key: PublicKey;
+//     token_0_reserves: bigint;
+//     token_1_reserves: bigint;
+//     supply: bigint;
+// };
+
+const CPMMStateStruct = define_decoder_struct({
+    discriminator: discriminator(Buffer.from(RAYDIUM_CPMM_POOL_STATE_HEADER)),
+    amm_config: skip(pubkey().size),
+    pool_creator: skip(pubkey().size),
+    token_0_vault: pubkey(),
+    token_1_vault: pubkey(),
+    lp_mint: skip(pubkey().size),
+    token_0_mint: skip(pubkey().size),
+    token_1_mint: pubkey(),
+    token_0_program: skip(pubkey().size),
+    token_1_program: skip(pubkey().size),
+    observation_key: pubkey(),
+    auth_bump: skip(u8().size),
+    status: skip(u8().size),
+    lp_mint_decimals: skip(u8().size),
+    mint_0_decimals: skip(u8().size),
+    mint_1_decimals: skip(u8().size),
+    lp_supply: skip(u64().size),
+    protocol_fees_token_0: skip(u64().size),
+    protocol_fees_token_1: skip(u64().size),
+    fund_fees_token_0: skip(u64().size),
+    fund_fees_token_1: skip(u64().size),
+    open_time: skip(u64().size),
+    recent_epoch: skip(u64().size),
+    padding: skip(31 * u64().size)
+});
+
+type CPMMState = ReturnType<typeof CPMMStateStruct.decode> & {
     token_0_reserves: bigint;
     token_1_reserves: bigint;
     supply: bigint;
@@ -352,7 +400,7 @@ export class Trader {
             mint.publicKey
         );
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        const txs = common.chunks(traders, TRADE_MAX_WALLETS_PER_CREATE_TX);
+        const txs = common.chunks(traders, TRADE_MAX_WALLETS_PER_CREATE_TX - 1);
         const buy_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
         for (const tx of txs) {
@@ -399,7 +447,11 @@ export class Trader {
 
             if (!cpmm_pool && !mint_meta.complete) {
                 const state = await this.get_state(new PublicKey(mint_meta.pool));
-                const metrics = this.get_token_metrics(state);
+                const metrics = this.get_token_metrics(
+                    state.real_quote + state.virtual_quote,
+                    state.virtual_base - state.real_base,
+                    state.supply
+                );
                 return new BonkMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -413,7 +465,7 @@ export class Trader {
 
             if (cpmm_pool) {
                 const state = await this.get_cpmm_state(cpmm_pool);
-                const metrics = this.get_cpmm_token_metrics(state);
+                const metrics = this.get_token_metrics(state.token_0_reserves, state.token_1_reserves, state.supply);
                 return new BonkMintMeta({
                     ...mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
@@ -827,44 +879,30 @@ export class Trader {
         return vault;
     }
 
-    private static get_token_metrics(state: State): trade.TokenMetrics {
-        const price_sol = this.calculate_curve_price(
-            state.real_quote + state.virtual_quote,
-            state.virtual_base - state.real_base
-        );
-
-        const mcap_sol = (price_sol * Number(state.supply)) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS;
-        return { price_sol, mcap_sol, supply: state.supply };
-    }
-
-    private static get_cpmm_token_metrics(state: CPMMState): trade.TokenMetrics {
-        const price_sol = this.calculate_curve_price(state.token_0_reserves, state.token_1_reserves);
-        const mcap_sol = (price_sol * Number(state.supply)) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS;
-        return { price_sol, mcap_sol, supply: BigInt(0) };
+    private static get_token_metrics(
+        quote_reserves: bigint,
+        base_reserves: bigint,
+        supply: bigint
+    ): trade.TokenMetrics {
+        const price_sol = this.calculate_curve_price(quote_reserves, base_reserves);
+        const mcap_sol = (price_sol * Number(supply)) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS;
+        return { price_sol, mcap_sol };
     }
 
     private static calculate_curve_price(quote_reserves: bigint, base_reserves: bigint): number {
         if (base_reserves <= 0 || quote_reserves <= 0)
             throw new RangeError('Curve state contains invalid virtual reserves');
-        return Number(quote_reserves) / LAMPORTS_PER_SOL / (Number(base_reserves) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS);
+        return (
+            Number(quote_reserves) /
+            LAMPORTS_PER_SOL /
+            (Number(base_reserves) / Math.pow(10, TRADE_DEFAULT_TOKEN_DECIMALS))
+        );
     }
 
     private static async get_state(bond_curve_addr: PublicKey): Promise<State> {
         const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
         if (!info || !info.data) throw new Error('Unexpected curve state');
-
-        const header = common.read_bytes(info.data, 0, RAYDIUM_LAUNCHPAD_POOL_HEADER.byteLength);
-        if (header.compare(RAYDIUM_LAUNCHPAD_POOL_HEADER) !== 0)
-            throw new Error('Unexpected curve state IDL signature');
-
-        return {
-            status: common.read_bytes(info.data, STATE_OFFSETS.STATUS, 1).readUint8(0),
-            supply: common.read_biguint_le(info.data, STATE_OFFSETS.SUPPLY, 8),
-            virtual_base: common.read_biguint_le(info.data, STATE_OFFSETS.VIRTUAL_BASE, 8),
-            virtual_quote: common.read_biguint_le(info.data, STATE_OFFSETS.VIRTUAL_QUOTE, 8),
-            real_base: common.read_biguint_le(info.data, STATE_OFFSETS.REAL_BASE, 8),
-            real_quote: common.read_biguint_le(info.data, STATE_OFFSETS.REAL_QUOTE, 8)
-        };
+        return StateStruct.decode(info.data);
     }
 
     private static create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
@@ -916,13 +954,13 @@ export class Trader {
                 filters: [
                     {
                         memcmp: {
-                            offset: CPMM_STATE_OFFSETS.TOKEN_1_MINT,
+                            offset: CPMMStateStruct.get_offset('token_1_mint'),
                             bytes: mint.toBase58()
                         }
                     },
                     {
                         memcmp: {
-                            offset: CPMM_STATE_OFFSETS.TOKEN_0_MINT,
+                            offset: CPMMStateStruct.get_offset('token_0_mint'),
                             bytes: SOL_MINT.toBase58()
                         }
                     },
@@ -945,26 +983,13 @@ export class Trader {
         const info = await global.CONNECTION.getAccountInfo(cpmm_pool);
         if (!info || !info.data) throw new Error('Unexpected CPMM state');
 
-        const header = common.read_bytes(info.data, 0, RAYDIUM_CPMM_POOL_STATE_HEADER.byteLength);
-        if (header.compare(RAYDIUM_CPMM_POOL_STATE_HEADER) !== 0)
-            throw new Error('Unexpected CPMM state IDL signature');
-
-        const token_0_vault = new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.TOKEN_0_VAULT, 32));
-        const token_1_vault = new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.TOKEN_1_VAULT, 32));
-        const token_1_mint = new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.TOKEN_1_MINT, 32));
-        const token_0_reserves = await trade.get_vault_balance(token_0_vault);
-        const token_1_reserves = await trade.get_vault_balance(token_1_vault);
-        const supply = await trade.get_token_supply(token_1_mint);
+        const state = CPMMStateStruct.decode(info.data);
+        const token_0_reserves = await trade.get_vault_balance(state.token_0_vault);
+        const token_1_reserves = await trade.get_vault_balance(state.token_1_vault);
+        const supply = await trade.get_token_supply(state.token_1_mint);
 
         return {
-            amm_config: new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.AMM_CONFIG, 32)),
-            pool_creator: new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.POOL_CREATOR, 32)),
-            token_0_vault,
-            token_1_vault,
-            lp_mint: new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.LP_MINT, 32)),
-            token_0_mint: new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.TOKEN_0_MINT, 32)),
-            token_1_mint,
-            observation_key: new PublicKey(common.read_bytes(info.data, CPMM_STATE_OFFSETS.OBSERVATION_KEY, 32)),
+            ...state,
             token_0_reserves: token_0_reserves.balance,
             token_1_reserves: token_1_reserves.balance,
             supply: supply.supply

@@ -156,7 +156,6 @@ export type MintAsset = {
 export type TokenMetrics = {
     price_sol: number;
     mcap_sol: number;
-    supply: bigint;
 };
 
 export type TxBalanceChanges = {
@@ -187,7 +186,7 @@ export async function retry_get_tx(
                 commitment: COMMITMENT
             });
             if (transaction) return transaction;
-        } catch (error) {}
+        } catch (error) { }
         retries--;
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
@@ -260,7 +259,7 @@ export function calc_ata(owner: PublicKey, mint: PublicKey): PublicKey {
 }
 
 export function calc_token_balance_changes(tx: ParsedTransactionWithMeta, account: PublicKey): TxBalanceChanges | null {
-    if (!tx.meta || !tx.meta.postTokenBalances || !tx.meta.preTokenBalances) return null;
+    if (!tx.meta || tx.meta.err || !tx.meta.postTokenBalances || !tx.meta.preTokenBalances) return null;
 
     const change_sol_index = tx.transaction.message.accountKeys.findIndex((acc) => acc.pubkey.equals(account));
     const pre_token_balance_index = tx.meta.preTokenBalances.findIndex((change) => change.owner === account.toString());
@@ -628,6 +627,7 @@ export async function send_bundle(
             );
         }
         const versioned_tx = create_versioned_tx(signers[i], instructions[i], ctx, alts);
+
         if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
         serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }
