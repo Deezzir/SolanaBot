@@ -86,7 +86,9 @@ export async function bundle_sell(
                 return null;
             })
         )
-    ).filter((wallet) => wallet !== null);
+    )
+        .filter((wallet) => wallet !== null)
+        .sort((a, b) => b!.token_amount.uiAmount! - a!.token_amount.uiAmount!);
 
     const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
     const bundles: Promise<void>[] = [];

@@ -186,7 +186,7 @@ export async function retry_get_tx(
                 commitment: COMMITMENT
             });
             if (transaction) return transaction;
-        } catch (error) { }
+        } catch (error) {}
         retries--;
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
     }
@@ -342,8 +342,8 @@ export async function get_cost_basis(
     const changes = txs
         .filter((tx) => tx !== null)
         .map((tx) => calc_token_balance_changes(tx, account))
-        .filter((change) => change !== null)
-        .filter((change) => change.change_tokens > 0);
+        .filter((change) => change !== null);
+    // .filter((change) => change.change_tokens > 0);
 
     const total_tokens = changes.reduce((sum: number, cur: TxBalanceChanges) => sum + Math.abs(cur.change_tokens), 0);
     const total_fees = changes.reduce((sum: number, cur: TxBalanceChanges) => sum + Math.abs(cur.fees), 0);
