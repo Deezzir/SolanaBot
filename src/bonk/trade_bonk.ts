@@ -23,7 +23,6 @@ import {
     METAPLEX_PROGRAM_ID,
     PriorityLevel,
     RAYDIUM_CPMM_AUTHORITY,
-    RAYDIUM_CPMM_CONFIG,
     RAYDIUM_CPMM_POOL_STATE_HEADER,
     RAYDIUM_CPMM_PROGRAM_ID,
     RAYDIUM_CPMM_SWAP_DISCRIMINATOR,
@@ -78,7 +77,7 @@ const StateStruct = define_decoder_struct({
     migrate_fee: skip(u64().size),
     vesting_schedule: skip(5 * u64().size),
     global_config: skip(pubkey().size),
-    platform_config: skip(pubkey().size),
+    platform_config: pubkey(),
     base_mint: skip(pubkey().size),
     quote_mint: skip(pubkey().size),
     base_vault: skip(pubkey().size),
@@ -115,7 +114,7 @@ type State = ReturnType<typeof StateStruct.decode>;
 
 const CPMMStateStruct = define_decoder_struct({
     discriminator: discriminator(Buffer.from(RAYDIUM_CPMM_POOL_STATE_HEADER)),
-    amm_config: skip(pubkey().size),
+    amm_config: pubkey(),
     pool_creator: skip(pubkey().size),
     token_0_vault: pubkey(),
     token_1_vault: pubkey(),
@@ -153,6 +152,7 @@ class BonkMintMeta implements trade.IMintMeta {
     base_vault!: string;
     quote_vault!: string;
     pool!: string;
+    config!: string;
     sol_reserves: bigint = BigInt(0);
     token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
@@ -459,7 +459,8 @@ export class Trader {
                     sol_reserves: state.real_quote + state.virtual_quote,
                     token_reserves: state.virtual_base - state.real_base,
                     total_supply: state.supply,
-                    complete: state.status !== 0
+                    complete: state.status !== 0,
+                    config: state.platform_config.toString()
                 });
             }
 
@@ -477,7 +478,8 @@ export class Trader {
                     quote_vault: state.token_0_vault.toString(),
                     total_supply: state.supply,
                     complete: true,
-                    observation_state: state.observation_key.toString()
+                    observation_state: state.observation_key.toString(),
+                    config: state.amm_config.toString()
                 });
             }
 
@@ -489,7 +491,7 @@ export class Trader {
 
     public static async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<BonkMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
-            return { token_name: 'Unknown', token_symbol: 'Unknown', creator: undefined };
+            return { token_name: 'Unknown', token_symbol: 'Unknown' };
         });
         const pool = this.calc_pool(mint);
         const [base_vault, quote_vault] = this.calc_vault(mint, pool);
@@ -597,13 +599,15 @@ export class Trader {
         mint_meta: Partial<BonkMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.pool)
+        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.pool || !mint_meta.config)
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
         const quote_vault = new PublicKey(mint_meta.quote_vault);
         const base_vault = new PublicKey(mint_meta.base_vault);
         const pool = new PublicKey(mint_meta.pool);
+        const config = new PublicKey(mint_meta.config);
+
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
 
@@ -628,7 +632,7 @@ export class Trader {
                     { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
                     { pubkey: RAYDIUM_LAUNCHPAD_AUTHORITY, isSigner: false, isWritable: false },
                     { pubkey: RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: BONK_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: config, isSigner: false, isWritable: false },
                     { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
@@ -654,7 +658,7 @@ export class Trader {
         mint_meta: Partial<BonkMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.quote_vault || !mint_meta.base_vault || !mint_meta.pool)
+        if (!mint_meta.mint || !mint_meta.quote_vault || !mint_meta.base_vault || !mint_meta.pool || !mint_meta.config)
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
@@ -662,6 +666,7 @@ export class Trader {
         const quote_vault = new PublicKey(mint_meta.quote_vault);
         const base_vault = new PublicKey(mint_meta.base_vault);
         const pool = new PublicKey(mint_meta.pool);
+        const config = new PublicKey(mint_meta.config);
 
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage);
@@ -677,7 +682,7 @@ export class Trader {
                     { pubkey: seller.publicKey, isSigner: true, isWritable: true },
                     { pubkey: RAYDIUM_LAUNCHPAD_AUTHORITY, isSigner: false, isWritable: false },
                     { pubkey: RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: BONK_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: config, isSigner: false, isWritable: false },
                     { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
@@ -708,7 +713,8 @@ export class Trader {
             !mint_meta.pool ||
             !mint_meta.base_vault ||
             !mint_meta.quote_vault ||
-            !mint_meta.observation_state
+            !mint_meta.observation_state ||
+            !mint_meta.config
         )
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
@@ -717,6 +723,7 @@ export class Trader {
         const observation_state = new PublicKey(mint_meta.observation_state);
         const quote_vault = new PublicKey(mint_meta.quote_vault);
         const base_vault = new PublicKey(mint_meta.base_vault);
+        const config = new PublicKey(mint_meta.config);
 
         const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
         const token_amount_raw = this.calc_slippage_down(
@@ -741,7 +748,7 @@ export class Trader {
                 keys: [
                     { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
                     { pubkey: RAYDIUM_CPMM_AUTHORITY, isSigner: false, isWritable: true },
-                    { pubkey: RAYDIUM_CPMM_CONFIG, isSigner: false, isWritable: true },
+                    { pubkey: config, isSigner: false, isWritable: true },
                     { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
@@ -771,7 +778,8 @@ export class Trader {
             !mint_meta.pool ||
             !mint_meta.base_vault ||
             !mint_meta.quote_vault ||
-            !mint_meta.observation_state
+            !mint_meta.observation_state ||
+            !mint_meta.config
         )
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
@@ -781,6 +789,7 @@ export class Trader {
         const observation_state = new PublicKey(mint_meta.observation_state);
         const quote_vault = new PublicKey(mint_meta.quote_vault);
         const base_vault = new PublicKey(mint_meta.base_vault);
+        const config = new PublicKey(mint_meta.config);
 
         const token_amount_raw = BigInt(token_amount.amount);
         const instruction_data = this.swap_cpmm_data(
@@ -796,7 +805,7 @@ export class Trader {
                 keys: [
                     { pubkey: seller.publicKey, isSigner: true, isWritable: true },
                     { pubkey: RAYDIUM_CPMM_AUTHORITY, isSigner: false, isWritable: true },
-                    { pubkey: RAYDIUM_CPMM_CONFIG, isSigner: false, isWritable: true },
+                    { pubkey: config, isSigner: false, isWritable: true },
                     { pubkey: pool, isSigner: false, isWritable: true },
                     { pubkey: token_ata, isSigner: false, isWritable: true },
                     { pubkey: wsol_ata, isSigner: false, isWritable: true },
