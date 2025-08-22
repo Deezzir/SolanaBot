@@ -211,6 +211,7 @@ export abstract class SniperBase implements ISniper {
             common.log(`[Main Worker] Token detected: ${this.bot_config.mint.toString()}`);
 
             let mint_meta = await this.trader.default_mint_meta(this.bot_config.mint, sol_price);
+            // mint_meta = await this.trader.update_mint_meta(mint_meta, sol_price);
             this.workers_post_message('mint', mint_meta);
 
             let migrated: boolean = false;
@@ -219,7 +220,7 @@ export abstract class SniperBase implements ISniper {
                     mint_meta = await this.trader.update_mint_meta(mint_meta, sol_price);
                     if (mint_meta.migrated && !migrated) {
                         migrated = true;
-                        common.log('[Main Worker] Tokek migrated to DEX...');
+                        common.log('[Main Worker] Token migrated to DEX...');
                     }
                     if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
                     this.workers_post_message('mint', mint_meta);

@@ -156,7 +156,7 @@ export const PUMP_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_IPFS_API_URL = 'https://frontend-api-v3.pump.fun/ipfs/token-metadata';
 export const PUMP_TOKEN_DECIMALS = 6;
 export const PUMP_FEE_PERCENTAGE = 0.01; // 1%
-export const PUMP_SWAP_PERCENTAGE = 0.0025; // 0.25%
+export const PUMP_SWAP_PERCENTAGE = 0.003; // 0.3%
 export const PUMP_LTA_ACCOUNT_EXTRA = new PublicKey('FNbKyKh4LjC1kSmhMahZ2gJPwt1anynVUdaCNmmuxzac');
 export const PUMP_LTA_ACCOUNT = new PublicKey('J5edBug5X1G1PoUgtnBjNUpcrhpeJiRKy7TWqs5Yvuk3');
 export const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -169,6 +169,8 @@ export const PUMP_AMM_GLOBAL_ACCOUNT = new PublicKey('ADyA8hdefvWN2dbGGWFotbzWxr
 export const PUMP_AMM_EVENT_AUTHORITY_ACCOUNT = new PublicKey('GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR');
 export const PUMP_AMM_FEE_ACCOUNT = new PublicKey('62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV');
 export const PUMP_AMM_FEE_TOKEN_ACCOUNT = new PublicKey('94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb');
+export const PUMP_GLOBAL_VOLUME_ACCUMULATOR = new PublicKey('Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y');
+export const PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR = new PublicKey('C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw');
 export const PUMP_STATE_HEADER = new Uint8Array([23, 183, 248, 55, 96, 216, 172, 96]);
 export const PUMP_AMM_STATE_HEADER = new Uint8Array([241, 154, 109, 4, 17, 177, 109, 188]);
 export const PUMP_BONDING_SEED = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
@@ -180,6 +182,9 @@ export const PUMP_BUY_DISCRIMINATOR = new Uint8Array([102, 6, 61, 18, 1, 218, 23
 export const PUMP_SELL_DISCRIMINATOR = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
 export const PUMP_CREATE_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
 export const PUMP_EXTEND_DISCRIMINATOR = new Uint8Array([234, 102, 194, 203, 150, 72, 62, 229]);
+export const PUMP_USER_VOLUME_ACCUMULATOR_SEED = new Uint8Array([
+    117, 115, 101, 114, 95, 118, 111, 108, 117, 109, 101, 95, 97, 99, 99, 117, 109, 117, 108, 97, 116, 111, 114
+]);
 
 // SNIPE CONSTANTS
 export const SNIPE_BUY_SLIPPAGE = 0.85;
@@ -187,10 +192,10 @@ export const SNIPE_SELL_SLIPPAGE = 0.5;
 export const SNIPE_MIN_BUY_THRESHOLD = 0.00001;
 export const SNIPE_MIN_BUY = 0.005;
 export const SNIPE_TRADE_BATCH = 1;
-export const SNIPE_META_UPDATE_INTERVAL_MS = 300;
+export const SNIPE_META_UPDATE_INTERVAL_MS = 100;
 export const SNIPE_MIN_MCAP = 5000;
 export const SNIPE_RETRIES = 5;
-export const SNIPE_RETRY_INTERVAL_MS = 500;
+export const SNIPE_RETRY_INTERVAL_MS = 100;
 
 // TRANSFER CONSTANTS
 export const TRANSFER_INTERVAL_MS: number = 1000;

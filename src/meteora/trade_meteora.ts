@@ -471,7 +471,6 @@ export class Trader {
             return {
                 token_name: 'Unknown',
                 token_symbol: 'Unknown',
-                creator: undefined,
                 token_supply: 10 ** 18,
                 token_decimal: 9
             };
