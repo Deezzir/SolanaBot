@@ -131,7 +131,7 @@ export interface IProgramTrader {
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
     update_mint_meta(mint_meta: IMintMeta, sol_price?: number): Promise<IMintMeta>;
     update_mint_meta_reserves(mint_meta: IMintMeta, amount: number | TokenAmount): IMintMeta;
-    default_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta>;
+    default_mint_meta(mint: PublicKey, sol_price?: number, data?: object): Promise<IMintMeta>;
 }
 
 type PriorityOptions = {
