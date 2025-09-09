@@ -82,7 +82,7 @@ const StateStruct = define_decoder_struct({
     quote_mint: skip(pubkey().size),
     base_vault: skip(pubkey().size),
     quote_vault: skip(pubkey().size),
-    creator: skip(pubkey().size),
+    creator: pubkey(),
     padding: skip(8 * u64().size)
 });
 
@@ -153,6 +153,7 @@ class BonkMintMeta implements trade.IMintMeta {
     quote_vault!: string;
     pool!: string;
     config!: string;
+    creator!: string;
     sol_reserves: bigint = BigInt(0);
     token_reserves: bigint = BigInt(0);
     total_supply: bigint = BigInt(0);
@@ -460,7 +461,8 @@ export class Trader {
                     token_reserves: state.virtual_base - state.real_base,
                     total_supply: state.supply,
                     complete: state.status !== 0,
-                    config: state.platform_config.toString()
+                    config: state.platform_config.toString(),
+                    creator: state.creator.toString()
                 });
             }
 
@@ -593,13 +595,28 @@ export class Trader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf]);
     }
 
+    private static calc_volume_accumulator(target: PublicKey): PublicKey {
+        const [user_volume_accumulator] = PublicKey.findProgramAddressSync(
+            [target.toBuffer(), SOL_MINT.toBuffer()],
+            RAYDIUM_LAUNCHPAD_PROGRAM_ID
+        );
+        return user_volume_accumulator;
+    }
+
     private static async get_buy_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<BonkMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.base_vault || !mint_meta.quote_vault || !mint_meta.pool || !mint_meta.config)
+        if (
+            !mint_meta.mint ||
+            !mint_meta.base_vault ||
+            !mint_meta.quote_vault ||
+            !mint_meta.pool ||
+            !mint_meta.config ||
+            !mint_meta.creator
+        )
             throw new Error(`Incomplete mint meta data for buy instructions.`);
 
         const mint = new PublicKey(mint_meta.mint);
@@ -607,6 +624,10 @@ export class Trader {
         const base_vault = new PublicKey(mint_meta.base_vault);
         const pool = new PublicKey(mint_meta.pool);
         const config = new PublicKey(mint_meta.config);
+        const creator = new PublicKey(mint_meta.creator);
+
+        const platform_volume_accumulator = this.calc_volume_accumulator(config);
+        const creator_volume_accumulator = this.calc_volume_accumulator(creator);
 
         const token_ata = trade.calc_ata(buyer.publicKey, mint);
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
@@ -643,7 +664,10 @@ export class Trader {
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY, isSigner: false, isWritable: false },
-                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: platform_volume_accumulator, isSigner: false, isWritable: true },
+                    { pubkey: creator_volume_accumulator, isSigner: false, isWritable: true }
                 ],
                 programId: RAYDIUM_LAUNCHPAD_PROGRAM_ID,
                 data: instruction_data
@@ -658,7 +682,7 @@ export class Trader {
         mint_meta: Partial<BonkMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.quote_vault || !mint_meta.base_vault || !mint_meta.pool || !mint_meta.config)
+        if (!mint_meta.mint || !mint_meta.quote_vault || !mint_meta.base_vault || !mint_meta.pool || !mint_meta.config || !mint_meta.creator)
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
@@ -667,6 +691,10 @@ export class Trader {
         const base_vault = new PublicKey(mint_meta.base_vault);
         const pool = new PublicKey(mint_meta.pool);
         const config = new PublicKey(mint_meta.config);
+        const creator = new PublicKey(mint_meta.creator);
+
+        const platform_volume_accumulator = this.calc_volume_accumulator(config);
+        const creator_volume_accumulator = this.calc_volume_accumulator(creator);
 
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage);
@@ -693,7 +721,10 @@ export class Trader {
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY, isSigner: false, isWritable: false },
-                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: platform_volume_accumulator, isSigner: false, isWritable: true },
+                    { pubkey: creator_volume_accumulator, isSigner: false, isWritable: true }
                 ],
                 programId: RAYDIUM_LAUNCHPAD_PROGRAM_ID,
                 data: instruction_data

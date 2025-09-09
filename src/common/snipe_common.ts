@@ -83,7 +83,7 @@ export abstract class SniperBase implements ISniper {
         this.bot_config = null;
     }
 
-    protected abstract decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null;
+    protected abstract decode_create_instr(data: Uint8Array): { name: string; symbol: string; misc?: object } | null;
     protected abstract is_create_tx(logs: string[]): boolean;
 
     private get_worker_path(): string {
@@ -99,12 +99,15 @@ export abstract class SniperBase implements ISniper {
         }
     }
 
-    public async wait_drop_sub(token_name: string, token_ticker: string): Promise<PublicKey | null> {
+    public async wait_drop_sub(
+        token_name: string,
+        token_ticker: string
+    ): Promise<{ mint: PublicKey; misc?: object } | null> {
         const name = token_name.toLowerCase();
         const ticker = token_ticker.toLowerCase();
         common.log(`Waiting for the new token drop for the '${this.trader.get_name()}' program...`);
 
-        return new Promise<PublicKey | null>((resolve, reject) => {
+        return new Promise<{ mint: PublicKey; misc?: object } | null>((resolve, reject) => {
             this.logs_stop_func = () => reject(new Error('User stopped the process'));
 
             this.subscription_id = global.CONNECTION.onLogs(
@@ -134,7 +137,7 @@ export abstract class SniperBase implements ISniper {
                                     this.logs_stop_func = null;
                                     await this.wait_drop_unsub();
                                     common.log(`Found the mint using Solana logs`);
-                                    resolve(mint.pubkey);
+                                    resolve({ mint: mint.pubkey, misc: result.misc });
                                 }
                             }
                         } catch (err) {
@@ -200,18 +203,17 @@ export abstract class SniperBase implements ISniper {
         common.log('[Main Worker] Bot started successfully, waiting for the token...');
 
         try {
-            const mint =
+            const result =
                 this.bot_config.token_name && this.bot_config.token_ticker
                     ? await this.wait_drop_sub(this.bot_config.token_name, this.bot_config.token_ticker)
-                    : this.bot_config.mint;
+                    : { mint: this.bot_config.mint, misc: undefined };
 
-            if (!mint) throw new Error('Failed to find the token. Exiting...');
+            if (!result || !result.mint) throw new Error('Failed to find the token. Exiting...');
 
-            this.bot_config.mint = mint;
+            this.bot_config.mint = result.mint;
             common.log(`[Main Worker] Token detected: ${this.bot_config.mint.toString()}`);
 
-            let mint_meta = await this.trader.default_mint_meta(this.bot_config.mint, sol_price);
-            // mint_meta = await this.trader.update_mint_meta(mint_meta, sol_price);
+            let mint_meta = await this.trader.default_mint_meta(this.bot_config.mint, sol_price, result.misc);
             this.workers_post_message('mint', mint_meta);
 
             let migrated: boolean = false;

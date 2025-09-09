@@ -9,7 +9,7 @@ export class Runner extends snipe.SniperBase {
         return logs.some((log) => log.includes('Program log: Instruction: InitializeVirtualPoolWithSplToken'));
     }
 
-    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null {
+    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string; misc?: object } | null {
         try {
             if (data.length < 18) return null;
 

@@ -1,5 +1,6 @@
 import { PUMP_CREATE_DISCRIMINATOR, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_PROGRAM_ID } from '../constants.js';
 import * as snipe from '../common/snipe_common.js';
+import { PublicKey } from '@solana/web3.js';
 
 export class Runner extends snipe.SniperBase {
     protected mint_authority = PUMP_MINT_AUTHORITY_ACCOUNT;
@@ -9,7 +10,7 @@ export class Runner extends snipe.SniperBase {
         return logs.some((log) => log.includes('Program log: Instruction: Create'));
     }
 
-    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string } | null {
+    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string; misc?: object } | null {
         try {
             if (data.length < 18) return null;
 
@@ -27,7 +28,17 @@ export class Runner extends snipe.SniperBase {
             const symbol_end = symbol_start + symbol_length;
             const symbol = Buffer.from(data.slice(symbol_start, symbol_end)).toString('utf-8');
 
-            return { name, symbol };
+            const uri_length = data[symbol_end];
+            const uri_start = symbol_end + 4;
+            const uri_end = uri_start + uri_length;
+            const uri = Buffer.from(data.slice(uri_start, uri_end)).toString('utf-8');
+
+            const creator_start = uri_end;
+            const creator_end = creator_start + 32;
+            const creator = new PublicKey(data.slice(creator_start, creator_end));
+
+            const misc = { uri, creator: creator.toBase58() };
+            return { name, symbol, misc };
         } catch (err) {
             return null;
         }

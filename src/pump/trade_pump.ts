@@ -56,7 +56,10 @@ import {
     TRADE_MAX_WALLETS_PER_CREATE_TX,
     PUMP_GLOBAL_VOLUME_ACCUMULATOR,
     PUMP_USER_VOLUME_ACCUMULATOR_SEED,
-    PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR
+    PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR,
+    PUMP_FEE_CONFIG,
+    PUMP_FEE_PROGRAM_ID,
+    PUMP_AMM_FEE_CONFIG
 } from '../constants.js';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
@@ -312,14 +315,34 @@ export class Trader {
         );
     }
 
-    public static async default_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta> {
-        const meta = await trade.get_token_meta(mint).catch(() => {
-            return { token_name: 'Unknown', token_symbol: 'Unknown', creator: undefined };
-        });
-        const [bonding, bonding_ata] = this.calc_bonding_curve(mint);
+    public static async default_mint_meta(
+        mint: PublicKey,
+        sol_price: number = 0,
+        data?: object
+    ): Promise<PumpMintMeta> {
+        let meta: { token_name: string; token_symbol: string; creator?: PublicKey } = {
+            token_name: 'Unknown',
+            token_symbol: 'Unknown',
+            creator: undefined
+        };
+        if (data) {
+            if ('name' in data && typeof data.name === 'string' && data.name) meta.token_name = data.name;
+            if ('symbol' in data && typeof data.symbol === 'string' && data.symbol) meta.token_symbol = data.symbol;
+            if ('creator' in data && typeof data.creator === 'string' && data.creator)
+                meta.creator = new PublicKey(data.creator);
+        } else {
+            const token_meta = await trade.get_token_meta(mint).catch(() => null);
+            if (token_meta)
+                meta = {
+                    token_name: token_meta.token_name,
+                    token_symbol: token_meta.token_symbol,
+                    creator: token_meta.creator
+                };
+        }
 
         let creator_vault: PublicKey | undefined;
         let creator_vault_ata: PublicKey | undefined;
+        const [bonding, bonding_ata] = this.calc_bonding_curve(mint);
         if (meta.creator) [creator_vault, creator_vault_ata] = this.calc_creator_vault(meta.creator);
 
         return new PumpMintMeta({
@@ -559,7 +582,9 @@ export class Trader {
                     { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: PUMP_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
-                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true }
+                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true },
+                    { pubkey: PUMP_FEE_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_PROGRAM_ID,
                 data: instruction_data
@@ -580,7 +605,6 @@ export class Trader {
         const mint = new PublicKey(mint_meta.mint);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
-        const user_volume_accumulator = this.calc_user_volume_accumulator(seller.publicKey, 'pump');
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.calc_sol_amount_raw(token_amount_raw, mint_meta);
@@ -602,8 +626,8 @@ export class Trader {
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
-                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true }
+                    { pubkey: PUMP_FEE_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_PROGRAM_ID,
                 data: instruction_data
@@ -846,7 +870,9 @@ export class Trader {
                     { pubkey: creator_vault_ata, isSigner: false, isWritable: true },
                     { pubkey: creator_vault, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
-                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true }
+                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true },
+                    { pubkey: PUMP_AMM_FEE_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data
@@ -876,7 +902,6 @@ export class Trader {
         const amm = new PublicKey(mint_meta.amm_pool);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
         const creator_vault_ata = new PublicKey(mint_meta.creator_vault_ata);
-        const user_volume_accumulator = this.calc_user_volume_accumulator(seller.publicKey, 'pump-swap');
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
@@ -909,8 +934,8 @@ export class Trader {
                     { pubkey: PUMP_AMM_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: creator_vault_ata, isSigner: false, isWritable: true },
                     { pubkey: creator_vault, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
-                    { pubkey: user_volume_accumulator, isSigner: false, isWritable: true }
+                    { pubkey: PUMP_AMM_FEE_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data

@@ -9,7 +9,7 @@ export class Runner extends snipe.SniperBase {
         throw new Error('is_create_tx not implemented');
     }
 
-    protected decode_create_instr(_data: Uint8Array): { name: string; symbol: string } | null {
+    protected decode_create_instr(_data: Uint8Array): { name: string; symbol: string; misc?: object } | null {
         throw new Error('decode_create_instr not implemented');
     }
 }
