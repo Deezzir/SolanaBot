@@ -1,4 +1,4 @@
-# Solana Buy Bot
+# Solana Bot
 
 ## Quick Start
 
