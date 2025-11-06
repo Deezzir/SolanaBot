@@ -850,7 +850,7 @@ export class Trader {
             createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({
                 keys: [
-                    { pubkey: amm, isSigner: false, isWritable: false },
+                    { pubkey: amm, isSigner: false, isWritable: true },
                     { pubkey: buyer.publicKey, isSigner: true, isWritable: true },
                     { pubkey: PUMP_AMM_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: mint, isSigner: false, isWritable: false },
@@ -915,7 +915,7 @@ export class Trader {
             createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT),
             new TransactionInstruction({
                 keys: [
-                    { pubkey: amm, isSigner: false, isWritable: false },
+                    { pubkey: amm, isSigner: false, isWritable: true },
                     { pubkey: seller.publicKey, isSigner: true, isWritable: true },
                     { pubkey: PUMP_AMM_GLOBAL_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: mint, isSigner: false, isWritable: false },
