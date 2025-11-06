@@ -682,7 +682,14 @@ export class Trader {
         mint_meta: Partial<BonkMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
-        if (!mint_meta.mint || !mint_meta.quote_vault || !mint_meta.base_vault || !mint_meta.pool || !mint_meta.config || !mint_meta.creator)
+        if (
+            !mint_meta.mint ||
+            !mint_meta.quote_vault ||
+            !mint_meta.base_vault ||
+            !mint_meta.pool ||
+            !mint_meta.config ||
+            !mint_meta.creator
+        )
             throw new Error(`Incomplete mint meta data for sell instructions.`);
         if (token_amount.amount === null) throw new Error(`Invalid token amount: ${token_amount.amount}`);
 
