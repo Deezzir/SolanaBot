@@ -52,6 +52,7 @@ export class MeteoraMintMeta implements trade.IMintMeta {
     market_cap: number = 0;
     token_decimal: number = 9;
     fee: number = 0;
+    token_program_id!: string;
 
     dbc_data?: DBCData;
     damm_v1_data?: DAMMV1Data;
@@ -88,6 +89,10 @@ export class MeteoraMintMeta implements trade.IMintMeta {
 
     public get mint_pubkey(): PublicKey {
         return new PublicKey(this.mint);
+    }
+
+    public get token_program(): PublicKey {
+        return new PublicKey(this.token_program_id);
     }
 }
 
@@ -472,7 +477,8 @@ export class Trader {
                 token_name: 'Unknown',
                 token_symbol: 'Unknown',
                 token_supply: 10 ** 18,
-                token_decimal: 9
+                token_decimal: 9,
+                token_program: TOKEN_PROGRAM_ID
             };
         });
 
@@ -486,7 +492,8 @@ export class Trader {
             sol_reserves: 0n,
             token_reserves: 1000000000000000000n,
             total_supply: BigInt(meta.token_supply),
-            token_decimal: meta.token_decimal
+            token_decimal: meta.token_decimal,
+            token_program_id: meta.token_program.toString()
         });
     }
 

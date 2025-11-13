@@ -140,7 +140,8 @@ const sell = async () => {
                 balance = await trade.get_token_balance(
                     WORKER_KEYPAIR.publicKey,
                     MINT_METADATA.mint_pubkey,
-                    COMMITMENT
+                    COMMITMENT,
+                    MINT_METADATA.token_program
                 );
                 if (balance.uiAmount !== null && balance.uiAmount !== 0) break;
                 get_balance_retry++;

@@ -1,6 +1,12 @@
-import { PUMP_CREATE_DISCRIMINATOR, PUMP_MINT_AUTHORITY_ACCOUNT, PUMP_PROGRAM_ID } from '../constants.js';
+import {
+    PUMP_CREATE_V1_DISCRIMINATOR,
+    PUMP_CREATE_V2_DISCRIMINATOR,
+    PUMP_MINT_AUTHORITY_ACCOUNT,
+    PUMP_PROGRAM_ID
+} from '../constants.js';
 import * as snipe from '../common/snipe_common.js';
 import { PublicKey } from '@solana/web3.js';
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 export class Runner extends snipe.SniperBase {
     protected mint_authority = PUMP_MINT_AUTHORITY_ACCOUNT;
@@ -14,9 +20,10 @@ export class Runner extends snipe.SniperBase {
         try {
             if (data.length < 18) return null;
 
-            const prefix = Uint8Array.from(PUMP_CREATE_DISCRIMINATOR);
+            const prefix_v1 = Uint8Array.from(PUMP_CREATE_V1_DISCRIMINATOR);
+            const prefix_v2 = Uint8Array.from(PUMP_CREATE_V2_DISCRIMINATOR);
             const data_prefix = Buffer.from(data.slice(0, 8));
-            if (!data_prefix.equals(prefix)) return null;
+            if (!data_prefix.equals(prefix_v1) && !data_prefix.equals(prefix_v2)) return null;
 
             const name_length = data[8];
             const name_start = 8 + 4;
@@ -37,7 +44,14 @@ export class Runner extends snipe.SniperBase {
             const creator_end = creator_start + 32;
             const creator = new PublicKey(data.slice(creator_start, creator_end));
 
-            const misc = { uri, creator: creator.toBase58() };
+            let is_mayhem = false;
+            let token_program = TOKEN_PROGRAM_ID;
+            if (data_prefix.equals(prefix_v2)) {
+                const mayhem_mode_byte = data[creator_end];
+                is_mayhem = mayhem_mode_byte === 1;
+                token_program = TOKEN_2022_PROGRAM_ID;
+            }
+            const misc = { uri, creator: creator.toBase58(), is_mayhem, token_program: token_program.toBase58() };
             return { name, symbol, misc };
         } catch (err) {
             return null;

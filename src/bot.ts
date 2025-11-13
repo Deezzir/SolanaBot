@@ -746,13 +746,14 @@ async function main() {
         .addOption(get_to_option(wallet_cnt))
         .addOption(get_list_option(wallet_cnt))
         .addOption(get_bundle_tip_option())
+        .addOption(get_json_config_option())
         .action(async (cid, creator, options) => {
-            const { mint, amount, from, to, list, bundle, min, max } = options;
+            const { mint, amount, from, to, list, bundle, min, max, config } = options;
             const pg = program.opts().program;
             let buyers: common.Wallet[] | undefined = undefined;
             if (from !== undefined || to !== undefined || list !== undefined)
                 buyers = common.filter_wallets(wallets, from, to, list);
-            await commands.create_token(cid, creator, pg, amount, mint, buyers, min, max, bundle);
+            await commands.create_token(cid, creator, pg, amount, mint, buyers, min, max, bundle, config);
         });
 
     program

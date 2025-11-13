@@ -10,6 +10,7 @@ import * as common from '../common/common.js';
 import * as trade from '../common/trade_common.js';
 import { PriorityLevel, SOL_MINT, TRADE_DEFAULT_TOKEN_DECIMALS, TRADE_RAYDIUM_SWAP_TAX } from '../constants.js';
 import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../common/trade_dex.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 class GenericMintMeta implements trade.IMintMeta {
     mint!: PublicKey;
@@ -19,6 +20,7 @@ class GenericMintMeta implements trade.IMintMeta {
     usd_market_cap: number = 0;
     market_cap: number = 0;
     fee: number = TRADE_RAYDIUM_SWAP_TAX;
+    token_program_id!: string;
 
     constructor(data: Partial<GenericMintMeta> = {}) {
         Object.assign(this, data);
@@ -50,6 +52,10 @@ class GenericMintMeta implements trade.IMintMeta {
 
     public get mint_pubkey(): PublicKey {
         return this.mint;
+    }
+
+    public get token_program(): PublicKey {
+        return new PublicKey(this.token_program_id);
     }
 }
 
@@ -243,7 +249,8 @@ export class Trader {
                 token_symbol: 'Unknown',
                 token_supply: 10 ** 16,
                 price_per_token: 0.0,
-                token_decimal: 6
+                token_decimal: 6,
+                token_program: TOKEN_PROGRAM_ID
             };
         });
 
@@ -255,7 +262,8 @@ export class Trader {
             symbol: meta.token_symbol,
             total_supply: BigInt(meta.token_supply),
             usd_market_cap,
-            market_cap
+            market_cap,
+            token_program_id: meta.token_program.toString()
         });
     }
 

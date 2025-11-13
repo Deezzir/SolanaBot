@@ -75,7 +75,8 @@ export async function bundle_sell(
                 const token_amount = await trade.get_token_balance(
                     wallet.keypair.publicKey,
                     mint_meta.mint_pubkey,
-                    COMMITMENT
+                    COMMITMENT,
+                    mint_meta.token_program
                 );
                 if (token_amount && token_amount.uiAmount && token_amount.uiAmount > 0) {
                     return {
@@ -186,7 +187,12 @@ export async function seq_sell(
     for (const wallet of wallets) {
         const seller = wallet.keypair;
         try {
-            const token_amount = await trade.get_token_balance(seller.publicKey, mint_meta.mint_pubkey, COMMITMENT);
+            const token_amount = await trade.get_token_balance(
+                seller.publicKey,
+                mint_meta.mint_pubkey,
+                COMMITMENT,
+                mint_meta.token_program
+            );
             if (!token_amount || token_amount.uiAmount === 0 || !token_amount.uiAmount) continue;
             const token_amount_to_sell = trade.get_token_amount_by_percent(token_amount, percent);
             common.log(

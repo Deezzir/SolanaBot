@@ -20,7 +20,9 @@ import {
     PartiallyDecodedInstruction
 } from '@solana/web3.js';
 import {
+    ASSOCIATED_TOKEN_PROGRAM_ID,
     AccountLayout,
+    TOKEN_2022_PROGRAM_ID,
     TOKEN_PROGRAM_ID,
     createAssociatedTokenAccountIdempotentInstruction,
     createBurnInstruction,
@@ -46,7 +48,10 @@ import {
     SENDER_ENDPOINTS,
     SENDER_TIP_ACCOUNTS,
     SYSTEM_PROGRAM_ID,
-    COMPUTE_BUDGET_PROGRAM_ID
+    COMPUTE_BUDGET_PROGRAM_ID,
+    MAYHEM_PROGRAM_ID,
+    MAYHEM_STATE_SEED,
+    MAYHEM_SOL_VAULT
 } from '../constants.js';
 import * as common from './common.js';
 import bs58 from 'bs58';
@@ -60,6 +65,7 @@ export interface IMintMeta {
     readonly migrated: boolean;
     readonly platform_fee: number;
     readonly mint_pubkey: PublicKey;
+    readonly token_program: PublicKey;
 }
 
 export interface IProgramTrader {
@@ -124,7 +130,8 @@ export interface IProgramTrader {
         sol_amount?: number,
         traders?: [Signer, number][],
         bundle_tip?: number,
-        priority?: PriorityLevel
+        priority?: PriorityLevel,
+        config?: object
     ): Promise<String>;
     create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string>;
     get_random_mints(count: number): Promise<IMintMeta[]>;
@@ -151,6 +158,7 @@ export type MintAsset = {
     price_per_token: number;
     mint: PublicKey;
     creator?: PublicKey;
+    token_program: PublicKey;
 };
 
 export type TokenMetrics = {
@@ -174,6 +182,15 @@ export type CostBasis = {
     total_tokens: number;
     total_fees: number;
 };
+
+export function calc_mayhem_state(mint: PublicKey): [PublicKey, PublicKey] {
+    const [state] = PublicKey.findProgramAddressSync([MAYHEM_STATE_SEED, mint.toBuffer()], MAYHEM_PROGRAM_ID);
+    const [token_vault] = PublicKey.findProgramAddressSync(
+        [MAYHEM_SOL_VAULT.toBuffer(), TOKEN_2022_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    return [state, token_vault];
+}
 
 export async function retry_get_tx(
     signature: string,
@@ -254,8 +271,8 @@ export async function retry_send_tx(
     throw new Error('Send transaction failed after multiple attempts');
 }
 
-export function calc_ata(owner: PublicKey, mint: PublicKey): PublicKey {
-    return getAssociatedTokenAddressSync(mint, owner, true);
+export function calc_ata(owner: PublicKey, mint: PublicKey, token_program: PublicKey = TOKEN_PROGRAM_ID): PublicKey {
+    return getAssociatedTokenAddressSync(mint, owner, true, token_program);
 }
 
 export function calc_token_balance_changes(tx: ParsedTransactionWithMeta, account: PublicKey): TxBalanceChanges | null {
@@ -324,9 +341,10 @@ export function calc_token_balance_changes(tx: ParsedTransactionWithMeta, accoun
 export async function get_cost_basis(
     account: PublicKey,
     mint: PublicKey,
-    commitment: Finality = 'finalized'
+    commitment: Finality = 'finalized',
+    token_program: PublicKey = TOKEN_PROGRAM_ID
 ): Promise<CostBasis | null> {
-    const token_ata = calc_ata(account, mint);
+    const token_ata = calc_ata(account, mint, token_program);
 
     const signatures = (await global.CONNECTION.getSignaturesForAddress(token_ata, {}, commitment)).map(
         (info) => info.signature
@@ -381,10 +399,11 @@ export async function get_balance(pubkey: PublicKey, commitment: Commitment = 'f
 export async function get_token_balance(
     owner: PublicKey,
     mint: PublicKey,
-    commitment: Commitment = 'finalized'
+    commitment: Commitment = 'finalized',
+    program_id: PublicKey = TOKEN_PROGRAM_ID
 ): Promise<TokenAmount> {
     try {
-        const assoc_addres = calc_ata(owner, mint);
+        const assoc_addres = calc_ata(owner, mint, program_id);
         const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_addres, commitment);
         return account_info.value;
     } catch (err) {
@@ -408,6 +427,9 @@ export async function get_token_meta(mint: PublicKey): Promise<MintAsset> {
                 token_supply: result.token_info.supply || 10 ** 16,
                 price_per_token: result.token_info.price_info?.price_per_token || 0.0,
                 creator: creator ? new PublicKey(creator.address) : undefined,
+                token_program: result.token_info.token_program
+                    ? new PublicKey(result.token_info.token_program)
+                    : TOKEN_PROGRAM_ID,
                 mint: mint
             };
         }
@@ -859,15 +881,23 @@ export async function send_tokens(
 
 export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; unsold: PublicKey[] }> {
     const token_accounts = (
-        await global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
-            programId: TOKEN_PROGRAM_ID
-        })
-    ).value.map((acc) => {
-        return {
-            pubkey: acc.pubkey,
-            data: AccountLayout.decode(acc.account.data)
-        };
-    });
+        await Promise.all([
+            global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
+                programId: TOKEN_PROGRAM_ID
+            }).then((res) => res.value.map((acc) => ({ ...acc, programId: TOKEN_PROGRAM_ID }))),
+            global.CONNECTION.getTokenAccountsByOwner(owner.publicKey, {
+                programId: TOKEN_2022_PROGRAM_ID
+            }).then((res) => res.value.map((acc) => ({ ...acc, programId: TOKEN_2022_PROGRAM_ID })))
+        ])
+    )
+        .flat()
+        .map((acc) => {
+            return {
+                pubkey: acc.pubkey,
+                programId: acc.programId,
+                data: AccountLayout.decode(acc.account.data)
+            };
+        });
     const unsold_mints = await Promise.all(
         token_accounts
             .filter((acc) => acc.data.amount !== BigInt(0))
@@ -887,10 +917,16 @@ export async function close_accounts(owner: Keypair): Promise<{ ok: boolean; uns
     for (const chunk of common.chunks(accounts_to_close, 15)) {
         while (true) {
             const intructions = chunk.map((account) => {
-                return createCloseAccountInstruction(account.pubkey, owner.publicKey, owner.publicKey);
+                return createCloseAccountInstruction(
+                    account.pubkey,
+                    owner.publicKey,
+                    owner.publicKey,
+                    undefined,
+                    account.programId
+                );
             });
             try {
-                const signature = await send_tx(intructions, [owner], PriorityLevel.HIGH);
+                const signature = await send_tx(intructions, [owner], PriorityLevel.DEFAULT);
                 common.log(`${chunk.length} accounts closed | Signature ${signature} `);
                 break;
             } catch (err) {

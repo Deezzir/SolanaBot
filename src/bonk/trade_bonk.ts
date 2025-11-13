@@ -162,6 +162,7 @@ class BonkMintMeta implements trade.IMintMeta {
     complete: boolean = false;
     observation_state: string | null = null;
     fee: number = BONK_SWAP_TAX;
+    token_program_id!: string;
 
     constructor(data: Partial<BonkMintMeta> = {}) {
         Object.assign(this, data);
@@ -193,6 +194,10 @@ class BonkMintMeta implements trade.IMintMeta {
 
     public get mint_pubkey(): PublicKey {
         return new PublicKey(this.mint);
+    }
+
+    public get token_program(): PublicKey {
+        return new PublicKey(this.token_program_id);
     }
 }
 
@@ -493,7 +498,7 @@ export class Trader {
 
     public static async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<BonkMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
-            return { token_name: 'Unknown', token_symbol: 'Unknown' };
+            return { token_name: 'Unknown', token_symbol: 'Unknown', token_program: TOKEN_PROGRAM_ID };
         });
         const pool = this.calc_pool(mint);
         const [base_vault, quote_vault] = this.calc_vault(mint, pool);
@@ -509,7 +514,8 @@ export class Trader {
             usd_market_cap: 30 * sol_price,
             sol_reserves: BigInt(30000852951),
             token_reserves: BigInt(1073025605596382),
-            total_supply: BigInt(1000000000000000)
+            total_supply: BigInt(1000000000000000),
+            token_program_id: meta.token_program.toString()
         });
     }
 

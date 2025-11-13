@@ -34,7 +34,7 @@ export async function burn_token(mint: PublicKey, burner: Signer, amount?: numbe
         common.yellow(`Burning ${amount ? `${amount} tokens` : `${percent! * 100}% of $${mint_meta.token_symbol}`}...`)
     );
 
-    const token_amount = await trade.get_token_balance(burner.publicKey, mint, COMMITMENT);
+    const token_amount = await trade.get_token_balance(burner.publicKey, mint, COMMITMENT, mint_meta.token_program);
     common.log(
         common.bold(
             `\nBurner address: ${burner.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
@@ -93,7 +93,8 @@ export async function create_token(
     wallets?: common.Wallet[],
     min?: number,
     max?: number,
-    bundle_tip?: number
+    bundle_tip?: number,
+    config?: object
 ): Promise<void> {
     if (wallets && (wallets.length === 0 || wallets.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE))
         throw new Error(
@@ -137,7 +138,8 @@ export async function create_token(
             dev_buy,
             entries,
             bundle_tip,
-            PriorityLevel.HIGH
+            PriorityLevel.HIGH,
+            config
         );
         common.log(common.green(`\nToken created | Signature: ${sig}`));
         common.log(common.green(`Mint address: ${mint.publicKey.toBase58()}`));
@@ -188,17 +190,22 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
 
     let decimals, supply, supply_raw;
     let token_name, token_symbol;
+    let token_program;
 
     try {
-        ({ token_name, token_symbol } = await trade.get_token_meta(mint));
+        ({ token_name, token_symbol, token_program } = await trade.get_token_meta(mint));
         ({ supply: supply_raw, decimals } = await trade.get_token_supply(mint));
         supply = Number(supply_raw);
     } catch (error) {
         throw new Error(`Failed to get the token information: ${error}`);
     }
     const [token_balances, cost_basiss] = await Promise.all([
-        Promise.all(wallets.map((wallet) => trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT))),
-        Promise.all(wallets.map((wallet) => trade.get_cost_basis(wallet.keypair.publicKey, mint, COMMITMENT)))
+        Promise.all(
+            wallets.map((wallet) => trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT, token_program))
+        ),
+        Promise.all(
+            wallets.map((wallet) => trade.get_cost_basis(wallet.keypair.publicKey, mint, COMMITMENT, token_program))
+        )
     ]);
 
     const wallet_count = cost_basiss.filter((cb) => cb).length;
@@ -311,7 +318,7 @@ export async function transfer_token(
         )
     );
 
-    const token_balance = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT);
+    const token_balance = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT, mint_meta.token_program);
     if (!token_balance.uiAmount) throw new Error(`Sender has no token balance for ${mint_meta.token_name}`);
     if (token_balance.uiAmount < amount)
         throw new Error(`Sender balance is not enough to transfer ${amount} $${mint_meta.token_symbol}`);
@@ -380,7 +387,7 @@ export async function sell_token_once(
 
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...`));
-    const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT);
+    const token_amount = await trade.get_token_balance(seller.publicKey, mint, COMMITMENT, mint_meta.token_program);
     common.log(
         common.bold(
             `\nSeller address: ${seller.publicKey.toString()} | Balance: ${token_amount.uiAmount || 0} tokens\n`
@@ -542,14 +549,22 @@ export async function collect(wallets: common.Wallet[], receiver: PublicKey): Pr
 export async function collect_token(wallets: common.Wallet[], mint: PublicKey, receiver: PublicKey): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
 
-    common.log(common.yellow(`Collecting all the tokens from the accounts to ${receiver}...`));
+    const mint_meta = await trade.get_token_meta(mint);
+    if (!mint_meta) throw new Error(`Mint metadata not found`);
+
+    common.log(common.yellow(`Collecting $${mint_meta.token_symbol} from the accounts to ${receiver}...`));
     const transactions = [];
 
     for (const wallet of wallets) {
         try {
             const sender = wallet.keypair;
             if (sender.publicKey.equals(receiver)) continue;
-            const token_amount = await trade.get_token_balance(sender.publicKey, mint, COMMITMENT);
+            const token_amount = await trade.get_token_balance(
+                sender.publicKey,
+                mint,
+                COMMITMENT,
+                mint_meta.token_program
+            );
 
             common.log(
                 `Collecting ${token_amount.uiAmount} tokens from ${sender.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
@@ -702,7 +717,7 @@ export async function distribute_token(
     const mint_meta = await trade.get_token_meta(mint);
     let amounts: TokenAmount[] = [];
 
-    const balance = await trade.get_token_balance(funder.publicKey, mint, COMMITMENT);
+    const balance = await trade.get_token_balance(funder.publicKey, mint, COMMITMENT, mint_meta.token_program);
     if (!balance.uiAmount) throw new Error(`Distributer has no token balance for ${mint_meta.token_name}`);
     common.log(
         common.yellow(
@@ -1051,7 +1066,12 @@ export async function drop(
 
     let token_balance: number = 0;
     try {
-        const balance = await trade.get_token_balance(drop.publicKey, mint_meta.mint, COMMITMENT);
+        const balance = await trade.get_token_balance(
+            drop.publicKey,
+            mint_meta.mint,
+            COMMITMENT,
+            mint_meta.token_program
+        );
         token_balance = Math.floor(balance.uiAmount || 0);
         common.log(
             common.yellow(

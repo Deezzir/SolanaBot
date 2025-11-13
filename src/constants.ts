@@ -48,6 +48,12 @@ export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111
 export const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111');
 export const RENT_PROGRAM_ID = new PublicKey('SysvarRent111111111111111111111111111111111');
 export const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+export const MAYHEM_PROGRAM_ID = new PublicKey('MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e');
+export const MAYHEM_FEE_ACCOUNT = new PublicKey('GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS');
+export const MAYHEM_GLOBAL_ACCOUNT = new PublicKey('13ec7XdrjF3h3YcqBTFDSReRcUFwbCnJaAQspM4j6DDJ');
+export const MAYHEM_SOL_VAULT = new PublicKey('BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s');
+export const MAYHEM_FEE_TOKEN_ACCOUNT = new PublicKey('C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet');
+export const MAYHEM_STATE_SEED = new Uint8Array([109, 97, 121, 104, 101, 109, 45, 115, 116, 97, 116, 101]);
 export const JUPITER_API_URL = 'https://quote-api.jup.ag/v6/';
 export const JITO_MIN_TIP = 1000000 / LAMPORTS_PER_SOL;
 export const JITO_BUNDLE_SIZE = 5;
@@ -101,7 +107,7 @@ export enum PriorityLevel {
     DEFAULT = 'Default'
 }
 
-// TRADE DEX CONSTANTS
+// TRADE RAYDIUM CONSTANTS
 export const RAYDIUM_LAUNCHPAD_API_URL = 'https://launch-mint-v1.raydium.io';
 export const RAYDIUM_AUTHORITY = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 export const RAYDIUM_AMM4_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
@@ -183,7 +189,8 @@ export const PUMP_AMM_CREATOR_VAULT_SEED = new Uint8Array([
 ]);
 export const PUMP_BUY_DISCRIMINATOR = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
 export const PUMP_SELL_DISCRIMINATOR = new Uint8Array([51, 230, 133, 164, 1, 127, 131, 173]);
-export const PUMP_CREATE_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
+export const PUMP_CREATE_V1_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
+export const PUMP_CREATE_V2_DISCRIMINATOR = new Uint8Array([214, 144, 76, 236, 95, 139, 49, 180]);
 export const PUMP_EXTEND_DISCRIMINATOR = new Uint8Array([234, 102, 194, 203, 150, 72, 62, 229]);
 export const PUMP_USER_VOLUME_ACCUMULATOR_SEED = new Uint8Array([
     117, 115, 101, 114, 95, 118, 111, 108, 117, 109, 101, 95, 97, 99, 99, 117, 109, 117, 108, 97, 116, 111, 114

@@ -66,6 +66,7 @@ class MoonshotMintMeta implements trade.IMintMeta {
         marketcapThreshold: ''
     };
     fee: number = TRADE_RAYDIUM_SWAP_TAX;
+    token_program_id!: string;
 
     constructor(data: Partial<MoonshotMintMeta> = {}) {
         Object.assign(this, data);
@@ -97,6 +98,10 @@ class MoonshotMintMeta implements trade.IMintMeta {
 
     public get mint_pubkey(): PublicKey {
         return new PublicKey(this.baseToken.address);
+    }
+
+    public get token_program(): PublicKey {
+        return new PublicKey(this.token_program_id);
     }
 }
 
