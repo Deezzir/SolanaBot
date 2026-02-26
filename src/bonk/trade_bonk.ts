@@ -201,13 +201,12 @@ class BonkMintMeta implements trade.IMintMeta {
     }
 }
 
-@common.staticImplements<trade.IProgramTrader>()
-export class Trader {
-    public static get_name(): string {
+export class Trader implements trade.IProgramTrader {
+    public get_name(): string {
         return common.Program.Bonk;
     }
 
-    public static async buy_token(
+    public async buy_token(
         sol_amount: number,
         buyer: Signer,
         mint_meta: BonkMintMeta,
@@ -219,7 +218,7 @@ export class Trader {
         return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
     }
 
-    public static async buy_token_instructions(
+    public async buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: BonkMintMeta,
@@ -234,7 +233,7 @@ export class Trader {
         return [instructions, lta];
     }
 
-    public static async sell_token(
+    public async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: BonkMintMeta,
@@ -246,7 +245,7 @@ export class Trader {
         return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
     }
 
-    public static async sell_token_instructions(
+    public async sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: BonkMintMeta,
@@ -261,7 +260,7 @@ export class Trader {
         return [instructions, lta];
     }
 
-    public static async buy_sell_instructions(
+    public async buy_sell_instructions(
         sol_amount: number,
         trader: Signer,
         mint_meta: BonkMintMeta,
@@ -283,7 +282,7 @@ export class Trader {
         return [buy_instructions, sell_instructions, lta];
     }
 
-    public static async buy_sell(
+    public async buy_sell(
         sol_amount: number,
         trader: Signer,
         mint_meta: BonkMintMeta,
@@ -322,7 +321,7 @@ export class Trader {
         return [signature, signature];
     }
 
-    public static async buy_sell_bundle(
+    public async buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
         mint_meta: BonkMintMeta,
@@ -345,7 +344,7 @@ export class Trader {
         );
     }
 
-    public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<BonkMintMeta | undefined> {
+    public async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<BonkMintMeta | undefined> {
         try {
             let mint_meta = await this.default_mint_meta(mint, sol_price);
             mint_meta = await this.update_mint_meta(mint_meta, sol_price);
@@ -355,7 +354,7 @@ export class Trader {
         }
     }
 
-    public static async get_random_mints(count: number): Promise<BonkMintMeta[]> {
+    public async get_random_mints(count: number): Promise<BonkMintMeta[]> {
         const graduated_length = Math.floor(count * Math.random());
         const ungraduated_length = count - graduated_length;
         return (
@@ -366,7 +365,7 @@ export class Trader {
         ).flat();
     }
 
-    public static async create_token(
+    public async create_token(
         mint: Keypair,
         creator: Signer,
         token_name: string,
@@ -428,7 +427,7 @@ export class Trader {
         );
     }
 
-    public static update_mint_meta_reserves(mint_meta: BonkMintMeta, amount: number | TokenAmount): BonkMintMeta {
+    public update_mint_meta_reserves(mint_meta: BonkMintMeta, amount: number | TokenAmount): BonkMintMeta {
         if (typeof amount === 'number') {
             const sol_amount_raw = BigInt(Math.floor(amount * LAMPORTS_PER_SOL));
             const fee = (sol_amount_raw * BigInt(mint_meta.fee * 10000)) / 10000n;
@@ -447,7 +446,7 @@ export class Trader {
         throw new Error(`Invalid amount type: ${typeof amount}`);
     }
 
-    public static async update_mint_meta(mint_meta: BonkMintMeta, sol_price: number = 0.0): Promise<BonkMintMeta> {
+    public async update_mint_meta(mint_meta: BonkMintMeta, sol_price: number = 0.0): Promise<BonkMintMeta> {
         try {
             const cpmm_pool = await this.get_cpmm_from_mint(new PublicKey(mint_meta.mint));
 
@@ -496,7 +495,7 @@ export class Trader {
         }
     }
 
-    public static async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<BonkMintMeta> {
+    public async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<BonkMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
             return { token_name: 'Unknown', token_symbol: 'Unknown', token_program: TOKEN_PROGRAM_ID };
         });
@@ -519,7 +518,7 @@ export class Trader {
         });
     }
 
-    public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+    public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
         const image_file = new File([readFileSync(image_path)], basename(image_path), {
             type: 'image/png'
         });
@@ -552,7 +551,7 @@ export class Trader {
         }
     }
 
-    private static calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<BonkMintMeta>): bigint {
+    private calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<BonkMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
         if (sol_amount_raw <= 0) return 0n;
 
@@ -563,24 +562,24 @@ export class Trader {
         return token.token_reserves - new_token_reserves;
     }
 
-    private static calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<BonkMintMeta>): bigint {
+    private calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<BonkMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves) return 0n;
         if (token_amount_raw <= 0) return 0n;
 
         return (token_amount_raw * token.sol_reserves) / (token.token_reserves + token_amount_raw);
     }
 
-    private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static swap_data(amount_in: bigint, minimum_amount_out: bigint, op: 'buy' | 'sell'): Buffer {
+    private swap_data(amount_in: bigint, minimum_amount_out: bigint, op: 'buy' | 'sell'): Buffer {
         const discriminator = op === 'buy' ? RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR : RAYDIUM_LAUNCHPAD_SELL_DISCRIMINATOR;
         const instruction_buf = Buffer.from(discriminator);
         const sol_amount_buf = Buffer.alloc(8);
@@ -592,7 +591,7 @@ export class Trader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf, share_fee_rate]);
     }
 
-    private static swap_cpmm_data(amount_in: bigint, minimum_amount_out: bigint): Buffer {
+    private swap_cpmm_data(amount_in: bigint, minimum_amount_out: bigint): Buffer {
         const instruction_buf = Buffer.from(RAYDIUM_CPMM_SWAP_DISCRIMINATOR);
         const sol_amount_buf = Buffer.alloc(8);
         sol_amount_buf.writeBigUInt64LE(amount_in, 0);
@@ -601,7 +600,7 @@ export class Trader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf]);
     }
 
-    private static calc_volume_accumulator(target: PublicKey): PublicKey {
+    private calc_volume_accumulator(target: PublicKey): PublicKey {
         const [user_volume_accumulator] = PublicKey.findProgramAddressSync(
             [target.toBuffer(), SOL_MINT.toBuffer()],
             RAYDIUM_LAUNCHPAD_PROGRAM_ID
@@ -609,7 +608,7 @@ export class Trader {
         return user_volume_accumulator;
     }
 
-    private static async get_buy_instructions(
+    private async get_buy_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<BonkMintMeta>,
@@ -682,7 +681,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_instructions(
+    private async get_sell_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<BonkMintMeta>,
@@ -746,7 +745,7 @@ export class Trader {
         ];
     }
 
-    private static async get_buy_cpmm_instructions(
+    private async get_buy_cpmm_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: BonkMintMeta,
@@ -811,7 +810,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_cpmm_instructions(
+    private async get_sell_cpmm_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: BonkMintMeta,
@@ -868,7 +867,7 @@ export class Trader {
         ];
     }
 
-    private static async get_create_token_instructions(
+    private async get_create_token_instructions(
         creator: Signer,
         token_name: string,
         token_symbol: string,
@@ -912,7 +911,7 @@ export class Trader {
         ];
     }
 
-    private static calc_vault(mint: PublicKey, pool: PublicKey): [PublicKey, PublicKey] {
+    private calc_vault(mint: PublicKey, pool: PublicKey): [PublicKey, PublicKey] {
         const [base_vault] = PublicKey.findProgramAddressSync(
             [RAYDIUM_LAUNCHPAD_VAULT_SEED, pool.toBuffer(), mint.toBuffer()],
             RAYDIUM_LAUNCHPAD_PROGRAM_ID
@@ -924,7 +923,7 @@ export class Trader {
         return [base_vault, quote_vault];
     }
 
-    private static calc_pool(base_mint: PublicKey): PublicKey {
+    private calc_pool(base_mint: PublicKey): PublicKey {
         const [vault] = PublicKey.findProgramAddressSync(
             [RAYDIUM_LAUNCHPAD_POOL_SEED, base_mint.toBuffer(), SOL_MINT.toBuffer()],
             RAYDIUM_LAUNCHPAD_PROGRAM_ID
@@ -932,17 +931,13 @@ export class Trader {
         return vault;
     }
 
-    private static get_token_metrics(
-        quote_reserves: bigint,
-        base_reserves: bigint,
-        supply: bigint
-    ): trade.TokenMetrics {
+    private get_token_metrics(quote_reserves: bigint, base_reserves: bigint, supply: bigint): trade.TokenMetrics {
         const price_sol = this.calculate_curve_price(quote_reserves, base_reserves);
         const mcap_sol = (price_sol * Number(supply)) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS;
         return { price_sol, mcap_sol };
     }
 
-    private static calculate_curve_price(quote_reserves: bigint, base_reserves: bigint): number {
+    private calculate_curve_price(quote_reserves: bigint, base_reserves: bigint): number {
         if (base_reserves <= 0 || quote_reserves <= 0)
             throw new RangeError('Curve state contains invalid virtual reserves');
         return (
@@ -952,13 +947,13 @@ export class Trader {
         );
     }
 
-    private static async get_state(bond_curve_addr: PublicKey): Promise<State> {
+    private async get_state(bond_curve_addr: PublicKey): Promise<State> {
         const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
         if (!info || !info.data) throw new Error('Unexpected curve state');
         return StateStruct.decode(info.data);
     }
 
-    private static create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
+    private create_data(token_name: string, token_ticker: string, meta_link: string): Buffer {
         const instruction_buf = Buffer.from(RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR);
 
         const decimals_buf = Buffer.alloc(1);
@@ -1001,7 +996,7 @@ export class Trader {
         ]);
     }
 
-    private static async get_cpmm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
+    private async get_cpmm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
         try {
             const [cpmm] = await global.CONNECTION.getProgramAccounts(RAYDIUM_CPMM_PROGRAM_ID, {
                 filters: [
@@ -1032,7 +1027,7 @@ export class Trader {
         }
     }
 
-    private static async get_cpmm_state(cpmm_pool: PublicKey): Promise<CPMMState> {
+    private async get_cpmm_state(cpmm_pool: PublicKey): Promise<CPMMState> {
         const info = await global.CONNECTION.getAccountInfo(cpmm_pool);
         if (!info || !info.data) throw new Error('Unexpected CPMM state');
 
@@ -1049,7 +1044,7 @@ export class Trader {
         };
     }
 
-    private static async get_random_mints_type(
+    private async get_random_mints_type(
         count: number,
         graduated: boolean,
         sort: 'new' | 'lastTrade' | 'hotToken' | 'marketCap' = 'new'

@@ -6,7 +6,6 @@ import * as commands from './commands';
 import { exit } from 'process';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
-import { Environment, Moonshot } from '@wen-moon-ser/moonshot-sdk';
 import {
     COMMITMENT,
     DROP_AIRDROP_CSV,
@@ -139,13 +138,6 @@ async function main() {
 
     global.CONNECTION = new Connection(HELIUS_RPC, { disableRetryOnRateLimit: true, commitment: COMMITMENT });
     global.HELIUS_CONNECTION = new Helius(HELIUS_API_KEY);
-    global.MOONSHOT = new Moonshot({
-        rpcUrl: global.CONNECTION.rpcEndpoint,
-        environment: Environment.MAINNET,
-        chainOptions: {
-            solana: { confirmOptions: { commitment: COMMITMENT } }
-        }
-    });
 
     const program = new Command();
 

@@ -68,7 +68,9 @@ import {
     MAYHEM_FEE_ACCOUNT,
     MAYHEM_FEE_TOKEN_ACCOUNT,
     PUMB_BONDING_SEED_2,
-    PUMP_POOL_SEED_2
+    PUMP_AMM_POOL_SEED_2,
+    PUMP_AMM_POOL_SEED,
+    PUMP_POOL_AUTHORITY_SEED
 } from '../constants';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
@@ -170,13 +172,12 @@ type AMMState = ReturnType<typeof AMMStateStruct.decode> & {
     supply: bigint;
 };
 
-@common.staticImplements<trade.IProgramTrader>()
-export class Trader {
-    public static get_name(): string {
+export class Trader implements trade.IProgramTrader {
+    public get_name(): string {
         return common.Program.Pump;
     }
 
-    public static async buy_token(
+    public async buy_token(
         sol_amount: number,
         buyer: Signer,
         mint_meta: PumpMintMeta,
@@ -188,7 +189,7 @@ export class Trader {
         return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
     }
 
-    public static async buy_token_instructions(
+    public async buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: PumpMintMeta,
@@ -203,7 +204,7 @@ export class Trader {
         return [instructions, lta];
     }
 
-    public static async sell_token(
+    public async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: PumpMintMeta,
@@ -215,7 +216,7 @@ export class Trader {
         return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
     }
 
-    public static async sell_token_instructions(
+    public async sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: PumpMintMeta,
@@ -230,7 +231,7 @@ export class Trader {
         return [instructions, lta];
     }
 
-    public static async buy_sell_instructions(
+    public async buy_sell_instructions(
         sol_amount: number,
         trader: Signer,
         mint_meta: PumpMintMeta,
@@ -252,7 +253,7 @@ export class Trader {
         return [buy_instructions, sell_instructions, lta];
     }
 
-    public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta | undefined> {
+    public async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<PumpMintMeta | undefined> {
         try {
             let mint_meta = await this.default_mint_meta(mint, sol_price);
             mint_meta = await this.update_mint_meta(mint_meta, sol_price);
@@ -262,7 +263,7 @@ export class Trader {
         }
     }
 
-    public static async get_random_mints(count: number): Promise<PumpMintMeta[]> {
+    public async get_random_mints(count: number): Promise<PumpMintMeta[]> {
         const graduated_length = Math.floor(count * Math.random());
         const ungraduated_length = count - graduated_length;
         return (
@@ -273,7 +274,7 @@ export class Trader {
         ).flat();
     }
 
-    public static async create_token(
+    public async create_token(
         mint: Keypair,
         creator: Signer,
         token_name: string,
@@ -374,11 +375,7 @@ export class Trader {
         );
     }
 
-    public static async default_mint_meta(
-        mint: PublicKey,
-        sol_price: number = 0,
-        data?: object
-    ): Promise<PumpMintMeta> {
+    public async default_mint_meta(mint: PublicKey, sol_price: number = 0, data?: object): Promise<PumpMintMeta> {
         let meta: {
             token_name: string;
             token_symbol: string;
@@ -447,7 +444,7 @@ export class Trader {
         });
     }
 
-    public static async buy_sell_bundle(
+    public async buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
         mint_meta: PumpMintMeta,
@@ -464,7 +461,7 @@ export class Trader {
         return await trade.send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip, priority, lta);
     }
 
-    public static async buy_sell(
+    public async buy_sell(
         sol_amount: number,
         trader: Signer,
         mint_meta: PumpMintMeta,
@@ -503,7 +500,7 @@ export class Trader {
         return [signature, signature];
     }
 
-    public static update_mint_meta_reserves(mint_meta: PumpMintMeta, amount: number | TokenAmount): PumpMintMeta {
+    public update_mint_meta_reserves(mint_meta: PumpMintMeta, amount: number | TokenAmount): PumpMintMeta {
         if (typeof amount === 'number') {
             const sol_amount_raw = BigInt(Math.floor(amount * LAMPORTS_PER_SOL));
             const fee = (sol_amount_raw * BigInt(mint_meta.fee * 10000)) / 10000n;
@@ -522,7 +519,7 @@ export class Trader {
         throw new Error(`Invalid amount type: ${typeof amount}`);
     }
 
-    public static async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number = 0): Promise<PumpMintMeta> {
+    public async update_mint_meta(mint_meta: PumpMintMeta, sol_price: number = 0): Promise<PumpMintMeta> {
         try {
             const pump_amm = await this.get_amm_from_mint(new PublicKey(mint_meta.mint));
             mint_meta.amm_pool = pump_amm?.toString() ?? null;
@@ -581,11 +578,11 @@ export class Trader {
         }
     }
 
-    private static get_amm(mint_meta: PumpMintMeta): PublicKey | undefined {
+    private get_amm(mint_meta: PumpMintMeta): PublicKey | undefined {
         if (mint_meta.amm_pool !== null) return new PublicKey(mint_meta.amm_pool);
     }
 
-    private static calc_token_amount_raw(sol_amount_raw: bigint, meta: Partial<PumpMintMeta>): bigint {
+    private calc_token_amount_raw(sol_amount_raw: bigint, meta: Partial<PumpMintMeta>): bigint {
         if (!meta.sol_reserves || !meta.token_reserves || !meta.fee) return 0n;
         if (sol_amount_raw <= 0) return 0n;
 
@@ -596,7 +593,7 @@ export class Trader {
         return meta.token_reserves - new_token_reserves;
     }
 
-    private static calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
+    private calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<PumpMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
         if (token_amount_raw <= 0) return 0n;
 
@@ -605,17 +602,17 @@ export class Trader {
         return n - fee;
     }
 
-    private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static buy_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
+    private buy_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from(PUMP_BUY_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
@@ -624,7 +621,7 @@ export class Trader {
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
-    private static sell_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
+    private sell_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from(PUMP_SELL_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
@@ -633,7 +630,7 @@ export class Trader {
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
-    private static async get_buy_instructions(
+    private async get_buy_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<PumpMintMeta>,
@@ -699,7 +696,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_instructions(
+    private async get_sell_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
@@ -759,7 +756,7 @@ export class Trader {
         ];
     }
 
-    private static create_data(
+    private create_data(
         token_name: string,
         token_ticker: string,
         meta_link: string,
@@ -806,7 +803,7 @@ export class Trader {
         ]);
     }
 
-    private static async get_create_token_instructions(
+    private async get_create_token_instructions(
         creator: Signer,
         token_name: string,
         token_symbol: string,
@@ -897,7 +894,7 @@ export class Trader {
         ];
     }
 
-    private static calc_bonding_curve(mint: PublicKey, token_program: PublicKey): [PublicKey, PublicKey] {
+    private calc_bonding_curve(mint: PublicKey, token_program: PublicKey): [PublicKey, PublicKey] {
         if (!token_program.equals(TOKEN_2022_PROGRAM_ID) && !token_program.equals(TOKEN_PROGRAM_ID)) {
             throw new Error(`Invalid token program: ${token_program.toString()}`);
         }
@@ -909,7 +906,7 @@ export class Trader {
         return [bonding_curve, bonding_curve_ata];
     }
 
-    private static calc_bonding_curve_v2(mint: PublicKey): PublicKey {
+    private calc_bonding_curve_v2(mint: PublicKey): PublicKey {
         const [bonding_curve] = PublicKey.findProgramAddressSync(
             [PUMB_BONDING_SEED_2, mint.toBuffer()],
             PUMP_PROGRAM_ID
@@ -917,12 +914,12 @@ export class Trader {
         return bonding_curve;
     }
 
-    private static calc_pool_v2(mint: PublicKey): PublicKey {
-        const [pool] = PublicKey.findProgramAddressSync([PUMP_POOL_SEED_2, mint.toBuffer()], PUMP_AMM_PROGRAM_ID);
+    private calc_pool_v2(mint: PublicKey): PublicKey {
+        const [pool] = PublicKey.findProgramAddressSync([PUMP_AMM_POOL_SEED_2, mint.toBuffer()], PUMP_AMM_PROGRAM_ID);
         return pool;
     }
 
-    private static calc_creator_vault(
+    private calc_creator_vault(
         creator: PublicKey,
         token_program: PublicKey = TOKEN_PROGRAM_ID
     ): [PublicKey, PublicKey] {
@@ -934,7 +931,7 @@ export class Trader {
         return [creator_vault, creator_vault_ata];
     }
 
-    private static calc_amm_creator_vault(
+    private calc_amm_creator_vault(
         creator: PublicKey,
         token_program: PublicKey = TOKEN_PROGRAM_ID
     ): [PublicKey, PublicKey] {
@@ -946,7 +943,7 @@ export class Trader {
         return [creator_vault, creator_vault_ata];
     }
 
-    private static calc_user_volume_accumulator(user: PublicKey, program: 'pump' | 'pump-swap'): PublicKey {
+    private calc_user_volume_accumulator(user: PublicKey, program: 'pump' | 'pump-swap'): PublicKey {
         const [user_volume_accumulator] = PublicKey.findProgramAddressSync(
             [PUMP_USER_VOLUME_ACCUMULATOR_SEED, user.toBuffer()],
             program === 'pump' ? PUMP_PROGRAM_ID : PUMP_AMM_PROGRAM_ID
@@ -954,29 +951,25 @@ export class Trader {
         return user_volume_accumulator;
     }
 
-    private static calculate_curve_price(quote_reserves: bigint, base_reserves: bigint): number {
+    private calculate_curve_price(quote_reserves: bigint, base_reserves: bigint): number {
         if (base_reserves <= 0 || quote_reserves <= 0)
             throw new RangeError('Curve state contains invalid reserve data');
         return Number(quote_reserves) / LAMPORTS_PER_SOL / (Number(base_reserves) / Math.pow(10, PUMP_TOKEN_DECIMALS));
     }
 
-    private static get_token_metrics(
-        quote_reserves: bigint,
-        base_reserves: bigint,
-        supply: bigint
-    ): trade.TokenMetrics {
+    private get_token_metrics(quote_reserves: bigint, base_reserves: bigint, supply: bigint): trade.TokenMetrics {
         const price_sol = this.calculate_curve_price(quote_reserves, base_reserves);
         const mcap_sol = (price_sol * Number(supply)) / Math.pow(10, PUMP_TOKEN_DECIMALS);
         return { price_sol, mcap_sol };
     }
 
-    private static async get_state(bond_curve_addr: PublicKey): Promise<State> {
+    private async get_state(bond_curve_addr: PublicKey): Promise<State> {
         const info = await global.CONNECTION.getAccountInfo(bond_curve_addr, COMMITMENT);
         if (!info || !info.data) throw new Error('Unexpected curve state');
         return StateStruct.decode(info.data);
     }
 
-    static async get_amm_state(amm: PublicKey): Promise<AMMState> {
+    async get_amm_state(amm: PublicKey): Promise<AMMState> {
         const info = await global.CONNECTION.getAccountInfo(amm);
         if (!info || !info.data) throw new Error('Unexpected AMM state');
 
@@ -993,32 +986,21 @@ export class Trader {
         };
     }
 
-    private static async get_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
-        try {
-            const [amm] = await global.CONNECTION.getProgramAccounts(PUMP_AMM_PROGRAM_ID, {
-                filters: [
-                    {
-                        memcmp: {
-                            offset: AMMStateStruct.get_offset('base_mint'),
-                            bytes: mint.toBase58()
-                        }
-                    },
-                    {
-                        memcmp: {
-                            offset: 0,
-                            bytes: base58.encode(PUMP_AMM_STATE_HEADER)
-                        }
-                    }
-                ],
-                commitment: COMMITMENT
-            });
-            return amm.pubkey;
-        } catch (error) {
-            return null;
-        }
+    private async get_amm_from_mint(mint: PublicKey): Promise<PublicKey | null> {
+        const [creator] = PublicKey.findProgramAddressSync(
+            [PUMP_POOL_AUTHORITY_SEED, mint.toBuffer()],
+            PUMP_PROGRAM_ID
+        );
+        const [amm] = PublicKey.findProgramAddressSync(
+            [PUMP_AMM_POOL_SEED, new Uint8Array([0, 0]), creator.toBuffer(), mint.toBuffer(), SOL_MINT.toBuffer()],
+            PUMP_AMM_PROGRAM_ID
+        );
+        const info = await global.CONNECTION.getAccountInfo(amm);
+        if (info && info.data) return amm;
+        return null;
     }
 
-    private static async get_buy_amm_instructions(
+    private async get_buy_amm_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<PumpMintMeta>,
@@ -1112,7 +1094,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_amm_instructions(
+    private async get_sell_amm_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<PumpMintMeta>,
@@ -1195,7 +1177,7 @@ export class Trader {
         ];
     }
 
-    public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+    public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
         let formData = new FormData();
         const image_file = new File([readFileSync(image_path)], basename(image_path), {
             type: 'image/png'
@@ -1225,7 +1207,7 @@ export class Trader {
         }
     }
 
-    private static async get_random_ungraduated_mints(count: number): Promise<PumpMintMeta[]> {
+    private async get_random_ungraduated_mints(count: number): Promise<PumpMintMeta[]> {
         if (count <= 0) return [];
         const limit = 50;
         count = Math.min(count, limit);
@@ -1250,8 +1232,8 @@ export class Trader {
         }
     }
 
-    private static graduated_mints_cache: PublicKey[] | null = null;
-    private static async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
+    private graduated_mints_cache: PublicKey[] | null = null;
+    private async get_random_graduated_mints(count: number): Promise<PumpMintMeta[]> {
         if (count <= 0) return [];
         if (!this.graduated_mints_cache) {
             this.graduated_mints_cache = [];

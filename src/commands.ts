@@ -417,7 +417,7 @@ export async function buy_token_once(
 ): Promise<void> {
     slippage = slippage || COMMANDS_BUY_SLIPPAGE;
     const trader = get_trader(program);
-    const mint_meta = await trader.get_mint_meta(mint, 175);
+    const mint_meta = await trader.get_mint_meta(mint);
     if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));

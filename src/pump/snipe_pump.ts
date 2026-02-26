@@ -45,13 +45,23 @@ export class Runner extends snipe.SniperBase {
             const creator = new PublicKey(data.slice(creator_start, creator_end));
 
             let is_mayhem = false;
+            let is_cashback = false;
             let token_program = TOKEN_PROGRAM_ID;
             if (data_prefix.equals(prefix_v2)) {
                 const mayhem_mode_byte = data[creator_end];
                 is_mayhem = mayhem_mode_byte === 1;
+
+                const cashback_mode_byte = data[creator_end + 1];
+                is_cashback = cashback_mode_byte === 1;
                 token_program = TOKEN_2022_PROGRAM_ID;
             }
-            const misc = { uri, creator: creator.toBase58(), is_mayhem, token_program: token_program.toBase58() };
+            const misc = {
+                uri,
+                creator: creator.toBase58(),
+                is_mayhem,
+                is_cashback,
+                token_program: token_program.toBase58()
+            };
             return { name, symbol, misc };
         } catch (err) {
             return null;

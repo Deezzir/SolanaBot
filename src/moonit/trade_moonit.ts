@@ -1,6 +1,4 @@
-import { FixedSide } from '@wen-moon-ser/moonshot-sdk';
 import {
-    LAMPORTS_PER_SOL,
     PublicKey,
     Signer,
     TokenAmount,
@@ -118,13 +116,12 @@ function isMoonMeta(obj: any): obj is MoonshotMintMeta {
     );
 }
 
-@common.staticImplements<trade.IProgramTrader>()
-export class Trader {
-    public static get_name(): string {
+export class Trader implements trade.IProgramTrader {
+    public get_name(): string {
         return common.Program.Moonit;
     }
 
-    public static async buy_token(
+    public async buy_token(
         sol_amount: number,
         buyer: Signer,
         mint_meta: MoonshotMintMeta,
@@ -141,7 +138,7 @@ export class Trader {
         return await trade.send_tx(instructions, [buyer], priority, protection_tip, address_lt_accounts);
     }
 
-    public static async buy_token_instructions(
+    public async buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: MoonshotMintMeta,
@@ -156,7 +153,7 @@ export class Trader {
         }
     }
 
-    public static async sell_token(
+    public async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: MoonshotMintMeta,
@@ -173,7 +170,7 @@ export class Trader {
         return await trade.send_tx(instructions, [seller], priority, protection_tip, address_lt_accounts);
     }
 
-    public static async sell_token_instructions(
+    public async sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: MoonshotMintMeta,
@@ -188,7 +185,7 @@ export class Trader {
         }
     }
 
-    public static async buy_sell_instructions(
+    public async buy_sell_instructions(
         _sol_amount: number,
         _trader: Signer,
         _mint_meta: MoonshotMintMeta,
@@ -197,7 +194,7 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async buy_sell_bundle(
+    public async buy_sell_bundle(
         _sol_amount: number,
         _trader: Signer,
         _mint_meta: MoonshotMintMeta,
@@ -208,7 +205,7 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async buy_sell(
+    public async buy_sell(
         _sol_amount: number,
         _trader: Signer,
         _mint_meta: MoonshotMintMeta,
@@ -220,7 +217,7 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async get_mint_meta(mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta | undefined> {
+    public async get_mint_meta(mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta | undefined> {
         return fetch(`https://api.moonshot.cc/token/v1/solana/${mint.toString()}`)
             .then((response) => response.json())
             .then((data) => {
@@ -232,11 +229,11 @@ export class Trader {
             });
     }
 
-    public static async get_random_mints(_count: number): Promise<MoonshotMintMeta[]> {
+    public async get_random_mints(_count: number): Promise<MoonshotMintMeta[]> {
         throw new Error('Not Implemented');
     }
 
-    public static async create_token(
+    public async create_token(
         _mint: Keypair,
         _creator: Signer,
         _token_name: string,
@@ -250,96 +247,47 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static async create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
+    public async create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
         throw new Error('Not implemented');
     }
 
-    public static async default_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
+    public async default_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
-    public static update_mint_meta_reserves(
-        _mint_meta: MoonshotMintMeta,
-        _amount: number | TokenAmount
-    ): MoonshotMintMeta {
+    public update_mint_meta_reserves(_mint_meta: MoonshotMintMeta, _amount: number | TokenAmount): MoonshotMintMeta {
         throw new Error('Not Implemented');
     }
 
-    public static async update_mint_meta(_mint_meta: MoonshotMintMeta, _sol_price: number): Promise<MoonshotMintMeta> {
+    public async update_mint_meta(_mint_meta: MoonshotMintMeta, _sol_price: number): Promise<MoonshotMintMeta> {
         throw new Error('Not Implemented');
     }
 
-    private static get_raydium_amm(mint_meta: MoonshotMintMeta): PublicKey | undefined {
+    private get_raydium_amm(mint_meta: MoonshotMintMeta): PublicKey | undefined {
         if (mint_meta.dexId === 'raydium') return new PublicKey(mint_meta.pairAddress);
     }
 
-    private static async get_sell_token_instructions(
-        token_amount: TokenAmount,
-        seller: Signer,
+    private async get_sell_token_instructions(
+        _token_amount: TokenAmount,
+        _seller: Signer,
         mint_meta: Partial<MoonshotMintMeta>,
-        slippage: number = 0.05
+        _slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
             throw new Error(`Failed to get the mint meta.`);
         }
-
-        const token = global.MOONSHOT.Token({
-            mintAddress: mint_meta.baseToken.address
-        });
-        const raw_slippage = slippage * 1000;
-        const curve_pos = await token.getCurvePosition();
-        const token_amount_raw = BigInt(token_amount.amount);
-
-        const collateral_amount = await token.getCollateralAmountByTokens({
-            tokenAmount: token_amount_raw,
-            tradeDirection: 'SELL',
-            curvePosition: curve_pos
-        });
-
-        const { ixs } = await token.prepareIxs({
-            slippageBps: raw_slippage,
-            creatorPK: seller.publicKey.toBase58(),
-            tokenAmount: token_amount_raw,
-            collateralAmount: collateral_amount,
-            tradeDirection: 'SELL',
-            fixedSide: FixedSide.IN
-        });
-
-        return [ixs, undefined];
+        throw new Error('Not Implemented');
     }
 
-    private static async get_buy_token_instructions(
-        sol_amount: number,
-        buyer: Signer,
+    private async get_buy_token_instructions(
+        _sol_amount: number,
+        _buyer: Signer,
         mint_meta: Partial<MoonshotMintMeta>,
-        slippage: number = 0.05
+        _slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
             throw new Error(`Failed to get the mint meta.`);
         }
-
-        const token = global.MOONSHOT.Token({
-            mintAddress: mint_meta.baseToken.address
-        });
-        const raw_slippage = slippage * 1000;
-        const curve_pos = await token.getCurvePosition();
-        const collateral_amount = BigInt(sol_amount * LAMPORTS_PER_SOL);
-
-        const token_amount = await token.getTokenAmountByCollateral({
-            collateralAmount: collateral_amount,
-            tradeDirection: 'BUY',
-            curvePosition: curve_pos
-        });
-
-        const { ixs } = await token.prepareIxs({
-            creatorPK: buyer.publicKey.toBase58(),
-            tokenAmount: token_amount,
-            collateralAmount: collateral_amount,
-            tradeDirection: 'BUY',
-            fixedSide: FixedSide.OUT,
-            slippageBps: raw_slippage
-        });
-
-        return [ixs, undefined];
+        throw new Error('Not Implemented');
     }
 }

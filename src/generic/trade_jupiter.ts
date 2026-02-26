@@ -59,13 +59,12 @@ class GenericMintMeta implements trade.IMintMeta {
     }
 }
 
-@common.staticImplements<trade.IProgramTrader>()
-export class Trader {
-    public static get_name(): string {
+export class Trader implements trade.IProgramTrader {
+    public get_name(): string {
         return common.Program.Generic;
     }
 
-    public static async buy_token(
+    public async buy_token(
         sol_amount: number,
         buyer: Signer,
         mint_meta: GenericMintMeta,
@@ -85,7 +84,7 @@ export class Trader {
         );
     }
 
-    public static async buy_token_instructions(
+    public async buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: GenericMintMeta,
@@ -96,7 +95,7 @@ export class Trader {
         return await swap_jupiter_instructions(buyer, quote);
     }
 
-    public static async sell_token(
+    public async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: GenericMintMeta,
@@ -107,7 +106,7 @@ export class Trader {
         return await swap_jupiter(token_amount, seller, mint_meta.mint, SOL_MINT, slippage, priority, protection_tip);
     }
 
-    public static async sell_token_instructions(
+    public async sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: GenericMintMeta,
@@ -117,7 +116,7 @@ export class Trader {
         return await swap_jupiter_instructions(seller, quote);
     }
 
-    public static async buy_sell_instructions(
+    public async buy_sell_instructions(
         sol_amount: number,
         trader: Signer,
         mint_meta: GenericMintMeta,
@@ -140,7 +139,7 @@ export class Trader {
         return [buy_instructions, sell_instructions, ltas];
     }
 
-    public static async buy_sell(
+    public async buy_sell(
         sol_amount: number,
         trader: Signer,
         mint_meta: GenericMintMeta,
@@ -179,7 +178,7 @@ export class Trader {
         return [signature, signature];
     }
 
-    public static async buy_sell_bundle(
+    public async buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
         mint_meta: GenericMintMeta,
@@ -202,7 +201,7 @@ export class Trader {
         );
     }
 
-    public static async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<GenericMintMeta | undefined> {
+    public async get_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<GenericMintMeta | undefined> {
         try {
             return await this.default_mint_meta(mint, sol_price);
         } catch (error) {
@@ -210,11 +209,11 @@ export class Trader {
         }
     }
 
-    public static async get_random_mints(_count: number): Promise<GenericMintMeta[]> {
+    public async get_random_mints(_count: number): Promise<GenericMintMeta[]> {
         throw new Error('Not implemented');
     }
 
-    public static async create_token(
+    public async create_token(
         _mint: Keypair,
         _creator: Signer,
         _token_name: string,
@@ -228,21 +227,15 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static update_mint_meta_reserves(
-        mint_meta: GenericMintMeta,
-        _amount: number | TokenAmount
-    ): GenericMintMeta {
+    public update_mint_meta_reserves(mint_meta: GenericMintMeta, _amount: number | TokenAmount): GenericMintMeta {
         return mint_meta;
     }
 
-    public static async update_mint_meta(
-        mint_meta: GenericMintMeta,
-        sol_price: number = 0.0
-    ): Promise<GenericMintMeta> {
+    public async update_mint_meta(mint_meta: GenericMintMeta, sol_price: number = 0.0): Promise<GenericMintMeta> {
         return this.default_mint_meta(mint_meta.mint, sol_price);
     }
 
-    public static async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<GenericMintMeta> {
+    public async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<GenericMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
             return {
                 token_name: 'Unknown',
@@ -267,7 +260,7 @@ export class Trader {
         });
     }
 
-    public static async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+    public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
         return await common.upload_metadata_ipfs(meta, image_path);
     }
 }

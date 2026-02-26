@@ -20,13 +20,6 @@ type IPFSResponse = {
     is_duplicate: boolean;
 };
 
-export function staticImplements<T>() {
-    return <U extends T>(constructor: U) => {
-        red;
-        constructor;
-    };
-}
-
 export type Wallet = {
     name: string;
     keypair: Keypair;

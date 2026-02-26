@@ -231,13 +231,12 @@ type DBCData = {
     quote_vault: string;
 };
 
-@common.staticImplements<trade.IProgramTrader>()
-export class Trader {
-    public static get_name(): string {
+export class Trader implements trade.IProgramTrader {
+    public get_name(): string {
         return common.Program.Meteora;
     }
 
-    public static async buy_token(
+    public async buy_token(
         sol_amount: number,
         buyer: Signer,
         mint_meta: MeteoraMintMeta,
@@ -249,7 +248,7 @@ export class Trader {
         return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
     }
 
-    public static async sell_token(
+    public async sell_token(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: MeteoraMintMeta,
@@ -261,7 +260,7 @@ export class Trader {
         return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
     }
 
-    public static async buy_token_instructions(
+    public async buy_token_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: MeteoraMintMeta,
@@ -277,7 +276,7 @@ export class Trader {
         return [await this.get_buy_dbc_instructions(sol_amount, buyer, mint_meta, slippage), lta];
     }
 
-    public static async sell_token_instructions(
+    public async sell_token_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: MeteoraMintMeta,
@@ -293,7 +292,7 @@ export class Trader {
         return [await this.get_sell_dbc_instructions(token_amount, seller, mint_meta, slippage), lta];
     }
 
-    public static async buy_sell_instructions(
+    public async buy_sell_instructions(
         sol_amount: number,
         trader: Signer,
         mint_meta: MeteoraMintMeta,
@@ -315,7 +314,7 @@ export class Trader {
         return [buy_instructions, sell_instructions, lta];
     }
 
-    public static async buy_sell_bundle(
+    public async buy_sell_bundle(
         sol_amount: number,
         trader: Signer,
         mint_meta: MeteoraMintMeta,
@@ -332,7 +331,7 @@ export class Trader {
         return await trade.send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip, priority, lta);
     }
 
-    public static async buy_sell(
+    public async buy_sell(
         sol_amount: number,
         trader: Signer,
         mint_meta: MeteoraMintMeta,
@@ -371,7 +370,7 @@ export class Trader {
         return [signature, signature];
     }
 
-    public static create_token(
+    public create_token(
         _mint: Keypair,
         _creator: Signer,
         _token_name: string,
@@ -385,15 +384,15 @@ export class Trader {
         throw new Error('Not implemented');
     }
 
-    public static create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
+    public create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
         throw new Error('Not implemented');
     }
 
-    public static get_random_mints(_count: number): Promise<MeteoraMintMeta[]> {
+    public get_random_mints(_count: number): Promise<MeteoraMintMeta[]> {
         throw new Error('Not implemented');
     }
 
-    public static async get_mint_meta(mint: PublicKey, sol_price?: number): Promise<MeteoraMintMeta | undefined> {
+    public async get_mint_meta(mint: PublicKey, sol_price?: number): Promise<MeteoraMintMeta | undefined> {
         try {
             let mint_meta = await this.default_mint_meta(mint, sol_price);
             mint_meta = await this.update_mint_meta(mint_meta, sol_price);
@@ -404,7 +403,7 @@ export class Trader {
         }
     }
 
-    public static async update_mint_meta(mint_meta: MeteoraMintMeta, sol_price: number = 0): Promise<MeteoraMintMeta> {
+    public async update_mint_meta(mint_meta: MeteoraMintMeta, sol_price: number = 0): Promise<MeteoraMintMeta> {
         try {
             const damm = await this.get_damm_from_mint(new PublicKey(mint_meta.mint));
 
@@ -464,14 +463,11 @@ export class Trader {
         }
     }
 
-    public static update_mint_meta_reserves(
-        mint_meta: MeteoraMintMeta,
-        _amount: number | TokenAmount
-    ): MeteoraMintMeta {
+    public update_mint_meta_reserves(mint_meta: MeteoraMintMeta, _amount: number | TokenAmount): MeteoraMintMeta {
         return mint_meta;
     }
 
-    public static async default_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<MeteoraMintMeta> {
+    public async default_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<MeteoraMintMeta> {
         const meta = await trade.get_token_meta(mint).catch(() => {
             return {
                 token_name: 'Unknown',
@@ -497,20 +493,20 @@ export class Trader {
         });
     }
 
-    private static get_dbc_token_metrics(state: DBCState): trade.TokenMetrics {
+    private get_dbc_token_metrics(state: DBCState): trade.TokenMetrics {
         const price_sol = this.calc_token_price(state.sqrt_price);
         const mcap_sol = price_sol * Number(state.base_reserve / 10n ** BigInt(state.token_decimals));
         return { price_sol, mcap_sol };
     }
 
-    private static async get_token_metrics(state: DAMMV1State): Promise<trade.TokenMetrics> {
+    private async get_token_metrics(state: DAMMV1State): Promise<trade.TokenMetrics> {
         const token = await trade.get_token_supply(state.base_vault_lp);
         const price_sol = Number(state.quote_reserve) / Number(state.base_reserve);
         const mcap_sol = (price_sol * Number(token.supply)) / Math.pow(10, token.decimals);
         return { price_sol, mcap_sol };
     }
 
-    private static calc_token_price(sqrt_price: bigint): number {
+    private calc_token_price(sqrt_price: bigint): number {
         const SCALE_FACTOR = 2n ** 64n;
         const PRECISION = 10n ** 18n;
 
@@ -519,7 +515,7 @@ export class Trader {
         return Number(numerator / denominator) / 1e18;
     }
 
-    // private static calc_dbc_vault(mint: PublicKey, pool: PublicKey): PublicKey {
+    // private calc_dbc_vault(mint: PublicKey, pool: PublicKey): PublicKey {
     //     const [base_vault] = PublicKey.findProgramAddressSync(
     //         [METEORA_DBC_VAULT_SEED, mint.toBuffer(), pool.toBuffer()],
     //         METEORA_DBC_PROGRAM_ID
@@ -527,7 +523,7 @@ export class Trader {
     //     return base_vault;
     // }
 
-    private static async get_dbc_state(mint: PublicKey): Promise<DBCState> {
+    private async get_dbc_state(mint: PublicKey): Promise<DBCState> {
         const pool = await this.get_dbc_pool_from_mint(mint);
         if (!pool) throw new Error('Pool not found');
         const pool_info = pool.account;
@@ -556,7 +552,7 @@ export class Trader {
         };
     }
 
-    private static async get_vault_state(vault: PublicKey): Promise<VaultState> {
+    private async get_vault_state(vault: PublicKey): Promise<VaultState> {
         const vault_state = await global.CONNECTION.getAccountInfo(vault, COMMITMENT);
         if (!vault_state) throw new Error('Unexpected vault state');
         const vault_header = common.read_bytes(vault_state.data, 0, METEORA_VAULT_HEADER.byteLength);
@@ -570,7 +566,7 @@ export class Trader {
         };
     }
 
-    private static async get_damm_v1_state(
+    private async get_damm_v1_state(
         pool_info: Readonly<{
             account: AccountInfo<Buffer>;
             pubkey: PublicKey;
@@ -626,7 +622,7 @@ export class Trader {
         };
     }
 
-    private static async get_dbc_pool_from_mint(
+    private async get_dbc_pool_from_mint(
         mint: PublicKey
     ): Promise<Readonly<{ account: AccountInfo<Buffer>; pubkey: PublicKey }> | null> {
         try {
@@ -653,17 +649,17 @@ export class Trader {
         }
     }
 
-    private static calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
+    private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
         if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
-    private static calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<MeteoraMintMeta>): bigint {
+    private calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<MeteoraMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
         if (sol_amount_raw <= 0) return 0n;
 
@@ -674,14 +670,14 @@ export class Trader {
         return token.token_reserves - new_token_reserves;
     }
 
-    private static calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<MeteoraMintMeta>): bigint {
+    private calc_sol_amount_raw(token_amount_raw: bigint, token: Partial<MeteoraMintMeta>): bigint {
         if (!token.sol_reserves || !token.token_reserves) return 0n;
         if (token_amount_raw <= 0) return 0n;
 
         return (token_amount_raw * token.sol_reserves) / (token.token_reserves + token_amount_raw);
     }
 
-    private static calc_dbc_token_amount_raw(sol_amount_raw: bigint, info: DBCData): bigint {
+    private calc_dbc_token_amount_raw(sol_amount_raw: bigint, info: DBCData): bigint {
         if (sol_amount_raw <= 0) return 0n;
 
         const SCALE_FACTOR = BigInt(2) ** BigInt(128);
@@ -689,7 +685,7 @@ export class Trader {
         return (sol_amount_raw * SCALE_FACTOR) / price;
     }
 
-    private static calc_dbc_sol_amount_raw(token_amount_raw: bigint, info: DBCData): bigint {
+    private calc_dbc_sol_amount_raw(token_amount_raw: bigint, info: DBCData): bigint {
         if (token_amount_raw <= 0) return 0n;
 
         const SCALE_FACTOR = BigInt(2) ** BigInt(128);
@@ -697,7 +693,7 @@ export class Trader {
         return (token_amount_raw * price) / SCALE_FACTOR;
     }
 
-    private static swap_data(amount_in: bigint, minimum_amount_out: bigint): Buffer {
+    private swap_data(amount_in: bigint, minimum_amount_out: bigint): Buffer {
         const instruction_buf = Buffer.from(METEORA_SWAP_DISCRIMINATOR);
         const sol_amount_buf = Buffer.alloc(8);
         sol_amount_buf.writeBigUInt64LE(amount_in, 0);
@@ -706,7 +702,7 @@ export class Trader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf]);
     }
 
-    private static async get_buy_dbc_instructions(
+    private async get_buy_dbc_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<MeteoraMintMeta>,
@@ -765,7 +761,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_dbc_instructions(
+    private async get_sell_dbc_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<MeteoraMintMeta>,
@@ -818,7 +814,7 @@ export class Trader {
         ];
     }
 
-    private static async get_damm_from_mint(mint: PublicKey): Promise<{
+    private async get_damm_from_mint(mint: PublicKey): Promise<{
         damm_info: Readonly<{ account: AccountInfo<Buffer>; pubkey: PublicKey }>;
         version: DAMMVersion;
     } | null> {
@@ -873,7 +869,7 @@ export class Trader {
         }
     }
 
-    private static async get_buy_damm_v1_instructions(
+    private async get_buy_damm_v1_instructions(
         sol_amount: number,
         buyer: Signer,
         mint_meta: Partial<MeteoraMintMeta>,
@@ -938,7 +934,7 @@ export class Trader {
         ];
     }
 
-    private static async get_sell_damm_v1_instructions(
+    private async get_sell_damm_v1_instructions(
         token_amount: TokenAmount,
         seller: Signer,
         mint_meta: Partial<MeteoraMintMeta>,

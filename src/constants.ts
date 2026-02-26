@@ -186,8 +186,15 @@ export const PUMP_BONDING_SEED = new Uint8Array([98, 111, 110, 100, 105, 110, 10
 export const PUMB_BONDING_SEED_2 = new Uint8Array([
     98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101, 45, 118, 50
 ]);
-export const PUMP_POOL_SEED_2 = new Uint8Array([112, 111, 111, 108, 45, 118, 50]);
 export const PUMP_CREATOR_VAULT_SEED = new Uint8Array([99, 114, 101, 97, 116, 111, 114, 45, 118, 97, 117, 108, 116]);
+export const PUMP_USER_VOLUME_ACCUMULATOR_SEED = new Uint8Array([
+    117, 115, 101, 114, 95, 118, 111, 108, 117, 109, 101, 95, 97, 99, 99, 117, 109, 117, 108, 97, 116, 111, 114
+]);
+export const PUMP_POOL_AUTHORITY_SEED = new Uint8Array([
+    112, 111, 111, 108, 45, 97, 117, 116, 104, 111, 114, 105, 116, 121
+]);
+export const PUMP_AMM_POOL_SEED = new Uint8Array([112, 111, 111, 108]);
+export const PUMP_AMM_POOL_SEED_2 = new Uint8Array([112, 111, 111, 108, 45, 118, 50]);
 export const PUMP_AMM_CREATOR_VAULT_SEED = new Uint8Array([
     99, 114, 101, 97, 116, 111, 114, 95, 118, 97, 117, 108, 116
 ]);
@@ -196,9 +203,6 @@ export const PUMP_SELL_DISCRIMINATOR = new Uint8Array([51, 230, 133, 164, 1, 127
 export const PUMP_CREATE_V1_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
 export const PUMP_CREATE_V2_DISCRIMINATOR = new Uint8Array([214, 144, 76, 236, 95, 139, 49, 180]);
 export const PUMP_EXTEND_DISCRIMINATOR = new Uint8Array([234, 102, 194, 203, 150, 72, 62, 229]);
-export const PUMP_USER_VOLUME_ACCUMULATOR_SEED = new Uint8Array([
-    117, 115, 101, 114, 95, 118, 111, 108, 117, 109, 101, 95, 97, 99, 99, 117, 109, 117, 108, 97, 116, 111, 114
-]);
 
 // SNIPE CONSTANTS
 export const SNIPE_BUY_SLIPPAGE = 0.85;

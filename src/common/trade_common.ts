@@ -31,7 +31,6 @@ import {
     getAssociatedTokenAddressSync,
     getMint
 } from '@solana/spl-token';
-import fetch from 'cross-fetch';
 import {
     COMMITMENT,
     JITO_ENDPOINTS,
