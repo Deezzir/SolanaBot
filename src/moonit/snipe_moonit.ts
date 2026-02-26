@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import * as snipe from '../common/snipe_common.js';
+import * as snipe from '../common/snipe_common';
 
 export class Runner extends snipe.SniperBase {
     protected mint_authority = new PublicKey('Placeholder');

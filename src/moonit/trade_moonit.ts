@@ -8,10 +8,10 @@ import {
     Keypair,
     AddressLookupTableAccount
 } from '@solana/web3.js';
-import { PriorityLevel, SOL_MINT, TRADE_RAYDIUM_SWAP_TAX } from '../constants.js';
-import * as trade from '../common/trade_common.js';
-import * as common from '../common/common.js';
-import { swap_raydium_instructions } from '../common/trade_dex.js';
+import { PriorityLevel, SOL_MINT, TRADE_RAYDIUM_SWAP_TAX } from '../constants';
+import * as trade from '../common/trade_common';
+import * as common from '../common/common';
+import { swap_raydium_instructions } from '../common/trade_dex';
 
 class MoonshotMintMeta implements trade.IMintMeta {
     url: string = '';

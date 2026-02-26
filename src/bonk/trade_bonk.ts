@@ -8,8 +8,8 @@ import {
     TokenAmount,
     TransactionInstruction
 } from '@solana/web3.js';
-import * as common from '../common/common.js';
-import * as trade from '../common/trade_common.js';
+import * as common from '../common/common';
+import * as trade from '../common/trade_common';
 import {
     BONK_CONFIG,
     BONK_CONFIG_2,
@@ -45,7 +45,7 @@ import {
     TRADE_MAX_SLIPPAGE,
     TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
     TRADE_MAX_WALLETS_PER_CREATE_TX
-} from '../constants.js';
+} from '../constants';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import {
@@ -55,7 +55,7 @@ import {
     TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import base58 from 'bs58';
-import { define_decoder_struct, skip, u8, u64, discriminator, pubkey } from '../common/struct_decoder.js';
+import { define_decoder_struct, skip, u8, u64, discriminator, pubkey } from '../common/struct_decoder';
 
 const StateStruct = define_decoder_struct({
     discriminator: discriminator(Buffer.from(RAYDIUM_LAUNCHPAD_POOL_HEADER)),

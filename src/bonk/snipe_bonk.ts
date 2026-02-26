@@ -2,8 +2,8 @@ import {
     RAYDIUM_LAUNCHPAD_AUTHORITY,
     RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_PROGRAM_ID
-} from '../constants.js';
-import * as snipe from '../common/snipe_common.js';
+} from '../constants';
+import * as snipe from '../common/snipe_common';
 
 export class Runner extends snipe.SniperBase {
     protected mint_authority = RAYDIUM_LAUNCHPAD_AUTHORITY;

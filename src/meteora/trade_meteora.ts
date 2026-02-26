@@ -9,8 +9,8 @@ import {
     TokenAmount,
     TransactionInstruction
 } from '@solana/web3.js';
-import * as common from '../common/common.js';
-import * as trade from '../common/trade_common.js';
+import * as common from '../common/common';
+import * as trade from '../common/trade_common';
 import {
     COMMITMENT,
     METEORA_CONFIG_HEADER,
@@ -29,7 +29,7 @@ import {
     PriorityLevel,
     SOL_MINT,
     TRADE_MAX_SLIPPAGE
-} from '../constants.js';
+} from '../constants';
 import base58 from 'bs58';
 import {
     createAssociatedTokenAccountIdempotentInstruction,

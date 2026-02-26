@@ -8,8 +8,8 @@ import {
     TokenAmount,
     TransactionInstruction
 } from '@solana/web3.js';
-import * as common from '../common/common.js';
-import * as trade from '../common/trade_common.js';
+import * as common from '../common/common';
+import * as trade from '../common/trade_common';
 import {
     ASSOCIATED_TOKEN_PROGRAM_ID,
     createAssociatedTokenAccountIdempotentInstruction,
@@ -66,12 +66,14 @@ import {
     MAYHEM_SOL_VAULT,
     PUMP_CREATE_V2_DISCRIMINATOR,
     MAYHEM_FEE_ACCOUNT,
-    MAYHEM_FEE_TOKEN_ACCOUNT
-} from '../constants.js';
+    MAYHEM_FEE_TOKEN_ACCOUNT,
+    PUMB_BONDING_SEED_2,
+    PUMP_POOL_SEED_2
+} from '../constants';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import base58 from 'bs58';
-import { define_decoder_struct, skip, u8, u64, discriminator, pubkey, u16, bool } from '../common/struct_decoder.js';
+import { define_decoder_struct, skip, u8, u64, discriminator, pubkey, u16, bool } from '../common/struct_decoder';
 
 export class PumpMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -91,6 +93,7 @@ export class PumpMintMeta implements trade.IMintMeta {
     fee: number = PUMP_FEE_PERCENTAGE;
     token_program_id!: string;
     is_mayhem: boolean = false;
+    is_cashback: boolean = false;
 
     constructor(data: Partial<PumpMintMeta> = {}) {
         Object.assign(this, data);
@@ -139,7 +142,8 @@ const StateStruct = define_decoder_struct({
     supply: u64(),
     complete: bool(),
     creator: pubkey(),
-    is_mayhem: bool()
+    is_mayhem: bool(),
+    is_cashback: bool()
 });
 
 type State = ReturnType<typeof StateStruct.decode>;
@@ -156,7 +160,8 @@ const AMMStateStruct = define_decoder_struct({
     quote_vault: pubkey(),
     lp_supply: skip(u64().size),
     creator: pubkey(),
-    is_mayhem: bool()
+    is_mayhem: bool(),
+    is_cashback: bool()
 });
 
 type AMMState = ReturnType<typeof AMMStateStruct.decode> & {
@@ -282,6 +287,7 @@ export class Trader {
     ): Promise<String> {
         let version: 'v1' | 'v2' = 'v2';
         let is_mayhem: boolean = false;
+        let is_cashback: boolean = false;
 
         if ((traders && !bundle_tip) || (!traders && bundle_tip))
             throw new Error(`Invalid parameters: traders and bundle_tip must be set together`);
@@ -295,12 +301,20 @@ export class Trader {
                     version = config.version === 1 ? 'v1' : 'v2';
                 }
             }
-            if ('is_mayhem' in config)
+            if ('is_mayhem' in config) {
                 if (typeof config.is_mayhem !== 'boolean') {
                     throw new Error(`Invalid config: is_mayhem must be a boolean`);
                 } else {
                     is_mayhem = config.is_mayhem;
                 }
+            }
+            if ('is_cashback' in config) {
+                if (typeof config.is_cashback !== 'boolean') {
+                    throw new Error(`Invalid config: is_cashback must be a boolean`);
+                } else {
+                    is_cashback = config.is_cashback;
+                }
+            }
         }
         if (version === 'v1' && is_mayhem)
             throw new Error(`Invalid config: is_mayhem can only be true for version 2 tokens`);
@@ -309,8 +323,9 @@ export class Trader {
             name: token_name,
             symbol: token_symbol,
             creator: creator.publicKey,
-            token_program: TOKEN_2022_PROGRAM_ID,
-            is_mayhem: is_mayhem
+            token_program: version === 'v1' ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID,
+            is_mayhem: is_mayhem,
+            is_cashback: is_cashback
         });
 
         const create_instructions = await this.get_create_token_instructions(
@@ -320,6 +335,7 @@ export class Trader {
             meta_cid,
             mint,
             is_mayhem,
+            is_cashback,
             version
         );
         if (sol_amount > 0) {
@@ -369,12 +385,14 @@ export class Trader {
             creator?: PublicKey;
             token_program: PublicKey;
             is_mayhem: boolean;
+            is_cashback: boolean;
         } = {
             token_name: 'Unknown',
             token_symbol: 'Unknown',
             creator: undefined,
             token_program: TOKEN_PROGRAM_ID,
-            is_mayhem: false
+            is_mayhem: false,
+            is_cashback: false
         };
         if (data) {
             if ('name' in data && typeof data.name === 'string' && data.name) meta.token_name = data.name;
@@ -389,6 +407,7 @@ export class Trader {
                     meta.token_program = new PublicKey(data.token_program);
             }
             if ('is_mayhem' in data && typeof data.is_mayhem === 'boolean') meta.is_mayhem = data.is_mayhem;
+            if ('is_cashback' in data && typeof data.is_cashback === 'boolean') meta.is_cashback = data.is_cashback;
         } else {
             const token_meta = await trade.get_token_meta(mint).catch(() => null);
             if (token_meta)
@@ -397,7 +416,8 @@ export class Trader {
                     token_symbol: token_meta.token_symbol,
                     creator: token_meta.creator,
                     token_program: token_meta.token_program,
-                    is_mayhem: false
+                    is_mayhem: false,
+                    is_cashback: false
                 };
         }
 
@@ -422,7 +442,8 @@ export class Trader {
             creator_vault: creator_vault ? creator_vault.toString() : undefined,
             creator_vault_ata: creator_vault_ata ? creator_vault_ata.toString() : undefined,
             token_program_id: meta.token_program.toString(),
-            is_mayhem: meta.is_mayhem
+            is_mayhem: meta.is_mayhem,
+            is_cashback: meta.is_cashback
         });
     }
 
@@ -525,7 +546,8 @@ export class Trader {
                     fee: PUMP_FEE_PERCENTAGE,
                     creator_vault: creator_vault.toString(),
                     creator_vault_ata: creator_vault_ata.toString(),
-                    is_mayhem: state.is_mayhem
+                    is_mayhem: state.is_mayhem,
+                    is_cashback: state.is_cashback
                 });
             }
             if (pump_amm) {
@@ -549,7 +571,8 @@ export class Trader {
                     fee: PUMP_SWAP_PERCENTAGE,
                     creator_vault: creator_vault.toString(),
                     creator_vault_ata: creator_vault_ata.toString(),
-                    is_mayhem: state.is_mayhem
+                    is_mayhem: state.is_mayhem,
+                    is_cashback: state.is_cashback
                 });
             }
             return mint_meta;
@@ -636,6 +659,7 @@ export class Trader {
         const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
         const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint, token_program);
+        const bonding_v2 = this.calc_bonding_curve_v2(mint);
 
         return [
             createAssociatedTokenAccountIdempotentInstruction(
@@ -666,7 +690,8 @@ export class Trader {
                     { pubkey: PUMP_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
                     { pubkey: user_volume_accumulator, isSigner: false, isWritable: true },
                     { pubkey: PUMP_FEE_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: bonding_v2, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_PROGRAM_ID,
                 data: instruction_data
@@ -693,12 +718,14 @@ export class Trader {
         const mint = new PublicKey(mint_meta.mint);
         const token_program = new PublicKey(mint_meta.token_program_id);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
+        const user_volume_accumulator = this.calc_user_volume_accumulator(seller.publicKey, 'pump');
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
         const sol_amount_raw = this.calc_sol_amount_raw(token_amount_raw, mint_meta);
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(seller.publicKey, mint, token_program);
+        const bonding_v2 = this.calc_bonding_curve_v2(mint);
 
         return [
             new TransactionInstruction({
@@ -720,7 +747,11 @@ export class Trader {
                     { pubkey: PUMP_EVENT_AUTHORITUY_ACCOUNT, isSigner: false, isWritable: false },
                     { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: PUMP_FEE_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false },
+                    ...(mint_meta.is_cashback
+                        ? [{ pubkey: user_volume_accumulator, isSigner: false, isWritable: true }]
+                        : []),
+                    { pubkey: bonding_v2, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_PROGRAM_ID,
                 data: instruction_data
@@ -734,6 +765,7 @@ export class Trader {
         meta_link: string,
         creator: PublicKey,
         mayhem_mode: boolean = false,
+        cashback_mode: boolean = false,
         version: 'v1' | 'v2' = 'v2'
     ): Buffer {
         const instruction_buf = Buffer.from(
@@ -759,13 +791,18 @@ export class Trader {
 
         const mayhem_mode_buf = Buffer.alloc(1);
         mayhem_mode_buf.writeUInt8(mayhem_mode ? 1 : 0, 0);
+
+        const cashback_mode_buf = Buffer.alloc(1);
+        cashback_mode_buf.writeUInt8(cashback_mode ? 1 : 0, 0);
+
         return Buffer.concat([
             instruction_buf,
             token_name_buf,
             token_ticker_buf,
             meta_link_buf,
             creator_buf,
-            mayhem_mode_buf
+            mayhem_mode_buf,
+            cashback_mode_buf
         ]);
     }
 
@@ -776,6 +813,7 @@ export class Trader {
         meta_cid: string,
         mint: Keypair,
         mayhem_mode: boolean = false,
+        cashback_mode: boolean = false,
         version: 'v1' | 'v2' = 'v2'
     ): Promise<TransactionInstruction[]> {
         const token_program = version === 'v1' ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
@@ -786,6 +824,7 @@ export class Trader {
             meta_link,
             creator.publicKey,
             mayhem_mode,
+            cashback_mode,
             version
         );
         const [bonding, assoc_ata] = this.calc_bonding_curve(mint.publicKey, token_program);
@@ -868,6 +907,19 @@ export class Trader {
             ASSOCIATED_TOKEN_PROGRAM_ID
         );
         return [bonding_curve, bonding_curve_ata];
+    }
+
+    private static calc_bonding_curve_v2(mint: PublicKey): PublicKey {
+        const [bonding_curve] = PublicKey.findProgramAddressSync(
+            [PUMB_BONDING_SEED_2, mint.toBuffer()],
+            PUMP_PROGRAM_ID
+        );
+        return bonding_curve;
+    }
+
+    private static calc_pool_v2(mint: PublicKey): PublicKey {
+        const [pool] = PublicKey.findProgramAddressSync([PUMP_POOL_SEED_2, mint.toBuffer()], PUMP_AMM_PROGRAM_ID);
+        return pool;
     }
 
     private static calc_creator_vault(
@@ -997,6 +1049,8 @@ export class Trader {
         const instruction_data = this.buy_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(buyer.publicKey, mint, token_program);
         const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
+        const wsol_user_accumulator_ata = trade.calc_ata(user_volume_accumulator, SOL_MINT);
+        const pool_v2 = this.calc_pool_v2(mint);
 
         return [
             createAssociatedTokenAccountIdempotentInstruction(
@@ -1045,7 +1099,11 @@ export class Trader {
                     { pubkey: PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR, isSigner: false, isWritable: true },
                     { pubkey: user_volume_accumulator, isSigner: false, isWritable: true },
                     { pubkey: PUMP_AMM_FEE_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false },
+                    ...(mint_meta.is_cashback
+                        ? [{ pubkey: wsol_user_accumulator_ata, isSigner: false, isWritable: true }]
+                        : []),
+                    { pubkey: pool_v2, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data
@@ -1077,6 +1135,7 @@ export class Trader {
         const amm = new PublicKey(mint_meta.amm_pool);
         const creator_vault = new PublicKey(mint_meta.creator_vault);
         const creator_vault_ata = new PublicKey(mint_meta.creator_vault_ata);
+        const user_volume_accumulator = this.calc_user_volume_accumulator(seller.publicKey, 'pump-swap');
         const bonding_curve = new PublicKey(mint_meta.base_vault);
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const token_amount_raw = BigInt(token_amount.amount);
@@ -1085,6 +1144,8 @@ export class Trader {
         const instruction_data = this.sell_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = trade.calc_ata(seller.publicKey, mint, token_program);
         const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);
+        const wsol_user_accumulator_ata = trade.calc_ata(user_volume_accumulator, SOL_MINT);
+        const pool_v2 = this.calc_pool_v2(mint);
 
         return [
             createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT),
@@ -1118,7 +1179,14 @@ export class Trader {
                     { pubkey: creator_vault_ata, isSigner: false, isWritable: true },
                     { pubkey: creator_vault, isSigner: false, isWritable: false },
                     { pubkey: PUMP_AMM_FEE_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: PUMP_FEE_PROGRAM_ID, isSigner: false, isWritable: false },
+                    ...(mint_meta.is_cashback
+                        ? [
+                              { pubkey: wsol_user_accumulator_ata, isSigner: false, isWritable: true },
+                              { pubkey: user_volume_accumulator, isSigner: false, isWritable: true }
+                          ]
+                        : []),
+                    { pubkey: pool_v2, isSigner: false, isWritable: false }
                 ],
                 programId: PUMP_AMM_PROGRAM_ID,
                 data: instruction_data

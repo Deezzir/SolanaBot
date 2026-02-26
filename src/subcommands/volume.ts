@@ -1,5 +1,5 @@
 import inquirer from 'inquirer';
-import * as common from '../common/common.js';
+import * as common from '../common/common';
 import {
     AddressLookupTableAccount,
     Keypair,
@@ -9,7 +9,7 @@ import {
     SystemProgram,
     TransactionInstruction
 } from '@solana/web3.js';
-import * as trade from '../common/trade_common.js';
+import * as trade from '../common/trade_common';
 import {
     JITO_BUNDLE_SIZE,
     VOLUME_MAX_WALLETS_PER_EXEC,
@@ -20,7 +20,7 @@ import {
     VOLUME_MAX_WALLETS_PER_TRADE_TX,
     VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE,
     COMMITMENT
-} from '../constants.js';
+} from '../constants';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 
 type VolumeConfig = {

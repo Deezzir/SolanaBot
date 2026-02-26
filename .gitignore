@@ -156,3 +156,5 @@ configs
 .env_old
 
 .DS_Store
+
+src/test*

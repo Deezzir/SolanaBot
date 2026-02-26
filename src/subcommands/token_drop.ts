@@ -1,8 +1,8 @@
 import { parse } from 'csv-parse/sync';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import * as trade from '../common/trade_common.js';
-import * as common from '../common/common.js';
-import { DROP_RECORDS_PER_ITERATION } from '../constants.js';
+import * as trade from '../common/trade_common';
+import * as common from '../common/common';
+import { DROP_RECORDS_PER_ITERATION } from '../constants';
 import { readFileSync, writeFileSync } from 'fs';
 
 type AirdropUser = {

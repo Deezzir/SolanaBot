@@ -1,4 +1,4 @@
-import { Trader } from './trade_moonit.js';
-import { Runner } from './snipe_moonit.js';
+import { Trader } from './trade_moonit';
+import { Runner } from './snipe_moonit';
 
 export { Trader as MoonitTrader, Runner as MoonitRunner };

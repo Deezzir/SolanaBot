@@ -1,5 +1,5 @@
-import { METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants.js';
-import * as snipe from '../common/snipe_common.js';
+import { METEORA_DBC_PROGRAM_ID, METEORA_DBC_POOL_AUTHORITY } from '../constants';
+import * as snipe from '../common/snipe_common';
 
 export class Runner extends snipe.SniperBase {
     protected mint_authority = METEORA_DBC_POOL_AUTHORITY;

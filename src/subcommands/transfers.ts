@@ -7,9 +7,9 @@ import {
     TRANSFER_INTERVAL_MS,
     TRANSFER_MAX_DEPTH,
     TRANSFER_MAX_WALLETS_PER_TX
-} from '../constants.js';
-import * as common from '../common/common.js';
-import * as trade from '../common/trade_common.js';
+} from '../constants';
+import * as common from '../common/common';
+import * as trade from '../common/trade_common';
 import {
     createAssociatedTokenAccountIdempotentInstruction,
     createCloseAccountInstruction,

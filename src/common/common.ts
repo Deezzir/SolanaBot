@@ -3,7 +3,7 @@ import { clearLine, cursorTo } from 'readline';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createInterface } from 'readline';
 import { parse } from 'csv-parse/sync';
-import { IPFS, IPFS_API, IPFS_JWT, PUMP_API_URL, WALLETS_FILE_HEADERS, WALLETS_RESCUE_DIR_PATH } from '../constants.js';
+import { IPFS, IPFS_API, IPFS_JWT, PUMP_API_URL, WALLETS_FILE_HEADERS, WALLETS_RESCUE_DIR_PATH } from '../constants';
 import base58 from 'bs58';
 import path, { basename } from 'path';
 
@@ -489,7 +489,7 @@ export async function upload_metadata_ipfs(meta: IPFSMetadata, image_path: strin
 
         const json = JSON.stringify(meta);
         const json_blob = new Blob([json]);
-        const json_file = new File([json_blob], `${uuid}-metadata.json`, { type: 'application/json' });
+        const json_file = new File([json_blob], `${uuid}-metadataon`, { type: 'application/json' });
         const meta_resp = await upload_ipfs(json_file);
         return meta_resp.cid;
     } catch (error) {

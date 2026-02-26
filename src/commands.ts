@@ -10,15 +10,15 @@ import {
     PriorityLevel,
     TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
     WALLETS_FILE_HEADERS
-} from './constants.js';
-import * as common from './common/common.js';
-import * as trade from './common/trade_common.js';
-import * as transfers from './subcommands/transfers.js';
-import * as volume from './subcommands/volume.js';
-import * as token_drop from './subcommands/token_drop.js';
-import * as pnl from './subcommands/pnl.js';
-import * as mass_trade from './subcommands/mass_trade.js';
-import { get_trader, get_sniper } from './common/get_trader.js';
+} from './constants';
+import * as common from './common/common';
+import * as trade from './common/trade_common';
+import * as transfers from './subcommands/transfers';
+import * as volume from './subcommands/volume';
+import * as token_drop from './subcommands/token_drop';
+import * as pnl from './subcommands/pnl';
+import * as mass_trade from './subcommands/mass_trade';
+import { get_trader, get_sniper } from './common/get_trader';
 
 export async function burn_token(mint: PublicKey, burner: Signer, amount?: number, percent?: number): Promise<void> {
     if (!amount && !percent) throw new Error('Either amount or percent should be provided.');

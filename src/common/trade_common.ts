@@ -52,8 +52,8 @@ import {
     MAYHEM_PROGRAM_ID,
     MAYHEM_STATE_SEED,
     MAYHEM_SOL_VAULT
-} from '../constants.js';
-import * as common from './common.js';
+} from '../constants';
+import * as common from './common';
 import bs58 from 'bs58';
 import { SendSmartTransactionOptions } from 'helius-sdk';
 

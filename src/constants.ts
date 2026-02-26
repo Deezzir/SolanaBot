@@ -183,6 +183,10 @@ export const PUMP_AMM_GLOBAL_VOLUME_ACCUMULATOR = new PublicKey('C2aFPdENg4A2HQs
 export const PUMP_STATE_HEADER = new Uint8Array([23, 183, 248, 55, 96, 216, 172, 96]);
 export const PUMP_AMM_STATE_HEADER = new Uint8Array([241, 154, 109, 4, 17, 177, 109, 188]);
 export const PUMP_BONDING_SEED = new Uint8Array([98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101]);
+export const PUMB_BONDING_SEED_2 = new Uint8Array([
+    98, 111, 110, 100, 105, 110, 103, 45, 99, 117, 114, 118, 101, 45, 118, 50
+]);
+export const PUMP_POOL_SEED_2 = new Uint8Array([112, 111, 111, 108, 45, 118, 50]);
 export const PUMP_CREATOR_VAULT_SEED = new Uint8Array([99, 114, 101, 97, 116, 111, 114, 45, 118, 97, 117, 108, 116]);
 export const PUMP_AMM_CREATOR_VAULT_SEED = new Uint8Array([
     99, 114, 101, 97, 116, 111, 114, 95, 118, 97, 117, 108, 116

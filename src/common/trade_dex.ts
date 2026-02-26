@@ -26,8 +26,8 @@ import {
     SOL_MINT,
     TRADE_SWAP_SEED,
     COMMITMENT
-} from '../constants.js';
-import { calc_ata, send_tx, get_token_supply, get_vault_balance, TokenMetrics, get_ltas } from './trade_common.js';
+} from '../constants';
+import { calc_ata, send_tx, get_token_supply, get_vault_balance, TokenMetrics, get_ltas } from './trade_common';
 import {
     createAssociatedTokenAccountInstruction,
     createCloseAccountInstruction,

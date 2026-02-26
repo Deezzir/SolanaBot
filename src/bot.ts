@@ -1,8 +1,8 @@
 import figlet from 'figlet';
 import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
 import { existsSync } from 'fs';
-import * as common from './common/common.js';
-import * as commands from './commands.js';
+import * as common from './common/common';
+import * as commands from './commands';
 import { exit } from 'process';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Helius } from 'helius-sdk';
@@ -18,7 +18,7 @@ import {
     TRADE_MAX_SLIPPAGE,
     TRANSFER_MAX_DEPTH,
     WALLETS_FILE
-} from './constants.js';
+} from './constants';
 import base58 from 'bs58';
 
 function reserve_wallet_check(wallets: common.Wallet[]) {

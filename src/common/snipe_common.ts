@@ -11,9 +11,9 @@ import {
     SNIPE_MIN_MCAP,
     SNIPE_SELL_SLIPPAGE,
     TRADE_MAX_SLIPPAGE
-} from '../constants.js';
-import * as common from './common.js';
-import { IProgramTrader, get_balance, retry_get_tx } from './trade_common.js';
+} from '../constants';
+import * as common from './common';
+import { IProgramTrader, get_balance, retry_get_tx } from './trade_common';
 import bs58 from 'bs58';
 
 export type BotConfig = {
@@ -87,7 +87,7 @@ export abstract class SniperBase implements ISniper {
     protected abstract is_create_tx(logs: string[]): boolean;
 
     private get_worker_path(): string {
-        return './dist/common/snipe_worker.js';
+        return './dist/common/snipe_worker';
     }
 
     private async wait_drop_unsub(): Promise<void> {

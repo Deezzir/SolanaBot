@@ -1,8 +1,8 @@
 import { parentPort, workerData } from 'worker_threads';
 import { Keypair, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
-import * as common from './common.js';
-import * as snipe from './snipe_common.js';
-import * as trade from './trade_common.js';
+import * as common from './common';
+import * as snipe from './snipe_common';
+import * as trade from './trade_common';
 import { Helius } from 'helius-sdk';
 import {
     COMMITMENT,
@@ -13,8 +13,8 @@ import {
     SNIPE_MIN_BUY_THRESHOLD,
     SNIPE_RETRIES,
     SNIPE_RETRY_INTERVAL_MS
-} from '../constants.js';
-import { get_trader } from './get_trader.js';
+} from '../constants';
+import { get_trader } from './get_trader';
 
 const WORKER_CONF: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const WORKER_KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(WORKER_CONF.secret));

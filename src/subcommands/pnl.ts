@@ -1,7 +1,7 @@
 import { PublicKey, ParsedTransactionWithMeta, ConfirmedSignatureInfo } from '@solana/web3.js';
-import * as common from '../common/common.js';
-import { PNL_BATCH_DELAY_MS, PNL_BATCH_SIZE, SOL_MINT, TRADE_RETRY_INTERVAL_MS } from '../constants.js';
-import { calc_token_balance_changes, get_token_meta, TxBalanceChanges } from '../common/trade_common.js';
+import * as common from '../common/common';
+import { PNL_BATCH_DELAY_MS, PNL_BATCH_SIZE, SOL_MINT, TRADE_RETRY_INTERVAL_MS } from '../constants';
+import { calc_token_balance_changes, get_token_meta, TxBalanceChanges } from '../common/trade_common';
 
 type TransactionWithBalances = ParsedTransactionWithMeta & {
     balance_changes: TxBalanceChanges;

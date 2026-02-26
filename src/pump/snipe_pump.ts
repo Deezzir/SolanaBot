@@ -3,8 +3,8 @@ import {
     PUMP_CREATE_V2_DISCRIMINATOR,
     PUMP_MINT_AUTHORITY_ACCOUNT,
     PUMP_PROGRAM_ID
-} from '../constants.js';
-import * as snipe from '../common/snipe_common.js';
+} from '../constants';
+import * as snipe from '../common/snipe_common';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 

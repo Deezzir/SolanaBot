@@ -1,11 +1,11 @@
-import { PumpTrader, PumpRunner } from '../pump/pump.js';
-import { MoonitTrader, MoonitRunner } from '../moonit/moonit.js';
-import { JupiterTrader } from '../generic/jupiter.js';
-import { MeteoraRunner, MeteoraTrader } from '../meteora/meteora.js';
-import { Program } from './common.js';
-import { IProgramTrader } from './trade_common.js';
-import { ISniper } from './snipe_common.js';
-import { BonkRunner, BonkTrader } from '../bonk/bonk.js';
+import { PumpTrader, PumpRunner } from '../pump/pump';
+import { MoonitTrader, MoonitRunner } from '../moonit/moonit';
+import { JupiterTrader } from '../generic/jupiter';
+import { MeteoraRunner, MeteoraTrader } from '../meteora/meteora';
+import { Program } from './common';
+import { IProgramTrader } from './trade_common';
+import { ISniper } from './snipe_common';
+import { BonkRunner, BonkTrader } from '../bonk/bonk';
 
 export function get_trader(program: Program): IProgramTrader {
     switch (program) {

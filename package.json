@@ -3,7 +3,6 @@
     "version": "5.0.0",
     "description": "Solana bot",
     "main": "./src/bot.ts",
-    "type": "module",
     "scripts": {
         "build": "npx tsc",
         "start": "node ./dist/bot.js",
