@@ -886,6 +886,23 @@ async function main() {
             await commands.benchmark(requests, '7536JKDpY6bGNq3qUcn87CAmwGPA4WcRctzsFDTr9i8N', thread, interval);
         });
 
+    program
+        .command('convert-key')
+        .alias('ck')
+        .description('Convert the private key from JSON file to base58 string')
+        .argument('<json_path>', 'Path to the JSON file', (value) => {
+            if (!existsSync(value)) throw new InvalidOptionArgumentError('Config file does not exist.');
+            const json = common.read_json(value);
+            if (!json) throw new InvalidOptionArgumentError('Invalid JSON format.');
+            if (!Array.isArray(json) || json.length !== 64 || !json.every((n) => typeof n === 'number'))
+                throw new InvalidOptionArgumentError('Invalid private key format. Must be an array of 64 numbers.');
+            return Uint8Array.from(json);
+        })
+        .action((json) => {
+            const keypair = Keypair.fromSecretKey(json);
+            console.log(base58.encode(keypair.secretKey));
+        });
+
     try {
         await program.parseAsync(process.argv);
         if (!process.argv.slice(2).length) {
