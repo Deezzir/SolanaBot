@@ -4,86 +4,94 @@
 
 1. Open the terminal and clone the repo
 
-    ```bash
+    ```shell
     git clone https://github.com/Deezzir/SolanaBot.git
     ```
 
-2. Change the directory to the cloned repo
-
-    ```bash
-    cd SolanaBot
-    ```
-
-3. Install Node.js and npm if you haven't already, and install the dependencies
+2. Install Node.js and npm if you haven't already, and install the dependencies
 
     A good way to install Node.js and NPM is to use [npm DOCS](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
 
-    ```bash
-    npm install
+    ```shell
+    cd SolanaBot && npm install
     ```
 
-4. Create a `.env` file in the root directory and add the following
+3. Create a `.env` file in the root directory and add the following
 
-    ```bash
+    ```shell
     HELIUS_API_KEY=
     ```
 
-5. Build the project
+4. Build the project
 
-    ```bash
+    ```shell
     npm run build
     ```
 
-6. Run the project
+5. Run the project
 
-    ```bash
-    > node dist/bot.js -h
+    ```shell
+    > alias bot="node dist/bot.js"
+    > bot -h
+      ____            _                             ____            _   
+     / ___|    ___   | |   __ _   _ __     __ _    | __ )    ___   | |_ 
+     \___ \   / _ \  | |  / _` | | '_ \   / _` |   |  _ \   / _ \  | __|
+      ___) | | (_) | | | | (_| | | | | | | (_| |   | |_) | | (_) | | |_ 
+     |____/   \___/  |_|  \__,_| |_| |_|  \__,_|   |____/   \___/   \__|
 
     Usage: bot [options] [command]
 
     Solana Bot CLI
 
     Options:
-    -V, --version                                               output the version number
-    -k, --keys <path>                                           Path to the CSV file with the wallets (default: keys.csv)
-    -h, --help                                                  display help for command
+      -V, --version                                                  output the version number
+      -k, --keys <path>                                              Path to the CSV file with the wallets (default: keys.csv)
+      -g, --program <type>                                           specify program (choices: "pump", "moonit", "meteora", "bonk", "generic", default: pump)
+      -h, --help                                                     display help for command
 
     Commands:
-    snipe|sn [options]                                          Start the snipe bot
-    volume|v [options]                                          Generate the volume for a token
-    generate|g [options] <count> <name>                         Generate the wallets. Optionally, a file with secret keys (separated by newline) can be provided to convert them to keypairs.
-    balance|b                                                   Get the balance of the wallets
-    wallet-pnl|pnl <address>                                    Get the PNL of the wallet
-    token-balance|tb <mint>                                     Get the total balance of a token of the wallets
-    warmup|w [options]                                          Warmup the wallets with the tokens
-    collect|c [options] <receiver>                              Collect all the SOL from the wallets to the provided address
-    buy-token-once|bto [options] <amount> <mint> <buyer_index>  Buy the token once with the provided amount
-    sell-token-once|sto [options] <mint> <seller_index>         Sell the token once with the provided amount
-    buy-token|bt [options] <mint>                               Buy the token by the mint from the wallets
-    sell-token|st [options] <mint>                              Sell all the token by the mint from the wallets
-    transfer|tr <amount> <receiver> <sender_index>              Transfer SOL from the specified keypair to the receiver
-    token-collect|tc [options] <mint> <receiver>                Collect all the token by the mint from the wallets to the provided address
-    fund|f [options] <amount> <sender_index>                   Fund the wallets with SOL using the provided wallet
-    create-metadata|cm <json_path> <image_path>                 Upload the metadata of the token using the provided JSON file and image
-    promote|pr [options] <count> <cid> <creator_index>          Create promotion tokens using the provided wallet
-    create-token|ct [options] <cid> <creator_index>             Create a token
-    clean|cl                                                    Clean the wallets
-    drop|dr [options] <mint> <drop_index>                       Do the drop
-    benchmark|bh [options] <requests>                           Benchmark the RPC connection
-    help [command]                                              display help for command
+      snipe|sn [options]                                             Start the snipe bot
+      volume|v [options]                                             Start the volume bot
+      generate|g [options] <file_path>                               Generate the wallets
+      balance|b                                                      Get the balance of the wallets
+      token-balance|tb <mint>                                        Get the token balance of the wallets
+      warmup|w [options]                                             Warmup the wallets with the tokens
+      clean|cl                                                       Clean the wallets by closing zero balance token accounts
+      token-burn|tburn [options] <mint> <burner_index>               Burn the tokens by mint from a wallet
+      collect|c [options] <receiver>                                 Collect all the SOL from the wallets to the provided address
+      token-collect|tc [options] <mint> <receiver>                   Collect all tokens by mint from the wallets to the provided address
+      fund|f [options] <amount> <sender_index>                       Fund the wallets with SOL using the provided wallet
+      token-distribute|td [options] <mint> <percent> <sender_index>  Distribute the token by the mint from the sender to the wallets
+      buy-token-once|bto [options] <amount> <mint> <buyer_index>     Buy the token once with the provided amount
+      sell-token-once|sto [options] <mint> <seller_index>            Sell the token once with the provided amount
+      buy-token|bt [options] <mint>                                  Buy the token by the mint from the wallets
+      sell-token|st [options] <mint>                                 Sell all the token by the mint from the wallets
+      wallet-pnl|pnl <address>                                       Get the PNL of the wallet
+      transfer|tr <amount> <receiver> <sender_index>                 Transfer SOL from the specified wallet to the receiver
+      transfer-token|tt <mint> <amount> <receiver> <sender_index>    Transfer the token from the specified wallet to the receiver
+      create-metadata|cm <json_path> <image_path>                    Upload the metadata of the token using the provided JSON file and image
+      promote|pr <count> <cid> <creator_index>                       Create promotion tokens using the provided wallet
+      create-token|ct [options] <cid> <creator_index>                Create a token
+      create-lta|clta <authority_index>                              Create a Address Lookup Table Account
+      extend-lta|elta <authority_index> <lta> <address_file>         Extend the Address Lookup Table Account
+      deactivate-ltas|dltas <authority_index>                        Deactivate the Address Lookup Table Accounts by the provided authority
+      close-ltas|cltas <authority_index>                             Close the Address Lookup Table Accounts by the provided authority
+      drop|dr [options] <mint> <drop_index>                          Execute token airdrop/presale
+      benchmark|bh [options] <requests>                              Benchmark the RPC connection
+      convert-key|ck <json_path>                                     Convert the private key from JSON file to base58 string
+      help [command]                                                 display help for command
     ```
 
-> ⚠️ Help is available for each command. Use `node dist/bot.js <command> -h` to see the options for that command.
+> ⚠️ Help is available for each command. Use `bot <command> -h` to see the options for that command.
 
-## Snipe Config (JSON)
+## Snipe config (JSON)
 
 The `snipe` subcommand optionally accepts a JSON config with the following fields:
 
 ### Required fields
 
 - `thread_cnt` (`number`) – Number of threads (≤ `keys_cnt`)
-- `spend_limit` (`number`) – Max total spend (> `SNIPE_MIN_MCAP`)
-- `start_buy` (`number`) – Initial buy amount (> `SNIPE_MIN_BUY`, < `spend_limit`)
+- `min_buy` (`number`) – Minimum buy amount in SOL (e.g., 0.1)
 - Token must be identified via:
   - `mint` (`string`, valid pubkey) **OR**
   - `token_name` (`string`) **AND** `token_ticker` (`string`)
@@ -92,18 +100,20 @@ The `snipe` subcommand optionally accepts a JSON config with the following field
 
 ### Optional fields
 
-| Field            | Type      | Default                  | Notes |
-|------------------|-----------|---------------------------|-------|
-| `buy_interval`    | `number`  | `0`                       | Required if `is_buy_once = false` |
-| `mcap_threshold`  | `number`  | `Infinity`                | Must be ≥ `SNIPE_MIN_MCAP` |
-| `start_interval`  | `number`  | `0`                       | Must be ≥ 0 |
-| `is_buy_once`     | `boolean` | `false`                   | If `true`, `buy_interval` must not be set |
-| `sell_slippage`   | `number`  | `SNIPE_SELL_SLIPPAGE`     | 0.0 – `TRADE_MAX_SLIPPAGE` |
-| `buy_slippage`    | `number`  | `SNIPE_BUY_SLIPPAGE`      | 0.0 – `TRADE_MAX_SLIPPAGE` |
-| `priority_level`  | `string`  | `Default`                 | See **Priority Levels** below |
-| `protection_tip`  | `number`  | `undefined`               | Must be ≥ 0.0 |
+| Field             | Type      | Default                  | Notes                                       |
+|-------------------|-----------|--------------------------|---------------------------------------------|
+| `trade_interval`  | `number`  | `0`                      | Required if `is_buy_once = false`           |
+| `mcap_threshold`  | `number`  | `Infinity`               | Must be ≥ `SNIPE_MIN_MCAP`                  |
+| `start_interval`  | `number`  | `0`                      | Must be ≥ 0                                 |
+| `spend_limit`     | `number`  | `Infinity`               | Must be ≥ 0                                 |
+| `max_buy`         | `number`  | `Infinity`               | Must be ≥ `min_buy`                         |
+| `is_buy_once`     | `boolean` | `false`                  | If `true`, `trade_interval` must not be set |
+| `sell_slippage`   | `number`  | `SNIPE_SELL_SLIPPAGE`    | 0.0 – `TRADE_MAX_SLIPPAGE`                  |
+| `buy_slippage`    | `number`  | `SNIPE_BUY_SLIPPAGE`     | 0.0 – `TRADE_MAX_SLIPPAGE`                  |
+| `priority_level`  | `string`  | `Default`                | See **Priority Levels** below               |
+| `protection_tip`  | `number`  | `undefined`              | Must be ≥ 0.0                               |
 
----
+----------------------------------------------------------------------------------------------------------
 
 ### Priority Levels
 
@@ -132,7 +142,7 @@ Set `priority_level` to control transaction fees.
   "start_buy": 10,
   "mint": "So11111111111111111111111111111111111111112",
   "is_buy_once": false,
-  "buy_interval": 5,
+  "trade_interval": 5,
   "priority_level": "MEDIUM"
 }
 ```

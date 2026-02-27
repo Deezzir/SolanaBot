@@ -1,12 +1,9 @@
 # TODO
 
-- Remove raydium sdk dependancy (AMMV4 left to implement)
 - Add Bump bot
-- Finish Moonit (without dep)
-- Fix Meteora
-
-- Rework snipe logic, more options and smart logic
-- Add sell by percent to start/snipe command
+- Finish Moonit
+- Finish Meteora
+- Finish Raydium
+- Smart snipe/trade logic
 
 - GUI
-- Optimize

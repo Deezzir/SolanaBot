@@ -898,10 +898,7 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid private key format. Must be an array of 64 numbers.');
             return Uint8Array.from(json);
         })
-        .action((json) => {
-            const keypair = Keypair.fromSecretKey(json);
-            console.log(base58.encode(keypair.secretKey));
-        });
+        .action((json) => console.log(base58.encode(Keypair.fromSecretKey(json).secretKey)));
 
     try {
         await program.parseAsync(process.argv);

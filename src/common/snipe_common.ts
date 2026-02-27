@@ -6,7 +6,7 @@ import {
     COMMITMENT,
     PriorityLevel,
     SNIPE_BUY_SLIPPAGE,
-    SNIPE_META_UPDATE_INTERVAL_MS,
+    SNIPE_META_POLL_INTERVAL_MS,
     SNIPE_MIN_BUY,
     SNIPE_MIN_MCAP,
     SNIPE_SELL_SLIPPAGE,
@@ -19,11 +19,12 @@ import bs58 from 'bs58';
 export type BotConfig = {
     thread_cnt: number;
     spend_limit: number;
-    start_buy: number;
+    min_buy: number;
+    max_buy?: number;
     mcap_threshold: number;
     is_buy_once: boolean;
     start_interval: number;
-    buy_interval: number;
+    trade_interval: number;
     sell_slippage: number;
     buy_slippage: number;
     priority_level: PriorityLevel;
@@ -37,9 +38,10 @@ export type WorkerConfig = {
     program: common.Program;
     secret: Uint8Array;
     id: number;
-    buy_interval: number;
+    trade_interval: number;
     spend_limit: number;
-    start_buy: number;
+    min_buy: number;
+    max_buy?: number;
     mcap_threshold: number;
     is_buy_once: boolean;
     sell_slippage: number;
@@ -47,6 +49,64 @@ export type WorkerConfig = {
     priority_level: PriorityLevel;
     protection_tip?: number;
 };
+
+export function update_config(config: WorkerConfig | BotConfig, key: string, value: string): [boolean, string?] {
+    switch (key) {
+        case 'trade_interval':
+            if (common.validate_float(value, 0)) {
+                config.trade_interval = parseFloat(value);
+                return [true, undefined];
+            } else {
+                return [false, 'Invalid buy interval.'];
+            }
+        case 'spend_limit':
+            if (common.validate_float(value, SNIPE_MIN_BUY)) {
+                config.spend_limit = parseFloat(value);
+                return [true, undefined];
+            } else {
+                return [false, 'Invalid spend limit.'];
+            }
+        case 'min_buy':
+            if (common.validate_float(value, SNIPE_MIN_BUY)) {
+                config.min_buy = parseFloat(value);
+                return [true, undefined];
+            } else {
+                return [false, `Invalid min_buy. Must be greater than ${SNIPE_MIN_BUY}.`];
+            }
+        case 'max_buy':
+            if (common.validate_float(value, config.min_buy)) {
+                config.max_buy = parseFloat(value);
+                return [true, undefined];
+            } else {
+                return [false, `Invalid max_buy. Must be greater than or equal to min_buy (${config.min_buy}).`];
+            }
+        case 'is_buy_once':
+            if (value !== 'true' && value !== 'false') {
+                return [false, 'Invalid value for is_buy_once. Use true or false.'];
+            } else {
+                config.is_buy_once = value === 'true';
+                return [true, undefined];
+            }
+        case 'mcap_threshold':
+            if (common.validate_int(value, SNIPE_MIN_MCAP)) {
+                config.mcap_threshold = parseInt(value, 10);
+                return [true, undefined];
+            } else {
+                return [false, 'Invalid market cap threshold.'];
+            }
+        case 'start_interval':
+            if (!('start_interval' in config)) return [true, ''];
+            if (common.validate_float(value, 0)) {
+                config.start_interval = parseFloat(value);
+                return [true, undefined];
+            } else {
+                return [false, 'Invalid start interval.'];
+            }
+        default:
+            return [false, 'Invalid key.'];
+            break;
+    }
+}
 
 type WorkerJob = {
     worker: Worker;
@@ -59,7 +119,7 @@ enum Method {
     Snipe = 1
 }
 
-type WorkerMessage = 'stop' | 'buy' | 'mint' | 'sell';
+type WorkerMessage = 'stop' | 'buy' | 'mint' | 'sell' | 'config';
 
 export interface ISniper {
     snipe(wallets: common.Wallet[], sol_price: number): Promise<void>;
@@ -74,7 +134,7 @@ export abstract class SniperBase implements ISniper {
     protected mint_authority!: PublicKey;
     protected program_id!: PublicKey;
 
-    private subscription_id: number | undefined;
+    private sub_id: number | undefined;
     private logs_stop_func: (() => void) | null = null;
 
     constructor(trader: IProgramTrader) {
@@ -91,10 +151,10 @@ export abstract class SniperBase implements ISniper {
     }
 
     private async wait_drop_unsub(): Promise<void> {
-        if (this.subscription_id !== undefined) {
+        if (this.sub_id !== undefined) {
             if (this.logs_stop_func) this.logs_stop_func();
-            global.CONNECTION.removeOnLogsListener(this.subscription_id)
-                .then(() => (this.subscription_id = undefined))
+            global.CONNECTION.removeOnLogsListener(this.sub_id)
+                .then(() => (this.sub_id = undefined))
                 .catch((err) => common.error(common.red(`Failed to unsubscribe from logs: ${err}`)));
         }
     }
@@ -110,7 +170,7 @@ export abstract class SniperBase implements ISniper {
         return new Promise<{ mint: PublicKey; misc?: object } | null>((resolve, reject) => {
             this.logs_stop_func = () => reject(new Error('User stopped the process'));
 
-            this.subscription_id = global.CONNECTION.onLogs(
+            this.sub_id = global.CONNECTION.onLogs(
                 this.mint_authority,
                 async ({ err, logs, signature }) => {
                     if (err) return;
@@ -148,7 +208,7 @@ export abstract class SniperBase implements ISniper {
                 COMMITMENT
             );
 
-            if (this.subscription_id === undefined) {
+            if (this.sub_id === undefined) {
                 reject(new Error('Failed to subscribe to logs'));
             }
         }).catch(() => {
@@ -214,26 +274,41 @@ export abstract class SniperBase implements ISniper {
             common.log(`[Main Worker] Token detected: ${this.bot_config.mint.toString()}`);
 
             let mint_meta = await this.trader.default_mint_meta(this.bot_config.mint, sol_price, result.misc);
-            this.workers_post_message('mint', mint_meta);
+            this.workers_post_message('mint', mint_meta.serialize());
 
             let migrated: boolean = false;
-            const interval = setInterval(async () => {
+            let poll_stopped = false;
+            let unsub: (() => void) | null = null;
+
+            const publish_update = (next_meta: typeof mint_meta) => {
+                mint_meta = next_meta;
+                if (mint_meta.migrated && !migrated) {
+                    migrated = true;
+                    common.log('[Main Worker] Token migrated to liquidity pool...');
+                }
+                if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
+                this.workers_post_message('mint', mint_meta.serialize());
+            };
+
+            const poll = async () => {
+                if (poll_stopped) return;
                 try {
                     mint_meta = await this.trader.update_mint_meta(mint_meta, sol_price);
-                    if (mint_meta.migrated && !migrated) {
-                        migrated = true;
-                        common.log('[Main Worker] Token migrated to DEX...');
-                    }
-                    if (global.RL) global.RL.emit('mcap', mint_meta.token_usd_mc);
-                    this.workers_post_message('mint', mint_meta);
+                    publish_update(mint_meta);
                 } catch (err) {
                     common.error(common.red(`Failed to update token metadata`));
                 }
-            }, SNIPE_META_UPDATE_INTERVAL_MS);
+                if (!poll_stopped) setTimeout(poll, SNIPE_META_POLL_INTERVAL_MS);
+            };
+
+            setTimeout(poll, SNIPE_META_POLL_INTERVAL_MS);
+            unsub = await this.trader.subscribe_mint_meta(mint_meta, publish_update);
 
             this.workers_post_message('buy');
             await this.workers_wait();
-            clearInterval(interval);
+
+            if (unsub) unsub();
+            poll_stopped = true;
         } catch (error) {
             throw new Error(`Failed to snipe the token: ${error}`);
         } finally {
@@ -273,27 +348,55 @@ export abstract class SniperBase implements ISniper {
     }
 
     private async workers_post_message(message: WorkerMessage, data: any = {}): Promise<void> {
+        if (!this.bot_config) throw new Error('Bot configuration is not set.');
+
         if (message === 'stop') await this.wait_drop_unsub();
         if (message === 'buy') {
-            for (const worker of this.workers) {
-                common.log(`[Main Worker] Sending the buy command to worker ${worker.index} `);
-                worker.worker.postMessage({ command: `buy${worker.index}`, data });
-                const start_interval = this.bot_config!.start_interval;
-                if (start_interval > 0) {
-                    const min_interval = start_interval * 1000;
-                    const max_interval = start_interval * 1.5 * 1000;
-                    await common.sleep(common.normal_random(min_interval, max_interval));
+            if ('idx' in data && data.idx !== undefined) {
+                const worker = this.workers.find((w) => w.index === data.idx);
+                if (worker) {
+                    common.log(`[Main Worker] Sending the buy command to worker ${worker.index} `);
+                    worker.worker.postMessage({ command: `buy${worker.index}`, data });
+                    return;
                 }
+            } else {
+                for (const worker of this.workers) {
+                    common.log(`[Main Worker] Sending the buy command to worker ${worker.index} `);
+                    worker.worker.postMessage({ command: `buy${worker.index}`, data });
+                    const start_interval = this.bot_config.start_interval;
+                    if (start_interval > 0) {
+                        const min_interval = start_interval * 1000;
+                        const max_interval = start_interval * 1.5 * 1000;
+                        await common.sleep(common.normal_random(min_interval, max_interval));
+                    }
+                }
+                return;
             }
-            return;
+        }
+        if (message === 'sell') {
+            if ('idx' in data && data.idx !== undefined) {
+                const worker = this.workers.find((w) => w.index === data.idx);
+                if (worker) {
+                    common.log(`[Main Worker] Sending the sell command to worker ${worker.index} `);
+                    worker.worker.postMessage({ command: `sell${worker.index}`, data });
+                    return;
+                }
+            } else {
+                this.workers.forEach((worker) => {
+                    common.log(`[Main Worker] Sending the sell command to worker ${worker.index} `);
+                    worker.worker.postMessage({ command: 'sell', data });
+                });
+                return;
+            }
         }
         this.workers.forEach(({ worker }) => worker.postMessage({ command: message, data }));
     }
 
     private async workers_start(wallets: common.Wallet[]): Promise<void> {
-        wallets = wallets.filter((wallet) => !wallet.is_reserve).slice(0, this.bot_config!.thread_cnt);
+        if (!this.bot_config) throw new Error('Bot configuration is not set.');
+        wallets = wallets.filter((wallet) => !wallet.is_reserve).slice(0, this.bot_config.thread_cnt);
 
-        if (wallets.length < this.bot_config!.thread_cnt)
+        if (wallets.length < this.bot_config.thread_cnt)
             throw new Error(`The number of keys doesn't match the number of threads`);
 
         const all_has_balances = await this.check_balances(wallets);
@@ -307,15 +410,16 @@ export abstract class SniperBase implements ISniper {
                 program: this.trader.get_name() as common.Program,
                 secret: wallet.keypair.secretKey,
                 id: wallet.id,
-                buy_interval: this.bot_config!.buy_interval,
-                spend_limit: this.bot_config!.spend_limit,
-                start_buy: this.bot_config!.start_buy,
-                mcap_threshold: this.bot_config!.mcap_threshold,
-                is_buy_once: this.bot_config!.is_buy_once,
-                sell_slippage: this.bot_config!.sell_slippage,
-                buy_slippage: this.bot_config!.buy_slippage,
-                priority_level: this.bot_config!.priority_level,
-                protection_tip: this.bot_config!.protection_tip
+                trade_interval: this.bot_config.trade_interval,
+                spend_limit: this.bot_config.spend_limit,
+                min_buy: this.bot_config.min_buy,
+                max_buy: this.bot_config.max_buy,
+                mcap_threshold: this.bot_config.mcap_threshold,
+                is_buy_once: this.bot_config.is_buy_once,
+                sell_slippage: this.bot_config.sell_slippage,
+                buy_slippage: this.bot_config.buy_slippage,
+                priority_level: this.bot_config.priority_level,
+                protection_tip: this.bot_config.protection_tip
             };
 
             const worker = new Worker(this.get_worker_path(), {
@@ -353,20 +457,20 @@ export abstract class SniperBase implements ISniper {
     }
 
     private setup_cmd_interface() {
+        if (!this.bot_config) throw new Error('Bot configuration is not set.');
         if (!global.RL) common.setup_readline();
         global.RL.setPrompt('Command (stop/config/sell/set)> ');
         global.RL.prompt(true);
 
-        let selling = false;
         let stopping = false;
 
         global.RL.on('line', (line) => {
             moveCursor(process.stdout, 0, -1);
             clearLine(process.stdout, 0);
 
-            const [command, key, value] = line.trim().split(' ');
+            const [command, ...rest] = line.trim().split(' ');
             switch (command) {
-                case 'stop':
+                case 'stop': {
                     if (!stopping) {
                         common.log('[Main Worker] Stopping the bot...');
                         this.workers_post_message('stop');
@@ -375,28 +479,67 @@ export abstract class SniperBase implements ISniper {
                         common.log('[Main Worker] Stopping is already in progress...');
                     }
                     break;
-                case 'config':
-                    if (this.bot_config) this.log_bot_config(this.bot_config);
-                    break;
-                case 'sell':
-                    if (!selling) {
-                        this.workers_post_message('sell');
-                        selling = true;
-                    } else {
-                        common.log('[Main Worker] Selling is already in progress...');
+                }
+                case 'buy': {
+                    const [amountRaw, idxRaw] = rest;
+                    const amount = amountRaw ? parseFloat(amountRaw) : undefined;
+                    const idx = idxRaw ? parseInt(idxRaw, 10) : undefined;
+
+                    if (amount !== undefined && (isNaN(amount) || amount <= 0.0)) {
+                        common.log('Invalid amount. Usage: buy <amount> <worker_id>');
+                        break;
                     }
+                    if (idx !== undefined && (isNaN(idx) || !this.workers.some((w) => w.index === idx))) {
+                        common.log('Invalid worker ID. Usage: buy <amount> <worker_id>');
+                        break;
+                    }
+
+                    if (!stopping) this.workers_post_message('buy', { idx, amount });
+                    else common.log('[Main Worker] Cannot send buy command, stopping is in progress...');
                     break;
-                case 'set':
-                    if (key && value) {
-                        this.update_bot_config(key, value);
-                        common.log(`[Main Worker] Configuration updated: ${key} = ${value}`);
-                    } else {
+                }
+                case 'config': {
+                    this.log_bot_config(this.bot_config!);
+                    break;
+                }
+                case 'sell': {
+                    const [percentRaw, idxRaw] = rest;
+                    const percent = percentRaw ? parseFloat(percentRaw) : undefined;
+                    const idx = idxRaw ? parseInt(idxRaw, 10) : undefined;
+
+                    if (percent !== undefined && (isNaN(percent) || percent <= 0.0 || percent > 1.0)) {
+                        common.log('Invalid percentage. Usage: sell <percent> <worker_id>');
+                        break;
+                    }
+                    if (idx !== undefined && (isNaN(idx) || !this.workers.some((w) => w.index === idx))) {
+                        common.log('Invalid worker ID. Usage: sell <percent> <worker_id>');
+                        break;
+                    }
+
+                    if (!stopping) this.workers_post_message('sell', { percent, idx });
+                    else common.log('[Main Worker] Cannot send sell command, stopping is in progress...');
+                    break;
+                }
+                case 'set': {
+                    if (rest.length < 2) {
                         common.log('Invalid command. Usage: set <key> <value>');
+                        break;
+                    }
+
+                    const [key, value] = rest;
+                    const [ok, err] = update_config(this.bot_config!, key, value);
+                    if (ok) {
+                        common.log(`[Main Worker] Configuration updated: ${key} = ${value}`);
+                        this.workers_post_message('config', { key, value });
+                    } else {
+                        common.log(common.red(err || 'Failed to update configuration'));
                     }
                     break;
-                default:
+                }
+                default: {
                     common.log(`Unknown command: ${line.trim()} `);
                     break;
+                }
             }
             global.RL.prompt(true);
         })
@@ -416,7 +559,7 @@ export abstract class SniperBase implements ISniper {
     }
 
     private async validate_json_config(json: any, keys_cnt: number): Promise<BotConfig> {
-        const required_fields = ['thread_cnt', 'spend_limit', 'start_buy'];
+        const required_fields = ['thread_cnt', 'min_buy'];
         for (const field of required_fields) {
             if (!(field in json)) throw new Error(`Missing required field: ${field}`);
         }
@@ -425,9 +568,10 @@ export abstract class SniperBase implements ISniper {
             token_ticker,
             mint,
             thread_cnt,
-            buy_interval,
+            trade_interval,
             spend_limit,
-            start_buy,
+            min_buy,
+            max_buy,
             mcap_threshold,
             start_interval,
             is_buy_once,
@@ -453,11 +597,16 @@ export abstract class SniperBase implements ISniper {
         ) {
             throw new Error('Both token name and token ticker are required.');
         }
-        if (typeof spend_limit !== 'number' || spend_limit <= SNIPE_MIN_BUY) {
-            throw new Error(`spend_limit must be a number greater than ${SNIPE_MIN_BUY}.`);
+        if (typeof min_buy !== 'number' || min_buy <= SNIPE_MIN_BUY) {
+            throw new Error(`min_buy must be a number greater than ${SNIPE_MIN_BUY}.`);
         }
-        if (typeof start_buy !== 'number' || start_buy <= SNIPE_MIN_BUY || start_buy > spend_limit) {
-            throw new Error(`start_buy must be a number greater than ${SNIPE_MIN_BUY} and less than spend_limit.`);
+        if (max_buy !== undefined) {
+            if (typeof max_buy !== 'number' || max_buy < min_buy) {
+                throw new Error('max_buy must be a number greater than or equal to min_buy.');
+            }
+        }
+        if (spend_limit !== undefined && (typeof spend_limit !== 'number' || spend_limit < min_buy)) {
+            throw new Error(`spend_limit must be a number greater than or equal to min_buy.`);
         }
         if (typeof thread_cnt !== 'number' || thread_cnt > keys_cnt) {
             throw new Error('thread_cnt must be a number and less than or equal to keys_cnt.');
@@ -471,14 +620,14 @@ export abstract class SniperBase implements ISniper {
         if (is_buy_once && typeof is_buy_once !== 'boolean') {
             throw new Error('is_buy_once must be a boolean');
         }
-        if (buy_interval && (typeof buy_interval !== 'number' || buy_interval <= 0)) {
-            throw new Error('buy_interval must be a number greater than 0.');
+        if (trade_interval && (typeof trade_interval !== 'number' || trade_interval <= 0)) {
+            throw new Error('trade_interval must be a number greater than 0.');
         }
-        if (!is_buy_once && buy_interval === undefined) {
-            throw new Error('buy_interval is required when is_buy_once is false.');
+        if (!is_buy_once && trade_interval === undefined) {
+            throw new Error('trade_interval is required when is_buy_once is false.');
         }
-        if (is_buy_once && buy_interval !== undefined) {
-            throw new Error('buy_interval is not required when is_buy_once is true.');
+        if (is_buy_once && trade_interval !== undefined) {
+            throw new Error('trade_interval is not required when is_buy_once is true.');
         }
         if (sell_slippage !== undefined) {
             if (typeof sell_slippage !== 'number' || sell_slippage < 0.0 || sell_slippage > TRADE_MAX_SLIPPAGE) {
@@ -508,9 +657,11 @@ export abstract class SniperBase implements ISniper {
             json.protection_tip = protection_tip;
         }
         if (!('is_buy_once' in json)) json.is_buy_once = false;
-        if (!('buy_interval' in json)) json.buy_interval = 0;
+        if (!('trade_interval' in json)) json.trade_interval = 0;
         if (!('start_interval' in json)) json.start_interval = 0;
         if (!('mcap_threshold' in json)) json.mcap_threshold = Infinity;
+        if (!('max_buy' in json)) json.max_buy = min_buy;
+        if (!('spend_limit' in json)) json.spend_limit = Infinity;
         if (!('sell_slippage' in json)) json.sell_slippage = SNIPE_SELL_SLIPPAGE;
         if (!('buy_slippage' in json)) json.buy_slippage = SNIPE_BUY_SLIPPAGE;
         if (!('protection_tip' in json)) json.protection_tip = undefined;
@@ -522,7 +673,7 @@ export abstract class SniperBase implements ISniper {
     private async get_config(keys_cnt: number): Promise<BotConfig> {
         let answers: BotConfig;
         do {
-            let start_buy: number;
+            let min_buy_val: number;
             answers = await inquirer.prompt<BotConfig>([
                 {
                     type: 'input',
@@ -548,27 +699,41 @@ export abstract class SniperBase implements ISniper {
                 },
                 {
                     type: 'input',
-                    name: 'start_buy',
-                    message: 'Enter the start SOL amount that the bot will buy the token for:',
+                    name: 'min_buy',
+                    message: 'Enter the minimum SOL amount per buy:',
                     validate: (value: string) => {
                         if (!common.validate_float(value, SNIPE_MIN_BUY))
                             return `Please enter a valid number greater than or equal to ${SNIPE_MIN_BUY}.`;
-                        start_buy = parseFloat(value);
+                        min_buy_val = parseFloat(value);
                         return true;
                     },
-                    filter: () => start_buy
+                    filter: () => min_buy_val
+                },
+                {
+                    type: 'input',
+                    name: 'max_buy',
+                    message: 'Enter the maximum SOL amount per buy (leave blank to use min_buy):',
+                    default: '',
+                    validate: (value: string) => {
+                        if (value === '') return true;
+                        if (!common.validate_float(value, min_buy_val))
+                            return `Please enter a valid number greater than or equal to min_buy (${min_buy_val}).`;
+                        return true;
+                    },
+                    filter: (value: string) => (value === '' ? undefined : parseFloat(value))
                 },
                 {
                     type: 'input',
                     name: 'spend_limit',
-                    message: 'Enter the limit of Solana that each bot can spend:',
+                    message: 'Enter the total SOL spend limit per bot (leave blank for Infinity):',
+                    default: '',
                     validate: (value: string) => {
-                        if (!common.validate_float(value, SNIPE_MIN_BUY))
-                            return `Please enter a valid number greater than or equal to ${SNIPE_MIN_BUY}.`;
-                        if (parseFloat(value) < start_buy) return 'Spend limit must be greater or equal to start buy.';
+                        if (value === '') return true;
+                        if (!common.validate_float(value, min_buy_val))
+                            return `Please enter a valid number greater than or equal to min_buy (${min_buy_val}).`;
                         return true;
                     },
-                    filter: (value: string) => parseFloat(value)
+                    filter: (value: string) => (value === '' ? Infinity : parseFloat(value))
                 },
                 {
                     type: 'input',
@@ -629,10 +794,10 @@ export abstract class SniperBase implements ISniper {
             ]);
 
             if (!answers.is_buy_once) {
-                const buy_interval = await inquirer.prompt([
+                const trade_interval = await inquirer.prompt([
                     {
                         type: 'input',
-                        name: 'buy_interval',
+                        name: 'trade_interval',
                         message: 'Enter the interval between each buy in seconds:',
                         validate: (value: string) => {
                             if (value === '') return true;
@@ -643,7 +808,7 @@ export abstract class SniperBase implements ISniper {
                         filter: (value: string) => (value === '' ? 0 : parseFloat(value))
                     }
                 ]);
-                answers = { ...answers, ...buy_interval };
+                answers = { ...answers, ...trade_interval };
             }
 
             const MethodStrings = ['Wait', 'Snipe'];
@@ -718,15 +883,16 @@ export abstract class SniperBase implements ISniper {
                     ? 'N/A'
                     : `$${common.format_currency(bot_config.mcap_threshold)}`,
             start_interval: bot_config.start_interval !== 0 ? `${bot_config.start_interval} secs` : 'N/A',
-            buy_interval: bot_config.buy_interval !== 0 ? `${bot_config.buy_interval} secs` : 'N/A',
+            trade_interval: bot_config.trade_interval !== 0 ? `${bot_config.trade_interval} secs` : 'N/A',
             mint: bot_config.mint ? bot_config.mint.toString() : 'N/A',
             token_name: bot_config.token_name ? bot_config.token_name : 'N/A',
             token_ticker: bot_config.token_ticker ? bot_config.token_ticker : 'N/A',
             is_buy_once: bot_config.is_buy_once ? 'Yes' : 'No',
             priority_level: bot_config.priority_level.toString(),
             protection_tip: bot_config.protection_tip ? `${bot_config.protection_tip} SOL` : 'N/A',
-            spend_limit: bot_config.spend_limit ? `${bot_config.spend_limit} SOL` : 'N/A',
-            start_buy: bot_config.start_buy ? `${bot_config.start_buy} SOL` : 'N/A',
+            spend_limit: bot_config.spend_limit === Infinity ? 'N/A' : `${bot_config.spend_limit} SOL`,
+            min_buy: bot_config.min_buy ? `${bot_config.min_buy} SOL` : 'N/A',
+            max_buy: bot_config.max_buy ? `${bot_config.max_buy} SOL` : 'N/A',
             buy_slippage: bot_config.buy_slippage ? `${bot_config.buy_slippage * 100}%` : 'N/A',
             sell_slippage: bot_config.sell_slippage ? `${bot_config.sell_slippage * 100}%` : 'N/A'
         };
@@ -746,30 +912,5 @@ export abstract class SniperBase implements ISniper {
         }
 
         common.print_footer([{ width: common.COLUMN_WIDTHS.parameter }, { width: max_length }]);
-    }
-
-    private update_bot_config(key: string, value: string): void {
-        switch (key) {
-            case 'buy_interval':
-                if (common.validate_float(value, 0)) this.bot_config!.buy_interval = parseFloat(value);
-                else common.error(common.red('Invalid buy interval.'));
-                break;
-            case 'spend_limit':
-                if (common.validate_float(value, SNIPE_MIN_BUY)) this.bot_config!.spend_limit = parseFloat(value);
-                else common.error(common.red('Invalid spend limit.'));
-                break;
-            case 'is_buy_once':
-                if (value !== 'true' && value !== 'false')
-                    common.error(common.red('Invalid value for is_buy_once. Use true or false.'));
-                else this.bot_config!.is_buy_once = value === 'true';
-                break;
-            case 'mcap_threshold':
-                if (common.validate_int(value, SNIPE_MIN_MCAP)) this.bot_config!.mcap_threshold = parseInt(value, 10);
-                else common.error(common.red('Invalid market cap threshold.'));
-                break;
-            default:
-                common.error(common.red('Invalid key.'));
-                break;
-        }
     }
 }

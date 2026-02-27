@@ -13,7 +13,7 @@ import { quote_jupiter, swap_jupiter, swap_jupiter_instructions } from '../commo
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 class GenericMintMeta implements trade.IMintMeta {
-    mint!: PublicKey;
+    mint!: string;
     name: string = 'Unknown';
     symbol: string = 'Unknown';
     total_supply: bigint = BigInt(0);
@@ -51,17 +51,59 @@ class GenericMintMeta implements trade.IMintMeta {
     }
 
     public get mint_pubkey(): PublicKey {
-        return this.mint;
+        return new PublicKey(this.mint);
     }
 
     public get token_program(): PublicKey {
         return new PublicKey(this.token_program_id);
+    }
+
+    public serialize(): trade.SerializedMintMeta {
+        return {
+            token_usd_mc: this.token_usd_mc,
+            mint_pubkey: this.mint_pubkey.toBase58(),
+            token_program: this.token_program.toBase58(),
+            migrated: this.migrated,
+            platform_fee: this.platform_fee,
+            token_name: this.token_name,
+            token_symbol: this.token_symbol,
+            token_mint: this.token_mint,
+
+            mint: this.mint,
+            name: this.name,
+            symbol: this.symbol,
+            total_supply: this.total_supply.toString(),
+            usd_market_cap: this.usd_market_cap,
+            market_cap: this.market_cap,
+            fee: this.fee
+        };
+    }
+
+    public deserialize(data: trade.SerializedMintMeta): GenericMintMeta {
+        return new GenericMintMeta({
+            mint: data.mint as string,
+            name: data.name as string,
+            symbol: data.symbol as string,
+            total_supply: BigInt(data.total_supply as string),
+            usd_market_cap: data.usd_market_cap as number,
+            market_cap: data.market_cap as number,
+            fee: data.fee as number,
+            token_program_id: data.token_program as string
+        });
     }
 }
 
 export class Trader implements trade.IProgramTrader {
     public get_name(): string {
         return common.Program.Generic;
+    }
+
+    public get_lta_addresses(): PublicKey[] {
+        return [];
+    }
+
+    public deserialize_mint_meta(data: trade.SerializedMintMeta): GenericMintMeta {
+        return new GenericMintMeta().deserialize(data);
     }
 
     public async buy_token(
@@ -73,15 +115,8 @@ export class Trader implements trade.IProgramTrader {
         protection_tip?: number
     ): Promise<String> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
-        return await swap_jupiter(
-            sol_token_amount,
-            buyer,
-            SOL_MINT,
-            mint_meta.mint,
-            slippage,
-            priority,
-            protection_tip
-        );
+        const mint = new PublicKey(mint_meta.mint);
+        return await swap_jupiter(sol_token_amount, buyer, SOL_MINT, mint, slippage, priority, protection_tip);
     }
 
     public async buy_token_instructions(
@@ -91,7 +126,8 @@ export class Trader implements trade.IProgramTrader {
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
-        const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint_meta.mint, slippage);
+        const mint = new PublicKey(mint_meta.mint);
+        const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint, slippage);
         return await swap_jupiter_instructions(buyer, quote);
     }
 
@@ -103,7 +139,8 @@ export class Trader implements trade.IProgramTrader {
         priority: PriorityLevel,
         protection_tip?: number
     ): Promise<String> {
-        return await swap_jupiter(token_amount, seller, mint_meta.mint, SOL_MINT, slippage, priority, protection_tip);
+        const mint = new PublicKey(mint_meta.mint);
+        return await swap_jupiter(token_amount, seller, mint, SOL_MINT, slippage, priority, protection_tip);
     }
 
     public async sell_token_instructions(
@@ -112,7 +149,8 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: GenericMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        const quote = await quote_jupiter(token_amount, mint_meta.mint, SOL_MINT, slippage);
+        const mint = new PublicKey(mint_meta.mint);
+        const quote = await quote_jupiter(token_amount, mint, SOL_MINT, slippage);
         return await swap_jupiter_instructions(seller, quote);
     }
 
@@ -123,7 +161,8 @@ export class Trader implements trade.IProgramTrader {
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
-        const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint_meta.mint, slippage);
+        const mint = new PublicKey(mint_meta.mint);
+        const quote = await quote_jupiter(sol_token_amount, SOL_MINT, mint, slippage);
         let [buy_instructions, ltas] = await swap_jupiter_instructions(trader, quote);
         let [sell_instructions] = await this.sell_token_instructions(
             {
@@ -232,7 +271,8 @@ export class Trader implements trade.IProgramTrader {
     }
 
     public async update_mint_meta(mint_meta: GenericMintMeta, sol_price: number = 0.0): Promise<GenericMintMeta> {
-        return this.default_mint_meta(mint_meta.mint, sol_price);
+        const mint = new PublicKey(mint_meta.mint);
+        return this.default_mint_meta(mint, sol_price);
     }
 
     public async default_mint_meta(mint: PublicKey, sol_price: number = 0.0): Promise<GenericMintMeta> {
@@ -250,7 +290,7 @@ export class Trader implements trade.IProgramTrader {
         const usd_market_cap = meta.price_per_token * (meta.token_supply / 10 ** meta.token_decimal);
         const market_cap = sol_price ? usd_market_cap / sol_price : 0;
         return new GenericMintMeta({
-            mint,
+            mint: mint.toString(),
             name: meta.token_name,
             symbol: meta.token_symbol,
             total_supply: BigInt(meta.token_supply),
@@ -258,6 +298,13 @@ export class Trader implements trade.IProgramTrader {
             market_cap,
             token_program_id: meta.token_program.toString()
         });
+    }
+
+    public async subscribe_mint_meta(
+        _mint_meta: GenericMintMeta,
+        _callback: (mint_meta: GenericMintMeta) => void
+    ): Promise<() => void> {
+        return () => {};
     }
 
     public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {

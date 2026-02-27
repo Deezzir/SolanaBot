@@ -158,3 +158,5 @@ configs
 .DS_Store
 
 src/test*
+
+.github

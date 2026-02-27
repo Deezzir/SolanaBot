@@ -48,8 +48,8 @@ export class MeteoraMintMeta implements trade.IMintMeta {
     token_reserves: bigint = 0n;
     total_supply: bigint = 0n;
     usd_market_cap: number = 0;
-    complete: boolean = false;
     market_cap: number = 0;
+    complete: boolean = false;
     token_decimal: number = 9;
     fee: number = 0;
     token_program_id!: string;
@@ -93,6 +93,57 @@ export class MeteoraMintMeta implements trade.IMintMeta {
 
     public get token_program(): PublicKey {
         return new PublicKey(this.token_program_id);
+    }
+
+    public serialize(): trade.SerializedMintMeta {
+        return {
+            token_usd_mc: this.token_usd_mc,
+            mint_pubkey: this.mint_pubkey.toBase58(),
+            token_program: this.token_program.toBase58(),
+            migrated: this.migrated,
+            platform_fee: this.platform_fee,
+            token_name: this.token_name,
+            token_symbol: this.token_symbol,
+            token_mint: this.token_mint,
+
+            mint: this.mint,
+            name: this.name,
+            symbol: this.symbol,
+            pool: this.pool,
+            sol_reserves: this.sol_reserves.toString(),
+            token_reserves: this.token_reserves.toString(),
+            total_supply: this.total_supply.toString(),
+            complete: this.complete,
+            usd_market_cap: this.usd_market_cap,
+            market_cap: this.market_cap,
+            token_decimal: this.token_decimal,
+            fee: this.fee,
+            token_program_id: this.token_program_id,
+            dbc_data: this.dbc_data,
+            damm_v1_data: this.damm_v1_data,
+            damm_v2_data: this.damm_v2_data
+        };
+    }
+
+    public static deserialize(data: trade.SerializedMintMeta): MeteoraMintMeta {
+        return new MeteoraMintMeta({
+            mint: data.mint as string,
+            name: data.name as string,
+            symbol: data.symbol as string,
+            pool: data.pool as string,
+            sol_reserves: BigInt(data.sol_reserves as string),
+            token_reserves: BigInt(data.token_reserves as string),
+            total_supply: BigInt(data.total_supply as string),
+            complete: data.complete as boolean,
+            usd_market_cap: data.usd_market_cap as number,
+            market_cap: data.market_cap as number,
+            token_decimal: data.token_decimal as number,
+            fee: data.fee as number,
+            token_program_id: data.token_program_id as string,
+            dbc_data: data.dbc_data as DBCData,
+            damm_v1_data: data.damm_v1_data as DAMMV1Data,
+            damm_v2_data: data.damm_v2_data as DAMMV2Data
+        });
     }
 }
 
@@ -234,6 +285,14 @@ type DBCData = {
 export class Trader implements trade.IProgramTrader {
     public get_name(): string {
         return common.Program.Meteora;
+    }
+
+    public get_lta_addresses(): PublicKey[] {
+        return [METEORA_LTA_ACCOUNT];
+    }
+
+    public deserialize_mint_meta(data: trade.SerializedMintMeta): MeteoraMintMeta {
+        return MeteoraMintMeta.deserialize(data);
     }
 
     public async buy_token(
@@ -401,6 +460,13 @@ export class Trader implements trade.IProgramTrader {
             console.error(`Error fetching mint meta: ${error}`);
             return undefined;
         }
+    }
+
+    public async subscribe_mint_meta(
+        _mint_meta: MeteoraMintMeta,
+        _callback: (mint_meta: MeteoraMintMeta) => void
+    ): Promise<() => void> {
+        throw new Error('Not implemented');
     }
 
     public async update_mint_meta(mint_meta: MeteoraMintMeta, sol_price: number = 0): Promise<MeteoraMintMeta> {

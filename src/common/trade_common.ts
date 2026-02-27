@@ -20,7 +20,6 @@ import {
     PartiallyDecodedInstruction
 } from '@solana/web3.js';
 import {
-    ASSOCIATED_TOKEN_PROGRAM_ID,
     AccountLayout,
     TOKEN_2022_PROGRAM_ID,
     TOKEN_PROGRAM_ID,
@@ -48,13 +47,25 @@ import {
     SENDER_TIP_ACCOUNTS,
     SYSTEM_PROGRAM_ID,
     COMPUTE_BUDGET_PROGRAM_ID,
-    MAYHEM_PROGRAM_ID,
-    MAYHEM_STATE_SEED,
-    MAYHEM_SOL_VAULT
+    PRIORITY_FEE_TTL_MS,
+    CACHE_SIZE_MAX,
+    ACCOUNT_READ_CACHE_TTL_MS
 } from '../constants';
 import * as common from './common';
 import bs58 from 'bs58';
 import { SendSmartTransactionOptions } from 'helius-sdk';
+
+export type SerializedMintMeta = {
+    token_usd_mc: number;
+    mint_pubkey: string;
+    token_program: string;
+    migrated: boolean;
+    platform_fee: number;
+    token_name: string;
+    token_symbol: string;
+    token_mint: string;
+    [key: string]: unknown;
+};
 
 export interface IMintMeta {
     readonly token_name: string;
@@ -65,10 +76,14 @@ export interface IMintMeta {
     readonly platform_fee: number;
     readonly mint_pubkey: PublicKey;
     readonly token_program: PublicKey;
+
+    serialize(): SerializedMintMeta;
 }
 
 export interface IProgramTrader {
     get_name(): string;
+    get_lta_addresses(): PublicKey[];
+    deserialize_mint_meta(data: SerializedMintMeta): IMintMeta;
     buy_token(
         sol_amount: number,
         buyer: Signer,
@@ -136,6 +151,7 @@ export interface IProgramTrader {
     get_random_mints(count: number): Promise<IMintMeta[]>;
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
     update_mint_meta(mint_meta: IMintMeta, sol_price?: number): Promise<IMintMeta>;
+    subscribe_mint_meta(mint_meta: IMintMeta, callback: (mint_meta: IMintMeta) => void): Promise<() => void>;
     update_mint_meta_reserves(mint_meta: IMintMeta, amount: number | TokenAmount): IMintMeta;
     default_mint_meta(mint: PublicKey, sol_price?: number, data?: object): Promise<IMintMeta>;
 }
@@ -181,15 +197,6 @@ export type CostBasis = {
     total_tokens: number;
     total_fees: number;
 };
-
-export function calc_mayhem_state(mint: PublicKey): [PublicKey, PublicKey] {
-    const [state] = PublicKey.findProgramAddressSync([MAYHEM_STATE_SEED, mint.toBuffer()], MAYHEM_PROGRAM_ID);
-    const [token_vault] = PublicKey.findProgramAddressSync(
-        [MAYHEM_SOL_VAULT.toBuffer(), TOKEN_2022_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-        ASSOCIATED_TOKEN_PROGRAM_ID
-    );
-    return [state, token_vault];
-}
 
 export async function retry_get_tx(
     signature: string,
@@ -373,22 +380,69 @@ export async function get_cost_basis(
         total_fees
     };
 }
-
+const token_supply_cache = new Map<string, { value: { supply: bigint; decimals: number }; expires_at: number }>();
+const token_supply_inflight = new Map<string, Promise<{ supply: bigint; decimals: number }>>();
 export async function get_token_supply(mint: PublicKey): Promise<{ supply: bigint; decimals: number }> {
-    try {
-        const mint_data = await getMint(global.CONNECTION, mint, COMMITMENT);
-        return { supply: mint_data.supply, decimals: mint_data.decimals };
-    } catch (err) {
-        return {
-            supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_TOKEN_DECIMALS),
-            decimals: TRADE_DEFAULT_TOKEN_DECIMALS
-        };
-    }
+    const key = mint.toBase58();
+    const now = Date.now();
+
+    cleanup_ttl_cache(token_supply_cache, now);
+
+    const cached = token_supply_cache.get(key);
+    if (cached && cached.expires_at > now) return cached.value;
+    if (cached) token_supply_cache.delete(key);
+
+    const in_flight = token_supply_inflight.get(key);
+    if (in_flight) return in_flight;
+
+    const fetch_promise = (async (): Promise<{ supply: bigint; decimals: number }> => {
+        try {
+            const mint_data = await getMint(global.CONNECTION, mint, COMMITMENT);
+            const value = { supply: mint_data.supply, decimals: mint_data.decimals };
+            token_supply_cache.set(key, { value, expires_at: Date.now() + ACCOUNT_READ_CACHE_TTL_MS });
+            return value;
+        } catch (err) {
+            const value = {
+                supply: BigInt(1_000_000_000 * 10 ** TRADE_DEFAULT_TOKEN_DECIMALS),
+                decimals: TRADE_DEFAULT_TOKEN_DECIMALS
+            };
+            token_supply_cache.set(key, { value, expires_at: Date.now() + ACCOUNT_READ_CACHE_TTL_MS });
+            return value;
+        }
+    })().finally(() => {
+        token_supply_inflight.delete(key);
+    });
+
+    token_supply_inflight.set(key, fetch_promise);
+    return fetch_promise;
 }
 
+const vault_balance_cache = new Map<string, { value: { balance: bigint; decimals: number }; expires_at: number }>();
+const vault_balance_inflight = new Map<string, Promise<{ balance: bigint; decimals: number }>>();
 export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bigint; decimals: number }> {
-    const balance = await global.CONNECTION.getTokenAccountBalance(vault);
-    return { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
+    const key = vault.toBase58();
+    const now = Date.now();
+
+    cleanup_ttl_cache(vault_balance_cache, now);
+
+    const cached = vault_balance_cache.get(key);
+    if (cached && cached.expires_at > now) return cached.value;
+    if (cached) vault_balance_cache.delete(key);
+
+    const in_flight = vault_balance_inflight.get(key);
+    if (in_flight) return in_flight;
+
+    const fetch_promise = (async (): Promise<{ balance: bigint; decimals: number }> => {
+        const balance = await global.CONNECTION.getTokenAccountBalance(vault);
+        const value = { balance: BigInt(balance.value.amount), decimals: balance.value.decimals };
+        vault_balance_cache.set(key, { value, expires_at: Date.now() + ACCOUNT_READ_CACHE_TTL_MS });
+        return value;
+    })().finally(() => {
+        vault_balance_inflight.delete(key);
+    });
+
+    vault_balance_inflight.set(key, fetch_promise);
+    return fetch_promise;
 }
 
 export async function get_balance(pubkey: PublicKey, commitment: Commitment = 'finalized'): Promise<number> {
@@ -466,6 +520,13 @@ function create_versioned_tx(
     );
     versioned_tx.sign(signers);
     return versioned_tx;
+}
+
+function cleanup_ttl_cache<T>(cache: Map<string, { value: T; expires_at: number }>, now: number): void {
+    if (cache.size <= CACHE_SIZE_MAX) return;
+    for (const [key, item] of cache.entries()) {
+        if (item.expires_at <= now) cache.delete(key);
+    }
 }
 
 async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
@@ -695,28 +756,61 @@ async function check_transaction_status(
     }
 }
 
+const priority_cache = new Map<string, { value: number; expires_at: number }>();
+const priority_cache_inflight = new Map<string, Promise<number>>();
 async function get_priority_fee(priority_opts: PriorityOptions): Promise<number> {
-    let encoded_tx: string | undefined;
+    const get_priority_cache_key = (priority_opts: PriorityOptions): string => {
+        const priority = (priority_opts.priority_level || 'recommended').toLowerCase();
+        const tx_shape = priority_opts.transaction
+            ? priority_opts.transaction.instructions.map((ix) => `${ix.programId.toBase58()}`).join('|')
+            : 'none';
+        return `${priority}::${tx_shape}`;
+    };
 
-    if (priority_opts.transaction) {
-        const { blockhash, lastValidBlockHeight } = await global.CONNECTION.getLatestBlockhash(COMMITMENT);
-        const tx = new Transaction({
-            blockhash: blockhash,
-            lastValidBlockHeight: lastValidBlockHeight,
-            feePayer: priority_opts.transaction.signers[0].publicKey
-        }).add(...priority_opts.transaction.instructions);
-        encoded_tx = bs58.encode(tx.serialize({ verifySignatures: false, requireAllSignatures: false }));
-    }
+    if (!priority_opts.transaction)
+        throw new Error(`Transaction instructions and signers are required to get priority fee estimate.`);
 
-    const response = await global.HELIUS_CONNECTION.rpc.getPriorityFeeEstimate({
-        transaction: encoded_tx,
-        accountKeys: priority_opts.accounts,
-        options: {
-            priorityLevel: priority_opts.priority_level,
-            recommended: priority_opts.priority_level === undefined ? true : undefined
+    const now = Date.now();
+    cleanup_ttl_cache(priority_cache, now);
+
+    const cache_key = get_priority_cache_key(priority_opts);
+    const cached = priority_cache.get(cache_key);
+    if (cached && cached.expires_at > now) return cached.value;
+    if (cached) priority_cache.delete(cache_key);
+
+    const in_flight = priority_cache_inflight.get(cache_key);
+    if (in_flight) return in_flight;
+
+    const fetch_priority_fee = (async () => {
+        let encoded_tx: string | undefined;
+        if (priority_opts.transaction) {
+            const { blockhash, lastValidBlockHeight } = await global.CONNECTION.getLatestBlockhash(COMMITMENT);
+            const tx = new Transaction({
+                blockhash: blockhash,
+                lastValidBlockHeight: lastValidBlockHeight,
+                feePayer: priority_opts.transaction.signers[0].publicKey
+            }).add(...priority_opts.transaction.instructions);
+            encoded_tx = bs58.encode(tx.serialize({ verifySignatures: false, requireAllSignatures: false }));
         }
+
+        const response = await global.HELIUS_CONNECTION.rpc.getPriorityFeeEstimate({
+            transaction: encoded_tx,
+            accountKeys: priority_opts.accounts,
+            options: {
+                priorityLevel: priority_opts.priority_level,
+                recommended: priority_opts.priority_level === undefined ? true : undefined
+            }
+        });
+
+        const fee = Math.floor(response.priorityFeeEstimate || 0);
+        priority_cache.set(cache_key, { value: fee, expires_at: Date.now() + PRIORITY_FEE_TTL_MS });
+        return fee;
+    })().finally(() => {
+        priority_cache_inflight.delete(cache_key);
     });
-    return Math.floor(response.priorityFeeEstimate || 0);
+
+    priority_cache_inflight.set(cache_key, fetch_priority_fee);
+    return fetch_priority_fee;
 }
 
 async function send_smart_tx(

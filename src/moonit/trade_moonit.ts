@@ -12,57 +12,12 @@ import * as common from '../common/common';
 import { swap_raydium_instructions } from '../common/trade_dex';
 
 class MoonshotMintMeta implements trade.IMintMeta {
-    url: string = '';
-    chainId: string = '';
-    dexId: string = '';
-    pairAddress: string = '';
-    baseToken: {
-        address: string;
-        name: string;
-        symbol: string;
-    } = {
-        address: '',
-        name: '',
-        symbol: ''
-    };
-    priceNative: string = '';
-    priceUsd: string = '';
-    quoteToken: {
-        address: string;
-        name: string;
-        symbol: string;
-    } = {
-        address: '',
-        name: '',
-        symbol: ''
-    };
-    profile: {
-        icon: string;
-        banner: string;
-        links: string[];
-        description: string;
-    } = {
-        icon: '',
-        banner: '',
-        links: [],
-        description: ''
-    };
-    fdv: number = 0;
-    marketCap: number = 0;
-    createdAt: number = Date.now();
-    moonshot: {
-        progress: number;
-        creator: number;
-        curveType: string;
-        curvePosition: string;
-        marketcapThreshold: string;
-    } = {
-        progress: 0,
-        creator: 0,
-        curveType: '',
-        curvePosition: '',
-        marketcapThreshold: ''
-    };
+    mint!: string;
+    name!: string;
+    symbol!: string;
+    usd_market_cap: number = 0;
+    market_cap: number = 0;
+    complete: boolean = false;
     fee: number = TRADE_RAYDIUM_SWAP_TAX;
     token_program_id!: string;
 
@@ -71,23 +26,23 @@ class MoonshotMintMeta implements trade.IMintMeta {
     }
 
     public get token_name(): string {
-        return this.baseToken.name;
+        return this.name;
     }
 
     public get token_mint(): string {
-        return this.baseToken.address;
+        return this.mint;
     }
 
     public get token_symbol(): string {
-        return this.baseToken.symbol;
+        return this.symbol;
     }
 
     public get token_usd_mc(): number {
-        return this.marketCap;
+        return this.usd_market_cap;
     }
 
     public get migrated(): boolean {
-        return this.dexId && this.dexId !== '' ? true : false;
+        return this.complete;
     }
 
     public get platform_fee(): number {
@@ -95,30 +50,60 @@ class MoonshotMintMeta implements trade.IMintMeta {
     }
 
     public get mint_pubkey(): PublicKey {
-        return new PublicKey(this.baseToken.address);
+        return new PublicKey(this.mint);
     }
 
     public get token_program(): PublicKey {
         return new PublicKey(this.token_program_id);
     }
-}
 
-function isMoonMeta(obj: any): obj is MoonshotMintMeta {
-    return (
-        typeof obj === 'object' &&
-        obj !== null &&
-        typeof obj.moonshot === 'object' &&
-        typeof obj.chainId === 'string' &&
-        typeof obj.pairAddress === 'string' &&
-        typeof obj.dexId === 'string' &&
-        typeof obj.baseToken === 'object' &&
-        typeof obj.marketCap === 'number'
-    );
+    public serialize(): trade.SerializedMintMeta {
+        return {
+            token_usd_mc: this.token_usd_mc,
+            mint_pubkey: this.mint_pubkey.toBase58(),
+            token_program: this.token_program.toBase58(),
+            migrated: this.migrated,
+            platform_fee: this.platform_fee,
+            token_name: this.token_name,
+            token_symbol: this.token_symbol,
+            token_mint: this.token_mint,
+
+            mint: this.mint,
+            name: this.name,
+            symbol: this.symbol,
+            usd_market_cap: this.usd_market_cap,
+            market_cap: this.market_cap,
+            complete: this.complete,
+            fee: this.fee,
+            token_program_id: this.token_program_id
+        };
+    }
+
+    public static deserialize(data: trade.SerializedMintMeta): MoonshotMintMeta {
+        return new MoonshotMintMeta({
+            mint: data.mint as string,
+            name: data.name as string,
+            symbol: data.symbol as string,
+            usd_market_cap: data.usd_market_cap as number,
+            market_cap: data.market_cap as number,
+            complete: data.complete as boolean,
+            fee: data.fee as number,
+            token_program_id: data.token_program_id as string
+        });
+    }
 }
 
 export class Trader implements trade.IProgramTrader {
     public get_name(): string {
         return common.Program.Moonit;
+    }
+
+    public get_lta_addresses(): PublicKey[] {
+        return [];
+    }
+
+    public deserialize_mint_meta(data: trade.SerializedMintMeta): MoonshotMintMeta {
+        return MoonshotMintMeta.deserialize(data);
     }
 
     public async buy_token(
@@ -180,7 +165,7 @@ export class Trader implements trade.IProgramTrader {
         if (!amm) {
             return this.get_sell_token_instructions(token_amount, seller, mint_meta, slippage);
         } else {
-            const mint = new PublicKey(mint_meta.baseToken.address);
+            const mint = new PublicKey(mint_meta.mint);
             return swap_raydium_instructions(token_amount, seller, amm, mint, slippage);
         }
     }
@@ -217,16 +202,8 @@ export class Trader implements trade.IProgramTrader {
         throw new Error('Not implemented');
     }
 
-    public async get_mint_meta(mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta | undefined> {
-        return fetch(`https://api.moonshot.cc/token/v1/solana/${mint.toString()}`)
-            .then((response) => response.json())
-            .then((data) => {
-                if (!data || data.statusCode !== undefined || data.error || !isMoonMeta(data)) return;
-                return new MoonshotMintMeta(data);
-            })
-            .catch(() => {
-                return undefined;
-            });
+    public async get_mint_meta(_mint: PublicKey, _sol_price: number): Promise<MoonshotMintMeta | undefined> {
+        throw new Error('Not Implemented');
     }
 
     public async get_random_mints(_count: number): Promise<MoonshotMintMeta[]> {
@@ -263,31 +240,32 @@ export class Trader implements trade.IProgramTrader {
         throw new Error('Not Implemented');
     }
 
-    private get_raydium_amm(mint_meta: MoonshotMintMeta): PublicKey | undefined {
-        if (mint_meta.dexId === 'raydium') return new PublicKey(mint_meta.pairAddress);
+    public async subscribe_mint_meta(
+        _mint_meta: MoonshotMintMeta,
+        _callback: (mint_meta: MoonshotMintMeta) => void
+    ): Promise<() => void> {
+        throw new Error('Not implemented');
+    }
+
+    private get_raydium_amm(_mint_meta: MoonshotMintMeta): PublicKey | undefined {
+        throw new Error('Not Implemented');
     }
 
     private async get_sell_token_instructions(
         _token_amount: TokenAmount,
         _seller: Signer,
-        mint_meta: Partial<MoonshotMintMeta>,
+        _mint_meta: Partial<MoonshotMintMeta>,
         _slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
         throw new Error('Not Implemented');
     }
 
     private async get_buy_token_instructions(
         _sol_amount: number,
         _buyer: Signer,
-        mint_meta: Partial<MoonshotMintMeta>,
+        _mint_meta: Partial<MoonshotMintMeta>,
         _slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        if (!mint_meta.baseToken || !mint_meta.baseToken.address || !mint_meta.priceNative) {
-            throw new Error(`Failed to get the mint meta.`);
-        }
         throw new Error('Not Implemented');
     }
 }

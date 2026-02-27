@@ -199,11 +199,72 @@ class BonkMintMeta implements trade.IMintMeta {
     public get token_program(): PublicKey {
         return new PublicKey(this.token_program_id);
     }
+
+    public serialize(): trade.SerializedMintMeta {
+        return {
+            token_usd_mc: this.token_usd_mc,
+            mint_pubkey: this.mint_pubkey.toBase58(),
+            token_program: this.token_program.toBase58(),
+            migrated: this.migrated,
+            platform_fee: this.platform_fee,
+            token_name: this.token_name,
+            token_symbol: this.token_symbol,
+            token_mint: this.token_mint,
+
+            mint: this.mint,
+            name: this.name,
+            symbol: this.symbol,
+            base_vault: this.base_vault,
+            quote_vault: this.quote_vault,
+            pool: this.pool,
+            config: this.config,
+            creator: this.creator,
+            sol_reserves: this.sol_reserves.toString(),
+            token_reserves: this.token_reserves.toString(),
+            total_supply: this.total_supply.toString(),
+            usd_market_cap: this.usd_market_cap,
+            market_cap: this.market_cap,
+            complete: this.complete,
+            observation_state: this.observation_state,
+            fee: this.fee,
+            token_program_id: this.token_program_id
+        };
+    }
+
+    public static deserialize(data: trade.SerializedMintMeta): BonkMintMeta {
+        return new BonkMintMeta({
+            mint: data.mint as string,
+            name: data.name as string,
+            symbol: data.symbol as string,
+            base_vault: data.base_vault as string,
+            quote_vault: data.quote_vault as string,
+            pool: data.pool as string,
+            config: data.config as string,
+            creator: data.creator as string,
+            sol_reserves: BigInt(data.sol_reserves as string),
+            token_reserves: BigInt(data.token_reserves as string),
+            total_supply: BigInt(data.total_supply as string),
+            usd_market_cap: data.usd_market_cap as number,
+            market_cap: data.market_cap as number,
+            complete: data.complete as boolean,
+            observation_state: data.observation_state as string | null,
+            fee: data.fee as number,
+            token_program_id: data.token_program_id as string
+        });
+    }
 }
 
 export class Trader implements trade.IProgramTrader {
     public get_name(): string {
         return common.Program.Bonk;
+    }
+
+    public get_lta_addresses(): PublicKey[] {
+        return [RAYDIUM_LTA_ACCOUNT];
+    }
+
+    public deserialize_mint_meta(data: trade.SerializedMintMeta): BonkMintMeta {
+        return BonkMintMeta.deserialize(data);
     }
 
     public async buy_token(
@@ -444,6 +505,13 @@ export class Trader implements trade.IProgramTrader {
             return mint_meta;
         }
         throw new Error(`Invalid amount type: ${typeof amount}`);
+    }
+
+    public async subscribe_mint_meta(
+        _mint_meta: BonkMintMeta,
+        _callback: (mint_meta: BonkMintMeta) => void
+    ): Promise<() => void> {
+        throw new Error('Not implemented');
     }
 
     public async update_mint_meta(mint_meta: BonkMintMeta, sol_price: number = 0.0): Promise<BonkMintMeta> {
