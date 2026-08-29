@@ -16,7 +16,7 @@ function create_rate_limiter(
         let now: bigint;
         let next: bigint;
         do {
-            now = process.hrtime.bigint() / 1000n;
+            now = BigInt(Date.now()) * 1000n;
             next = Atomics.load(next_start_us, 0);
             start_at = next > now ? next : now;
         } while (Atomics.compareExchange(next_start_us, 0, next, start_at + interval_us) !== next);

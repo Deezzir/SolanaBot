@@ -1,6 +1,7 @@
 import {
     AccountInfo,
     AddressLookupTableAccount,
+    Commitment,
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
@@ -13,6 +14,7 @@ import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import {
     ASSOCIATED_TOKEN_PROGRAM_ID,
+    AccountLayout,
     createAssociatedTokenAccountIdempotentInstruction,
     createCloseAccountInstruction,
     createSyncNativeInstruction,
@@ -73,16 +75,18 @@ import {
     PUMP_POOL_AUTHORITY_SEED,
     PUMP_SHARING_CONFIG_SEED,
     MAYHEM_STATE_SEED,
-    ACCOUNT_SUBSCRIPTION_FLUSH_MS,
     PUMP_COLLECT_CREATOR_FEE_DISCRIMINATOR,
     PUMP_AMM_COLLECT_CREATOR_FEE_DISCRIMINATOR,
     PUMP_CLAIM_CASHBACK_DISCRIMINATOR,
-    PUMP_CLAIM_TOKEN_INCENTIVES_DISCRIMINATOR
+    PUMP_CLAIM_TOKEN_INCENTIVES_DISCRIMINATOR,
+    PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import base58 from 'bs58';
 import { define_decoder_struct, skip, u8, u64, i128, discriminator, pubkey, u16, bool } from '../common/struct_decoder';
+
+const PUMP_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Pump];
 
 class PumpMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -532,7 +536,15 @@ export class Trader implements trade.IProgramTrader {
         }
 
         if (instructions.length === 0) throw new Error('Invalid assets were provided, no tx was derived');
-        return await trade.send_tx(instructions, [trader], priority);
+        return await trade.send_tx(
+            instructions,
+            [trader],
+            priority,
+            undefined,
+            false,
+            undefined,
+            PUMP_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async buy_token(
@@ -541,10 +553,19 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const [instructions, ltas] = await this.buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
-        return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
+        return await trade.send_tx(
+            instructions,
+            [buyer],
+            priority,
+            protection_tip,
+            mev_protect,
+            ltas,
+            PUMP_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async buy_token_instructions(
@@ -568,10 +589,19 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: PumpMintMeta,
         slippage: number = 0.05,
         priority: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const [instructions, ltas] = await this.sell_token_instructions(token_amount, seller, mint_meta, slippage);
-        return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
+        return await trade.send_tx(
+            instructions,
+            [seller],
+            priority,
+            protection_tip,
+            mev_protect,
+            ltas,
+            PUMP_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async sell_token_instructions(
@@ -650,8 +680,12 @@ export class Trader implements trade.IProgramTrader {
 
         if ((traders && !bundle_tip) || (!traders && bundle_tip))
             throw new Error(`Invalid parameters: traders and bundle_tip must be set together`);
-        if (traders && (traders.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE || traders.length < 1))
-            throw new Error(`Invalid parameters: traders must be less than ${TRADE_MAX_WALLETS_PER_CREATE_BUNDLE}`);
+        const max_bundle_wallets = Math.min(
+            TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+            (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
+        );
+        if (traders && (traders.length > max_bundle_wallets || traders.length < 1))
+            throw new Error(`Invalid parameters: traders must be less than ${max_bundle_wallets}`);
         if (config) {
             if ('version' in config) {
                 if (typeof config.version !== 'number' || config.version < 1 || config.version > 2) {
@@ -703,7 +737,16 @@ export class Trader implements trade.IProgramTrader {
         }
 
         const ltas = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
-        if (!traders) return await trade.retry_send_tx(create_instructions, [creator, mint], priority, undefined, ltas);
+        if (!traders)
+            return await trade.retry_send_tx(
+                create_instructions,
+                [creator, mint],
+                priority,
+                undefined,
+                false,
+                ltas,
+                PUMP_COMPUTE_UNIT_LIMIT
+            );
 
         const generated_lta = await trade.generate_trade_lta(
             creator,
@@ -711,7 +754,7 @@ export class Trader implements trade.IProgramTrader {
             mint.publicKey
         );
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        const chunk_size = traders.length <= 4 ? 1 : TRADE_MAX_WALLETS_PER_CREATE_TX;
+        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
         const txs = common.chunks(traders, chunk_size);
         const buy_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
@@ -730,7 +773,8 @@ export class Trader implements trade.IProgramTrader {
             [[creator, mint], ...bundle_signers],
             bundle_tip!,
             priority,
-            [generated_lta, ...ltas]
+            [generated_lta, ...ltas],
+            PUMP_COMPUTE_UNIT_LIMIT
         );
     }
 
@@ -817,7 +861,14 @@ export class Trader implements trade.IProgramTrader {
             mint_meta,
             slippage
         );
-        return await trade.send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip, priority, lta);
+        return await trade.send_bundle(
+            [buy_instructions, sell_instructions],
+            [[trader], [trader]],
+            tip,
+            priority,
+            lta,
+            PUMP_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async buy_sell(
@@ -827,7 +878,8 @@ export class Trader implements trade.IProgramTrader {
         slippage: number = 0.05,
         interval_ms?: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<[String, String]> {
         const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
@@ -837,14 +889,24 @@ export class Trader implements trade.IProgramTrader {
         );
 
         if (interval_ms && interval_ms > 0) {
-            const buy_signature = await trade.send_tx(buy_instructions, [trader], priority, protection_tip, ltas);
+            const buy_signature = await trade.send_tx(
+                buy_instructions,
+                [trader],
+                priority,
+                protection_tip,
+                mev_protect,
+                ltas,
+                PUMP_COMPUTE_UNIT_LIMIT
+            );
             await common.sleep(interval_ms);
             const sell_signature = await trade.retry_send_tx(
                 sell_instructions,
                 [trader],
                 priority,
                 protection_tip,
-                ltas
+                mev_protect,
+                ltas,
+                PUMP_COMPUTE_UNIT_LIMIT
             );
             return [buy_signature, sell_signature];
         }
@@ -854,7 +916,9 @@ export class Trader implements trade.IProgramTrader {
             [trader],
             priority,
             protection_tip,
-            ltas
+            mev_protect,
+            ltas,
+            PUMP_COMPUTE_UNIT_LIMIT
         );
         return [signature, signature];
     }
@@ -940,89 +1004,134 @@ export class Trader implements trade.IProgramTrader {
     public async subscribe_mint_meta(
         mint_meta: PumpMintMeta,
         callback: (mint_meta: PumpMintMeta) => void,
-        sol_price: number = 0
+        sol_price: number = 0,
+        commitment: Commitment = COMMITMENT
     ): Promise<() => void> {
         const mint = new PublicKey(mint_meta.mint);
         const bonding_curve = new PublicKey(mint_meta.base_vault);
-
         let bonding_sub_id: number | undefined;
-        let amm_sub_id: number | undefined;
-        let flush_timeout: NodeJS.Timeout | null = null;
-        let latest_update: PumpMintMeta | null = null;
+        let amm_state_sub_id: number | undefined;
+        let base_vault_sub_id: number | undefined;
+        let quote_vault_sub_id: number | undefined;
         let stopped = false;
         let switched_to_amm = false;
+        let current_mint_meta = mint_meta;
+        let latest_slot = 0;
+        let amm_state: ReturnType<typeof AMMStateStruct.decode> | null = null;
+        let base_vault_balance: bigint | null = null;
+        let quote_vault_balance: bigint | null = null;
+        let base_vault_slot = 0;
+        let quote_vault_slot = 0;
+        let vaults_started = false;
+        let amm_pool_address = current_mint_meta.amm_pool;
 
-        const schedule_flush = () => {
-            if (flush_timeout || stopped) return;
-            flush_timeout = setTimeout(() => {
-                flush_timeout = null;
-                if (!latest_update || stopped) return;
-                const update = latest_update;
-                latest_update = null;
-                callback(update);
-            }, ACCOUNT_SUBSCRIPTION_FLUSH_MS);
+        const publish = (update: PumpMintMeta, slot: number = 0) => {
+            if (stopped || (slot && slot < latest_slot)) return;
+            if (slot) latest_slot = slot;
+            current_mint_meta = update;
+            callback(update);
         };
 
-        const publish = (update: PumpMintMeta) => {
-            latest_update = update;
-            schedule_flush();
+        const unsubscribe = (id: number | undefined) => {
+            if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => {});
         };
 
-        const unsub_bonding = () => {
-            if (bonding_sub_id == null) return;
-            global.CONNECTION.removeAccountChangeListener(bonding_sub_id).catch(() =>
-                common.error(`Failed to unsubscribe from Pump Bonding Curve updates`)
-            );
-            bonding_sub_id = undefined;
-        };
-
-        const unsub_amm = () => {
-            if (amm_sub_id == null) return;
-            global.CONNECTION.removeAccountChangeListener(amm_sub_id).catch(() =>
-                common.error(`Failed to unsubscribe from Pump AMM Pool updates`)
-            );
-            amm_sub_id = undefined;
-        };
-
-        const process_amm_update = async (info: AccountInfo<Buffer>) => {
-            if (stopped || !info?.data) return;
-
-            const state = AMMStateStruct.decode(info.data);
-            const [base_vault_balance, quote_vault_balance, supply] = await Promise.all([
-                trade.get_vault_balance(state.base_vault),
-                trade.get_vault_balance(state.quote_vault),
-                trade.get_token_supply(state.base_mint)
-            ]);
-
+        const publish_amm = (slot: number = 0) => {
+            if (
+                !amm_state ||
+                base_vault_balance === null ||
+                quote_vault_balance === null ||
+                base_vault_slot !== quote_vault_slot
+            )
+                return;
+            const state = amm_state;
             const metrics = this.get_token_metrics(
-                quote_vault_balance.balance + state.virtual_quote_reserves,
-                base_vault_balance.balance,
-                supply.supply
+                quote_vault_balance + state.virtual_quote_reserves,
+                base_vault_balance,
+                current_mint_meta.total_supply
             );
             const [creator_vault, creator_vault_ata] = this.calc_amm_creator_vault(state.creator);
 
             publish(
                 new PumpMintMeta({
-                    ...mint_meta,
+                    ...current_mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
                     market_cap: metrics.mcap_sol,
-                    total_supply: supply.supply,
+                    amm_pool: amm_pool_address,
                     base_vault: state.base_vault.toString(),
                     quote_vault: state.quote_vault.toString(),
-                    sol_reserves: quote_vault_balance.balance + state.virtual_quote_reserves,
-                    token_reserves: base_vault_balance.balance,
+                    sol_reserves: quote_vault_balance + state.virtual_quote_reserves,
+                    token_reserves: base_vault_balance,
                     complete: true,
                     fee: PUMP_SWAP_PERCENTAGE,
                     creator_vault: creator_vault.toString(),
                     creator_vault_ata: creator_vault_ata.toString(),
                     is_mayhem: state.is_mayhem,
                     is_cashback: state.is_cashback
-                })
+                }),
+                slot
             );
         };
 
-        const process_bonding_update = (info: AccountInfo<Buffer>) => {
-            if (stopped || !info?.data) return;
+        const subscribe_amm_accounts = async (state: ReturnType<typeof AMMStateStruct.decode>) => {
+            if (vaults_started) return;
+            vaults_started = true;
+            base_vault_sub_id = global.CONNECTION.onAccountChange(
+                state.base_vault,
+                (info, context) => {
+                    base_vault_balance = AccountLayout.decode(info.data).amount;
+                    base_vault_slot = context.slot;
+                    publish_amm(context.slot);
+                },
+                { commitment }
+            );
+            quote_vault_sub_id = global.CONNECTION.onAccountChange(
+                state.quote_vault,
+                (info, context) => {
+                    quote_vault_balance = AccountLayout.decode(info.data).amount;
+                    quote_vault_slot = context.slot;
+                    publish_amm(context.slot);
+                },
+                { commitment }
+            );
+
+            const response = await global.CONNECTION.getMultipleAccountsInfoAndContext(
+                [state.base_vault, state.quote_vault],
+                commitment
+            );
+            const [base_info, quote_info] = response.value;
+            if (base_info && response.context.slot >= base_vault_slot) {
+                base_vault_balance = AccountLayout.decode(base_info.data).amount;
+                base_vault_slot = response.context.slot;
+            }
+            if (quote_info && response.context.slot >= quote_vault_slot) {
+                quote_vault_balance = AccountLayout.decode(quote_info.data).amount;
+                quote_vault_slot = response.context.slot;
+            }
+            publish_amm(response.context.slot);
+        };
+
+        const process_amm_update = async (info: AccountInfo<Buffer>, slot: number = 0) => {
+            if (stopped || !info?.data || (slot && slot < latest_slot)) return;
+            amm_state = AMMStateStruct.decode(info.data);
+            await subscribe_amm_accounts(amm_state);
+            unsubscribe(amm_state_sub_id);
+            amm_state_sub_id = undefined;
+        };
+
+        const attach_amm = async (amm: PublicKey) => {
+            amm_pool_address = amm.toBase58();
+            amm_state_sub_id = global.CONNECTION.onAccountChange(
+                amm,
+                (info, context) => void process_amm_update(info, context.slot),
+                { commitment }
+            );
+            const response = await global.CONNECTION.getAccountInfoAndContext(amm, commitment);
+            if (response.value) await process_amm_update(response.value, response.context.slot);
+        };
+
+        const process_bonding_update = (info: AccountInfo<Buffer>, slot: number = 0) => {
+            if (stopped || !info?.data || (slot && slot < latest_slot)) return;
 
             const state = StateStruct.decode(info.data);
             const [creator_vault, creator_vault_ata] = this.calc_creator_vault(state.creator);
@@ -1031,49 +1140,55 @@ export class Trader implements trade.IProgramTrader {
                 state.virtual_token_reserves,
                 state.supply
             );
+            const amm = state.complete ? this.calc_amm_from_mint(mint) : null;
 
             publish(
                 new PumpMintMeta({
-                    ...mint_meta,
+                    ...current_mint_meta,
                     usd_market_cap: metrics.mcap_sol * sol_price,
                     market_cap: metrics.mcap_sol,
                     total_supply: state.supply,
                     token_reserves: state.virtual_token_reserves,
                     sol_reserves: state.virtual_sol_reserves,
-                    complete: state.complete,
+                    complete: false,
                     fee: PUMP_FEE_PERCENTAGE,
+                    amm_pool: current_mint_meta.amm_pool,
                     creator_vault: creator_vault.toString(),
                     creator_vault_ata: creator_vault_ata.toString(),
                     is_mayhem: state.is_mayhem,
                     is_cashback: state.is_cashback
-                })
+                }),
+                slot
             );
 
             if (state.complete && !switched_to_amm) {
                 switched_to_amm = true;
-                const amm = this.calc_amm_from_mint(mint);
-                amm_sub_id = global.CONNECTION.onAccountChange(amm, process_amm_update, { commitment: COMMITMENT });
-                unsub_bonding();
+                if (!amm) return;
+                unsubscribe(bonding_sub_id);
+                bonding_sub_id = undefined;
+                void attach_amm(amm);
             }
         };
 
         const amm_pool = await this.get_amm_from_mint(mint);
         if (amm_pool) {
             switched_to_amm = true;
-            amm_sub_id = global.CONNECTION.onAccountChange(amm_pool, process_amm_update, { commitment: COMMITMENT });
+            await attach_amm(amm_pool);
         } else {
-            bonding_sub_id = global.CONNECTION.onAccountChange(bonding_curve, process_bonding_update, {
-                commitment: COMMITMENT
-            });
+            bonding_sub_id = global.CONNECTION.onAccountChange(
+                bonding_curve,
+                (info, context) => {
+                    process_bonding_update(info, context.slot);
+                },
+                { commitment }
+            );
+            const response = await global.CONNECTION.getAccountInfoAndContext(bonding_curve, commitment);
+            if (response.value) process_bonding_update(response.value, response.context.slot);
         }
 
         return () => {
             stopped = true;
-            if (flush_timeout) clearTimeout(flush_timeout);
-            flush_timeout = null;
-            latest_update = null;
-            unsub_bonding();
-            unsub_amm();
+            [bonding_sub_id, amm_state_sub_id, base_vault_sub_id, quote_vault_sub_id].forEach(unsubscribe);
         };
     }
 

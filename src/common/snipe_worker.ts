@@ -1,15 +1,17 @@
 import { parentPort, workerData } from 'worker_threads';
-import { Keypair, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, Connection, PublicKey, TokenAmount } from '@solana/web3.js';
 import * as common from './common';
 import * as snipe from './snipe_common';
 import * as trade from './trade_common';
 import {
     COMMITMENT,
     HELIUS_RPC,
+    SENDER_ENDPOINT,
     SNIPE_TRADE_BATCH,
     SNIPE_MIN_BUY,
     SNIPE_RETRIES,
-    SNIPE_RETRY_INTERVAL_MS
+    SNIPE_RETRY_INTERVAL_MS,
+    TransactionRelay
 } from '../constants';
 import { get_trader } from './get_trader';
 import { configure_rpc_rate_limiter, rpc_connection_config } from './rate_limit';
@@ -22,6 +24,9 @@ type State =
 
 const CONFIG: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
 const KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(CONFIG.secret));
+global.PROGRAM = CONFIG.program;
+global.TRANSACTION_RELAY = CONFIG.transaction_relay;
+global.PRIORITY_FEE = undefined;
 const TRADER: trade.IProgramTrader = get_trader(CONFIG.program);
 configure_rpc_rate_limiter(CONFIG.rpc_rate_limit_state);
 global.CONNECTION = new Connection(HELIUS_RPC, rpc_connection_config({ commitment: COMMITMENT }));
@@ -30,6 +35,26 @@ var MINT_METADATA: trade.IMintMeta;
 var CANCEL_SLEEP: (() => void) | null = null;
 var MESSAGE_BUFFER: string[] = [];
 var STATE: State = { mode: 'idle', buys: 0, sells: 0 };
+var SENDER_WARM_TIMER: NodeJS.Timeout | undefined;
+var SENDER_WARMING = false;
+var SENDER_WARM_FAILED = false;
+
+async function warm_sender_connection(): Promise<void> {
+    if (global.TRANSACTION_RELAY !== TransactionRelay.Sender || !SENDER_ENDPOINT || SENDER_WARMING) return;
+    SENDER_WARMING = true;
+    try {
+        const response = await fetch(`${SENDER_ENDPOINT}/ping`, { signal: AbortSignal.timeout(5000) });
+        await response.arrayBuffer();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        SENDER_WARM_FAILED = false;
+    } catch (error) {
+        if (!SENDER_WARM_FAILED)
+            parentPort?.postMessage(`[Worker ${CONFIG.id}] Sender connection warmup failed: ${error}`);
+        SENDER_WARM_FAILED = true;
+    } finally {
+        SENDER_WARMING = false;
+    }
+}
 
 function control_sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
     let timeout_id: NodeJS.Timeout;
@@ -110,7 +135,8 @@ const buy = async () => {
                 MINT_METADATA,
                 CONFIG.buy_slippage,
                 CONFIG.priority_level,
-                CONFIG.protection_tip
+                CONFIG.protection_tip,
+                CONFIG.mev_protect
             );
             transactions.push(
                 process_buy(buy_promise, amount).then((result) => {
@@ -189,7 +215,8 @@ const sell = async () => {
                 MINT_METADATA,
                 CONFIG.sell_slippage,
                 CONFIG.priority_level,
-                CONFIG.protection_tip
+                CONFIG.protection_tip,
+                CONFIG.mev_protect
             );
             transactions.push(
                 process_sell(sell_promise, balance).then((result) => {
@@ -247,7 +274,7 @@ const control_loop = async () =>
                     ? common.normal_random(CONFIG.trade_interval, 0.5 * CONFIG.trade_interval) * 1000
                     : SNIPE_RETRY_INTERVAL_MS;
 
-            if (STATE.mode === 'buy')
+            if (STATE.mode === 'buy' && ms >= 1000)
                 MESSAGE_BUFFER.push(
                     `[Worker ${CONFIG.id}] Sleeping for ${(ms / 1000).toFixed(2)} seconds before the next trade...`
                 );
@@ -268,6 +295,9 @@ async function main() {
 
     // Warmup
     await trade.get_ltas(TRADER.get_lta_addresses());
+    await warm_sender_connection();
+    SENDER_WARM_TIMER = setInterval(() => void warm_sender_connection(), 5000);
+    SENDER_WARM_TIMER.unref();
 
     parentPort?.postMessage({
         command: 'started',
@@ -284,6 +314,12 @@ async function main() {
 
                 if (STATE.mode !== 'buy') {
                     parentPort?.postMessage(`[Worker ${CONFIG.id}] Received buy command from the main thread`);
+                    if (CANCEL_SLEEP !== null) CANCEL_SLEEP();
+                    const { mint, mint_meta, misc, sol_price, priority_fee } = msg.data;
+                    global.PRIORITY_FEE = priority_fee;
+                    if (mint_meta !== undefined) MINT_METADATA = TRADER.deserialize_mint_meta(mint_meta);
+                    else if (mint !== undefined)
+                        MINT_METADATA = await TRADER.default_mint_meta(new PublicKey(mint), sol_price, misc);
                     STATE = {
                         mode: 'buy',
                         buy_amount,
@@ -311,6 +347,9 @@ async function main() {
             case 'mint':
                 MINT_METADATA = TRADER.deserialize_mint_meta(msg.data);
                 break;
+            case 'priority_fee':
+                global.PRIORITY_FEE = msg.data;
+                break;
             case 'config':
                 const { key, value } = msg.data;
                 snipe.update_config(CONFIG, key, value);
@@ -323,6 +362,7 @@ async function main() {
 
     await control_loop();
 
+    if (SENDER_WARM_TIMER) clearInterval(SENDER_WARM_TIMER);
     parentPort?.postMessage(`[Worker ${CONFIG.id}] Finished`);
     process.exit(0);
 }

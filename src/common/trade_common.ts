@@ -13,7 +13,6 @@ import {
     Commitment,
     Finality,
     AddressLookupTableAccount,
-    Transaction,
     AddressLookupTableProgram,
     ParsedTransactionWithMeta,
     ParsedInstruction,
@@ -50,7 +49,15 @@ import {
     PRIORITY_FEE_TTL_MS,
     CACHE_SIZE_MAX,
     ACCOUNT_READ_CACHE_TTL_MS,
-    HELIUS_RPC
+    HELIUS_RPC,
+    SENDER_ENDPOINT,
+    SENDER_INTERVAL_MS,
+    SENDER_MAX_BUNDLE_SIZE,
+    SENDER_MAX_MIN_PRIORITY_FEE,
+    SENDER_MAX_MIN_TIP,
+    TransactionRelay,
+    MAX_COMPUTE_UNIT_LIMIT,
+    COMPUTE_UNIT_BUFFER
 } from '../constants';
 import * as common from './common';
 import bs58 from 'bs58';
@@ -158,7 +165,8 @@ export interface IProgramTrader {
         mint_meta: IMintMeta,
         slippage: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect?: boolean
     ): Promise<String>;
     sell_token(
         token_amount: TokenAmount,
@@ -166,7 +174,8 @@ export interface IProgramTrader {
         mint_meta: Partial<IMintMeta>,
         slippage: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect?: boolean
     ): Promise<String>;
     buy_token_instructions(
         sol_amount: number,
@@ -201,7 +210,8 @@ export interface IProgramTrader {
         slippage: number,
         interval_ms?: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect?: boolean
     ): Promise<[String, String]>;
     create_token(
         mint: Keypair,
@@ -219,7 +229,12 @@ export interface IProgramTrader {
     get_random_mints(count: number): Promise<IMintMeta[]>;
     get_mint_meta(mint: PublicKey, sol_price?: number): Promise<IMintMeta | undefined>;
     update_mint_meta(mint_meta: IMintMeta, sol_price?: number): Promise<IMintMeta>;
-    subscribe_mint_meta(mint_meta: IMintMeta, callback: (mint_meta: IMintMeta) => void): Promise<() => void>;
+    subscribe_mint_meta(
+        mint_meta: IMintMeta,
+        callback: (mint_meta: IMintMeta) => void,
+        sol_price?: number,
+        commitment?: Commitment
+    ): Promise<() => void>;
     update_mint_meta_reserves(mint_meta: IMintMeta, amount: number | TokenAmount): IMintMeta;
     default_mint_meta(mint: PublicKey, sol_price?: number, data?: object): Promise<IMintMeta>;
     get_trader_fees(trader: Signer): Promise<ClaimableAsset[]>;
@@ -235,6 +250,18 @@ type PriorityOptions = {
     };
     priority_level?: PriorityLevel;
 };
+
+function get_transaction_relay(): TransactionRelay {
+    return global.TRANSACTION_RELAY ?? TransactionRelay.Sender;
+}
+
+export function get_bundle_size(): number {
+    return get_transaction_relay() === TransactionRelay.Sender ? SENDER_MAX_BUNDLE_SIZE : JITO_BUNDLE_SIZE;
+}
+
+export function get_bundle_interval_ms(): number {
+    return get_transaction_relay() === TransactionRelay.Sender ? SENDER_INTERVAL_MS : JITO_BUNDLE_INTERVAL_MS;
+}
 
 export type MintAsset = {
     token_name: string;
@@ -314,16 +341,24 @@ export async function retry_send_bundle(
     bundle_tip: number,
     priority?: PriorityLevel,
     ltas?: AddressLookupTableAccount[],
+    compute_unit_limit?: number,
     retries: number = TRADE_RETRIES
 ): Promise<String> {
     while (retries > 0) {
         try {
-            return await send_bundle(bundle_instructions, bundle_signers, bundle_tip, priority, ltas);
+            return await send_bundle(
+                bundle_instructions,
+                bundle_signers,
+                bundle_tip,
+                priority,
+                ltas,
+                compute_unit_limit
+            );
         } catch (error) {
-            common.log(common.red(`Failed to send bundle: ${error}`));
+            // common.log(common.red(`Failed to send bundle: ${error}`));
             retries--;
         }
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS * (retries + 1));
+        await common.sleep(get_bundle_interval_ms() * (retries + 1));
     }
     throw new Error('Send bundle failed after multiple attempts');
 }
@@ -333,14 +368,24 @@ export async function retry_send_tx(
     signers: Signer[],
     priority?: PriorityLevel,
     protection_tip?: number,
+    mev_protect: boolean = false,
     alts?: AddressLookupTableAccount[],
+    compute_unit_limit?: number,
     retries: number = TRADE_RETRIES
 ): Promise<String> {
     while (retries > 0) {
         try {
-            return await send_tx(instructions, signers, priority, protection_tip, alts);
+            return await send_tx(
+                instructions,
+                signers,
+                priority,
+                protection_tip,
+                mev_protect,
+                alts,
+                compute_unit_limit
+            );
         } catch (error) {
-            common.log(common.red(`Failed to send transaction: ${error}`));
+            // common.log(common.red(`Failed to send transaction: ${error}`));
             retries--;
         }
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
@@ -618,9 +663,17 @@ function cleanup_ttl_cache<T>(cache: Map<string, { value: T; expires_at: number 
     }
 }
 
-async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
-    const requests = JITO_ENDPOINTS.map((endpoint) =>
-        fetch(`${endpoint}/bundles`, {
+type JitoBundleSubmission = {
+    bundle_id: string;
+    endpoint: string;
+};
+
+type JitoBundleStatus = 'Invalid' | 'Pending' | 'Failed' | 'Landed';
+
+async function send_jito_bundle(serialized_txs: string[]): Promise<JitoBundleSubmission[]> {
+    const requests = JITO_ENDPOINTS.map((endpoint) => ({
+        endpoint,
+        response: fetch(`${endpoint}/bundles`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -637,19 +690,43 @@ async function send_jito_bundle(serialized_txs: string[]): Promise<string[]> {
                 ]
             })
         })
-    );
+    }));
     const responses = await Promise.all(
-        requests.map((resp) =>
-            resp
+        requests.map(({ endpoint, response }) =>
+            response
                 .then((resp) => resp.json())
                 .then((data) => {
                     if (data.error || !data.result) throw new Error(data.error?.message || 'Jito bundle rejected.');
-                    return data.result as string;
+                    return { bundle_id: data.result as string, endpoint };
                 })
                 .catch((err) => err)
         )
     );
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
+}
+
+async function get_jito_bundle_status(submission: JitoBundleSubmission): Promise<JitoBundleStatus | undefined> {
+    try {
+        const response = await fetch(`${submission.endpoint}/getInflightBundleStatuses`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'getInflightBundleStatuses',
+                params: [[submission.bundle_id]]
+            })
+        });
+        const data = await response.json();
+        if (data.error) return undefined;
+        return data.result?.value?.find(
+            (bundle: { bundle_id: string; status: JitoBundleStatus }) => bundle.bundle_id === submission.bundle_id
+        )?.status;
+    } catch (_error) {
+        return undefined;
+    }
 }
 
 async function send_jito_tx(serialized_tx: string): Promise<string[]> {
@@ -687,56 +764,76 @@ async function send_jito_tx(serialized_tx: string): Promise<string[]> {
     return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
 }
 
-async function send_sender_tx(serialized_tx: string): Promise<string[]> {
-    const requests = SENDER_ENDPOINTS.map((endpoint) =>
-        rate_limit_request(() =>
-            fetch(endpoint, {
+async function send_sender_tx(serialized_tx: string, mev_protect: boolean): Promise<string[]> {
+    const response = await send_sender<string>(
+        'sendTransaction',
+        [
+            serialized_tx,
+            {
+                encoding: 'base64',
+                skipPreflight: true,
+                maxRetries: 0
+            }
+        ],
+        mev_protect
+    );
+    return response ? [response] : [];
+}
+
+async function send_sender<T>(method: 'sendTransaction' | 'sendBundle', params: unknown[], mev_protect = false) {
+    const endpoints = SENDER_ENDPOINT ? [SENDER_ENDPOINT] : SENDER_ENDPOINTS;
+
+    const requests = endpoints.map((endpoint) => {
+        const url = new URL(`${endpoint}/fast`);
+        url.searchParams.append('mev-protect', mev_protect ? 'true' : 'false');
+        return rate_limit_request(() =>
+            fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     jsonrpc: '2.0',
                     id: Date.now().toString(),
-                    method: 'sendTransaction',
-                    params: [
-                        serialized_tx,
-                        {
-                            encoding: 'base64',
-                            skipPreflight: true, // Required for Sender
-                            maxRetries: 0
-                        }
-                    ]
+                    method,
+                    params
                 })
             })
-        )
-    );
-    const responses = await Promise.all(
-        requests.map((resp) =>
-            resp
-                .then((resp) => resp.json())
-                .then((data) => {
-                    if (data.error || !data.result)
-                        throw new Error(data.error?.message || 'Sender transaction rejected.');
-                    return data.result as string;
-                })
-                .catch((err) => err)
-        )
-    );
-    return responses.filter((resp) => !(resp instanceof Error) && resp !== undefined);
+        );
+    });
+    try {
+        const response = await Promise.any(
+            requests.map(async (request) => {
+                const data = await (await request).json();
+                if (data.error || !data.result) throw new Error(data.error?.message || `Sender ${method} rejected.`);
+                return data.result as T;
+            })
+        );
+        return response;
+    } catch {
+        return undefined;
+    }
+}
+
+async function send_sender_bundle(serialized_txs: string[]): Promise<boolean> {
+    return Boolean(await send_sender('sendBundle', [serialized_txs, { encoding: 'base64' }]));
 }
 
 async function send_protected_tx(
     instructions: TransactionInstruction[],
     signers: Signer[],
     tip: number,
+    mev_protect: boolean = false,
     alts?: AddressLookupTableAccount[],
-    provider: 'sender' | 'jito' = 'sender'
+    ctx?: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>
 ): Promise<String> {
-    if (tip < JITO_MIN_TIP) throw new Error(`Tip is too low, minimum is ${JITO_MIN_TIP} `);
+    const provider = get_transaction_relay();
+    const minimum_tip = provider === TransactionRelay.Sender ? SENDER_MAX_MIN_TIP : JITO_MIN_TIP;
+    if (tip < minimum_tip) throw new Error(`Tip is too low, minimum is ${minimum_tip} `);
     instructions = instructions.filter(Boolean);
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
-    const tip_account = provider === 'sender' ? get_random_sender_tip_account() : get_random_jito_tip_account();
+    const tip_account =
+        provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account();
 
     instructions.push(
         SystemProgram.transfer({
@@ -746,17 +843,22 @@ async function send_protected_tx(
         })
     );
 
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    ctx ??= await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     const versioned_tx = create_versioned_tx(signers, instructions, ctx, alts);
     const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
     const serialized_tx = Buffer.from(versioned_tx.serialize()).toString('base64');
 
-    const responses = provider === 'sender' ? await send_sender_tx(serialized_tx) : await send_jito_tx(serialized_tx);
+    const responses =
+        provider === TransactionRelay.Sender
+            ? await send_sender_tx(serialized_tx, mev_protect)
+            : await send_jito_tx(serialized_tx);
     if (responses.length > 0) {
         await check_transaction_status(jito_tx_signature, ctx);
         return responses[0];
     } else {
-        throw new Error(`Failed to send the protected transaction, no successful response from the JITO endpoints`);
+        throw new Error(
+            `Failed to send the protected transaction, no successful response from the ${provider} endpoints`
+        );
     }
 }
 
@@ -765,47 +867,60 @@ export async function send_bundle(
     signers: Signer[][],
     tip: number,
     priority?: PriorityLevel,
-    alts?: AddressLookupTableAccount[]
+    alts?: AddressLookupTableAccount[],
+    compute_unit_limit?: number
 ): Promise<String> {
-    if (tip < JITO_MIN_TIP) throw new Error(`Tip is too low, minimum is ${JITO_MIN_TIP} `);
-    instructions = instructions.filter(Boolean);
-    if (instructions.length > JITO_BUNDLE_SIZE || instructions.length === 0)
+    const provider = get_transaction_relay();
+    const minimum_tip = provider === TransactionRelay.Sender ? SENDER_MAX_MIN_TIP : JITO_MIN_TIP;
+    if (tip < minimum_tip) throw new Error(`Tip is too low, minimum is ${minimum_tip} `);
+    instructions = instructions.filter(Boolean).map((tx_instructions) => tx_instructions.filter(Boolean));
+    if (instructions.length > get_bundle_size() || instructions.length === 0)
         throw new Error(`Bundle size exceeded or size is 0.`);
     if (instructions.length !== signers.length) throw new Error(`Instructions and signers length mismatch.`);
     for (let i = 0; i < instructions.length; i++) {
         if (instructions[i].length === 0) throw new Error(`No instructions provided for tx ${i}.`);
         if (signers[i].length === 0) throw new Error(`No signers provided for tx ${i}.`);
-        instructions[i] = instructions[i].filter(Boolean);
     }
 
-    let priority_fee: number | undefined;
-    if (priority && !priority_fee) {
-        priority_fee = await get_priority_fee({
-            priority_level: priority,
-            transaction: {
-                instructions: instructions[0],
-                signers: signers[0]
-            }
-        });
-    }
-
-    const jito_tip_account = get_random_jito_tip_account();
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    const compute_unit_limits = instructions.map(() => compute_unit_limit ?? MAX_COMPUTE_UNIT_LIMIT);
+    let priority_fee: number | undefined;
+    if (priority || provider === TransactionRelay.Sender) {
+        priority_fee = await get_priority_fee(
+            {
+                priority_level: priority,
+                transaction: {
+                    instructions: instructions[0],
+                    signers: signers[0],
+                    alts
+                }
+            },
+            ctx
+        );
+    }
+
+    const tip_account =
+        provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account();
     let signature: string;
 
-    let serialized_txs = [];
+    const serialized_txs = [];
     for (let i = 0; i < instructions.length; i++) {
-        if (priority_fee)
-            instructions[i].unshift(
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: priority_fee!
-                })
+        const units = compute_unit_limits[i];
+        let tx_priority_fee = priority_fee;
+        if (provider === TransactionRelay.Sender)
+            tx_priority_fee = Math.max(
+                tx_priority_fee ?? 0,
+                Math.ceil((SENDER_MAX_MIN_PRIORITY_FEE * 1_000_000) / units)
             );
+        instructions[i].unshift(
+            ComputeBudgetProgram.setComputeUnitLimit({ units }),
+            ...(tx_priority_fee ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: tx_priority_fee })] : [])
+        );
         if (i === instructions.length - 1) {
             instructions[i].push(
                 SystemProgram.transfer({
                     fromPubkey: signers[i][0].publicKey,
-                    toPubkey: jito_tip_account,
+                    toPubkey: tip_account,
                     lamports: tip * LAMPORTS_PER_SOL
                 })
             );
@@ -816,10 +931,20 @@ export async function send_bundle(
         serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
     }
 
+    if (provider === TransactionRelay.Sender) {
+        if (!(await send_sender_bundle(serialized_txs)))
+            throw new Error(`Failed to send the bundle, no successful response from the Sender endpoints`);
+        // common.log(`Sender bundle accepted | Transaction: ${signature!}`);
+        await check_transaction_status(signature!, ctx);
+        return signature!;
+    }
+
     const responses = await send_jito_bundle(serialized_txs);
     if (responses.length > 0) {
-        await check_transaction_status(signature!, ctx);
-        return responses[0];
+        const submission = responses[Math.floor(Math.random() * responses.length)];
+        // common.log(`Jito bundle accepted: ${submission.bundle_id} | Transaction: ${signature!}`);
+        await check_transaction_status(signature!, ctx, 'confirmed', submission);
+        return submission.bundle_id;
     } else {
         throw new Error(`Failed to send the bundle, no successful response from the JITO endpoints`);
     }
@@ -833,9 +958,11 @@ async function is_blockhash_expired(last_valid_block_height: number): Promise<bo
 async function check_transaction_status(
     signature: string,
     context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
-    finality: Finality = 'confirmed'
+    finality: Finality = 'confirmed',
+    bundle_submission?: JitoBundleSubmission
 ): Promise<void> {
-    const retry_interval = 1000;
+    const retry_interval = bundle_submission ? 2000 : 1000;
+    let bundle_status: JitoBundleStatus | undefined;
     while (true) {
         const { value: status } = await CONNECTION.getSignatureStatus(signature);
 
@@ -850,13 +977,30 @@ async function check_transaction_status(
             });
             if (tx) {
                 if (tx.meta?.err === null) return;
-                if (tx.meta?.err !== null)
-                    throw new Error(`Transaction failed with an error | Signature: ${signature} `);
+                if (tx.meta?.err !== null) {
+                    const error_log =
+                        tx.meta?.logMessages?.find((line) => line.includes('AnchorError')) ??
+                        tx.meta?.logMessages?.find((line) => line.includes('failed:'));
+                    const error_detail = error_log?.replace('Program log: ', '') ?? JSON.stringify(tx.meta?.err);
+                    throw new Error(`Transaction failed: ${error_detail} | Signature: ${signature}`);
+                }
             }
         }
 
+        if (bundle_submission) {
+            bundle_status = await get_jito_bundle_status(bundle_submission);
+            if (bundle_status === 'Failed')
+                throw new Error(`Jito bundle ${bundle_submission.bundle_id} ${bundle_status.toLowerCase()}.`);
+        }
+
         const is_expired = await is_blockhash_expired(context.value.lastValidBlockHeight);
-        if (is_expired) throw new Error('Blockhash has expired.');
+        if (is_expired) {
+            if (bundle_submission)
+                throw new Error(
+                    `Jito bundle ${bundle_submission.bundle_id} did not land before its blockhash expired (last status: ${bundle_status?.toLowerCase() || 'unknown'}).`
+                );
+            throw new Error('Blockhash has expired.');
+        }
 
         await common.sleep(retry_interval);
     }
@@ -864,7 +1008,24 @@ async function check_transaction_status(
 
 const priority_cache = new Map<string, { value: number; expires_at: number }>();
 const priority_cache_inflight = new Map<string, Promise<number>>();
-async function get_priority_fee(priority_opts: PriorityOptions): Promise<number> {
+
+export async function get_priority_fee_estimate(
+    priority_level: PriorityLevel,
+    account_keys: PublicKey[]
+): Promise<number> {
+    const response = await helius_rpc<{ priorityFeeEstimate?: number }>('getPriorityFeeEstimate', [
+        {
+            accountKeys: account_keys.map((account) => account.toBase58()),
+            options: { priorityLevel: priority_level }
+        }
+    ]);
+    return Math.floor(response.priorityFeeEstimate || 0);
+}
+
+async function get_priority_fee(
+    priority_opts: PriorityOptions,
+    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>
+): Promise<number> {
     const get_priority_cache_key = (priority_opts: PriorityOptions): string => {
         const priority = (priority_opts.priority_level || 'recommended').toLowerCase();
         const tx_shape = priority_opts.transaction
@@ -890,26 +1051,8 @@ async function get_priority_fee(priority_opts: PriorityOptions): Promise<number>
     const fetch_priority_fee = (async () => {
         let encoded_tx: string | undefined;
         if (priority_opts.transaction) {
-            const { blockhash, lastValidBlockHeight } = await global.CONNECTION.getLatestBlockhash(COMMITMENT);
             const { instructions, signers, alts } = priority_opts.transaction;
-            if (alts?.length) {
-                const tx = new VersionedTransaction(
-                    new TransactionMessage({
-                        payerKey: signers[0].publicKey,
-                        recentBlockhash: blockhash,
-                        instructions
-                    }).compileToV0Message(alts)
-                );
-                tx.sign(signers);
-                encoded_tx = bs58.encode(tx.serialize());
-            } else {
-                const tx = new Transaction({
-                    blockhash: blockhash,
-                    lastValidBlockHeight: lastValidBlockHeight,
-                    feePayer: signers[0].publicKey
-                }).add(...instructions);
-                encoded_tx = bs58.encode(tx.serialize({ verifySignatures: false, requireAllSignatures: false }));
-            }
+            encoded_tx = bs58.encode(create_versioned_tx(signers, instructions, ctx, alts).serialize());
         }
 
         const response = await helius_rpc<{ priorityFeeEstimate?: number }>('getPriorityFeeEstimate', [
@@ -934,62 +1077,27 @@ async function get_priority_fee(priority_opts: PriorityOptions): Promise<number>
     return fetch_priority_fee;
 }
 
-async function send_smart_tx(
+async function estimate_compute_unit_limit(
     instructions: TransactionInstruction[],
     signers: Signer[],
-    protection_tip?: number,
+    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
     alts?: AddressLookupTableAccount[]
-): Promise<String> {
-    instructions = instructions.filter(Boolean);
-    if (instructions.length === 0) throw new Error(`No instructions provided.`);
-    if (signers.length === 0) throw new Error(`No signers provided.`);
-
-    if (instructions.some((instruction) => instruction.programId.equals(ComputeBudgetProgram.programId)))
-        throw new Error('Smart transactions cannot include compute budget instructions.');
-
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const priority_fee = await get_priority_fee({
-        transaction: { instructions, signers, alts }
-    });
-    const simulation_instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...instructions];
+): Promise<number> {
+    const simulation_instructions = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: MAX_COMPUTE_UNIT_LIMIT }),
+        ...instructions
+    ];
     const simulation_tx = create_versioned_tx(signers, simulation_instructions, ctx, alts);
     const simulation = await global.CONNECTION.simulateTransaction(simulation_tx, {
         sigVerify: true,
         commitment: COMMITMENT
     });
     if (simulation.value.err || !simulation.value.unitsConsumed)
-        throw new Error(`Smart transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
-
-    const final_instructions = [
-        ComputeBudgetProgram.setComputeUnitLimit({
-            units: Math.max(1_000, Math.ceil(simulation.value.unitsConsumed * 1.1))
-        }),
-        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority_fee }),
-        ...instructions
-    ];
-    if (protection_tip) {
-        final_instructions.push(
-            SystemProgram.transfer({
-                fromPubkey: signers[0].publicKey,
-                toPubkey: get_random_sender_tip_account(),
-                lamports: protection_tip * LAMPORTS_PER_SOL
-            })
-        );
-    }
-    const transaction = create_versioned_tx(signers, final_instructions, ctx, alts);
-    const signature = bs58.encode(transaction.signatures[0]);
-    if (protection_tip) {
-        const responses = await send_sender_tx(Buffer.from(transaction.serialize()).toString('base64'));
-        if (responses.length === 0) throw new Error('Sender did not accept the smart transaction.');
-    } else {
-        await global.CONNECTION.sendTransaction(transaction, {
-            skipPreflight: true,
-            preflightCommitment: COMMITMENT,
-            maxRetries: TRADE_TX_RETRIES
-        });
-    }
-    await check_transaction_status(signature, ctx);
-    return signature;
+        throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    return Math.min(
+        MAX_COMPUTE_UNIT_LIMIT,
+        Math.max(1_000, Math.ceil(simulation.value.unitsConsumed * COMPUTE_UNIT_BUFFER))
+    );
 }
 
 export async function send_tx(
@@ -997,31 +1105,42 @@ export async function send_tx(
     signers: Signer[],
     priority?: PriorityLevel,
     protection_tip?: number,
-    alts?: AddressLookupTableAccount[]
+    mev_protect: boolean = false,
+    alts?: AddressLookupTableAccount[],
+    compute_unit_limit?: number
 ): Promise<String> {
     const tx_instructions = instructions.filter(Boolean);
-    if (instructions.length === 0) throw new Error(`No instructions provided.`);
+    if (tx_instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
+    if (mev_protect && (!protection_tip || protection_tip <= 0))
+        throw new Error(`MEV protection requires a protection tip to be specified.`);
+    if (tx_instructions.some((instruction) => instruction.programId.equals(ComputeBudgetProgram.programId)))
+        throw new Error('Transactions cannot include compute budget instructions.');
 
-    if (!priority) return send_smart_tx(tx_instructions, signers, protection_tip, alts);
-
-    const fee = await get_priority_fee({
-        priority_level: priority,
-        transaction: { instructions: tx_instructions, signers }
-    });
-    tx_instructions.unshift(
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
+    const units = compute_unit_limit ?? (await estimate_compute_unit_limit(tx_instructions, signers, ctx, alts));
+    let fee =
+        global.PRIORITY_FEE ??
+        (await get_priority_fee(
+            {
+                priority_level: priority,
+                transaction: { instructions: tx_instructions, signers, alts }
+            },
+            ctx
+        ));
+    if (protection_tip && get_transaction_relay() === TransactionRelay.Sender)
+        fee = Math.max(fee, Math.ceil((SENDER_MAX_MIN_PRIORITY_FEE * 1_000_000) / units));
+    const final_instructions = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units }),
         ComputeBudgetProgram.setComputeUnitPrice({
             microLamports: fee
         }),
-        ComputeBudgetProgram.setComputeUnitLimit({
-            units: 1_600_000
-        })
-    );
+        ...tx_instructions
+    ];
 
-    if (protection_tip) return send_protected_tx(tx_instructions, signers, protection_tip, alts);
+    if (protection_tip) return send_protected_tx(final_instructions, signers, protection_tip, mev_protect, alts, ctx);
 
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const versioned_tx = create_versioned_tx(signers, tx_instructions, ctx, alts);
+    const versioned_tx = create_versioned_tx(signers, final_instructions, ctx, alts);
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
         skipPreflight: false,
         preflightCommitment: COMMITMENT,
@@ -1038,9 +1157,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
             maxSupportedTransactionVersion: 0
         });
         if (!tx_details) throw new Error(`Transaction not found: ${signature} `);
-        const balance_index = tx_details?.transaction.message
-            .getAccountKeys()
-            .staticAccountKeys.findIndex((i) => i.equals(address));
+        const balance_index = tx_details.transaction.message.staticAccountKeys.findIndex((i) => i.equals(address));
         if (balance_index !== undefined && balance_index !== -1) {
             const pre_balance = tx_details?.meta?.preBalances[balance_index] || 0;
             const post_balance = tx_details?.meta?.postBalances[balance_index] || 0;
@@ -1066,16 +1183,28 @@ export async function send_lamports(
             lamports: lamports
         })
     ];
+    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
     if (priority) {
-        const units = 500;
-        const fees = await get_priority_fee({
-            priority_level: priority,
-            transaction: {
-                instructions: instructions,
-                signers: [sender]
-            }
-        });
+        if (lamports <= 5000) throw new Error(`Spend cap of ${lamports} lamports is insufficient to cover fees.`);
+        const simulation_instructions = [
+            SystemProgram.transfer({
+                fromPubkey: sender.publicKey,
+                toPubkey: receiver,
+                lamports: lamports - 5000
+            })
+        ];
+        const units = await estimate_compute_unit_limit(simulation_instructions, [sender], ctx);
+        const fees = await get_priority_fee(
+            {
+                priority_level: priority,
+                transaction: {
+                    instructions: instructions,
+                    signers: [sender]
+                }
+            },
+            ctx
+        );
         const transfer_lamports = lamports - 5000 - Math.ceil((fees * units) / 10 ** 6);
         if (transfer_lamports <= 0)
             throw new Error(`Spend cap of ${lamports} lamports is insufficient to cover transaction fees.`);
@@ -1094,7 +1223,6 @@ export async function send_lamports(
         ];
     }
 
-    const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
     const versioned_tx = create_versioned_tx([sender], instructions, ctx);
     const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
         skipPreflight: false,

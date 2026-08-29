@@ -12,15 +12,24 @@ import {
     HELIUS_RPC,
     JITO_MIN_TIP,
     PriorityLevel,
+    TransactionRelay,
     TRADE_MAX_SLIPPAGE,
     TRANSFER_MAX_DEPTH,
     WALLETS_FILE
 } from './constants';
 import base58 from 'bs58';
 import { rpc_connection_config } from './common/rate_limit';
+import { SubscriberType } from './common/subscriber';
 
 const MULTI_CHARACTER_OPTION_ALIASES: Record<string, string> = {
     '-pr': '--pr',
+    '-pt': '--pt',
+    '-rl': '--rl',
+    '-nc': '--nc',
+    '-fm': '--fm',
+    '-mn': '--mn',
+    '-mx': '--mx',
+    '-bu': '--bu',
     '-ap': '--ap',
     '-pp': '--pp',
     '-af': '--af',
@@ -37,7 +46,7 @@ function reserve_wallet_check(wallets: common.Wallet[]) {
 function get_wallets_from_file(file: string): common.Wallet[] {
     try {
         const wallets = common.get_wallets(file);
-        if (wallets.length === 0) common.error(common.yellow('The file does not containt any wallets.'));
+        if (wallets.length === 0) common.error(common.yellow('The file does not contain any wallets.'));
         return wallets;
     } catch (error) {
         common.error(common.yellow(`${error}`));
@@ -84,18 +93,24 @@ function get_list_option(wallet_cnt: number): Option {
 
 function get_bundle_tip_option(): Option {
     return new Option('-b, --bundle <tip>', 'Enable bundles by providing tip amount').argParser((value) => {
-        if (!common.validate_float(value, JITO_MIN_TIP))
-            throw new InvalidOptionArgumentError(`Not a valid tip amount. Must be greater than ${JITO_MIN_TIP}.`);
-        return parseFloat(value);
+        const tip = parseFloat(value);
+        if (isNaN(tip) || tip < JITO_MIN_TIP)
+            throw new InvalidOptionArgumentError(`Not a valid tip amount. Must be at least ${JITO_MIN_TIP}.`);
+        return tip;
     });
 }
 
+function get_mev_protect_option(): Option {
+    return new Option('-m, --mev', 'Enable MEV protection').default(false).conflicts('bundle');
+}
+
 function get_protection_tip_option(): Option {
-    return new Option('-m, --mev <tip>', 'Enable MEV protection by providing tip amount')
+    return new Option('--pt, --protection-tip <tip>', 'Enable protected transaction routing by providing a tip')
         .argParser((value) => {
-            if (!common.validate_float(value, 0))
-                throw new InvalidOptionArgumentError('Not a valid tip amount. Must be greater than 0.');
-            return parseFloat(value);
+            const tip = parseFloat(value);
+            if (isNaN(tip) || tip < JITO_MIN_TIP)
+                throw new InvalidOptionArgumentError(`Not a valid tip amount. Must be at least ${JITO_MIN_TIP}.`);
+            return tip;
         })
         .conflicts('bundle');
 }
@@ -135,6 +150,14 @@ function get_depth_option(): Option {
     });
 }
 
+function lowercase_description(description: string): string {
+    return description.replace(/^[A-Z](?=[a-z])/, (letter) => letter.toLowerCase());
+}
+
+function single_dash_aliases(flags: string): string {
+    return flags.replace(/^--([a-z]{2}), /, '-$1, ');
+}
+
 //------------------------------------------------------------
 // MAIN
 // -----------------------------------------------------------
@@ -147,6 +170,9 @@ async function main() {
         HELIUS_RPC,
         rpc_connection_config({ disableRetryOnRateLimit: true, commitment: COMMITMENT })
     );
+    global.PROGRAM = common.Program.Pump;
+    global.TRANSACTION_RELAY = TransactionRelay.Sender;
+    global.NO_COLORS = false;
 
     const program = new Command();
 
@@ -159,6 +185,13 @@ async function main() {
         writeOut: (str) => process.stdout.write(str),
         writeErr: (str) => process.stderr.write(str),
         outputError: (str, write) => write(common.red(str))
+    });
+    program.configureHelp({
+        optionTerm: (option) => single_dash_aliases(option.flags),
+        optionDescription: (option) => lowercase_description(option.description),
+        commandDescription: (command) =>
+            command.parent ? lowercase_description(command.description()) : command.description(),
+        subcommandDescription: (command) => lowercase_description(command.description())
     });
 
     program.addOption(
@@ -177,13 +210,17 @@ async function main() {
             .default(common.Program.Pump, common.Program.Pump)
     );
     program.addOption(
-        new Option('--no-colors', 'Disable colored output')
-            .argParser((value) => {
-                global.NO_COLORS = value !== 'false';
-                return global.NO_COLORS;
-            })
-            .default(false, 'false')
+        new Option('--rl, --relay <provider>', 'transaction relay for protected transactions and bundles')
+            .choices(Object.values(TransactionRelay) as string[])
+            .default(TransactionRelay.Sender, TransactionRelay.Sender)
     );
+    program.addOption(new Option('--nc, --no-colors', 'Disable colored output'));
+
+    program.hook('preAction', () => {
+        global.PROGRAM = program.opts().program;
+        global.TRANSACTION_RELAY = program.opts().relay;
+        global.NO_COLORS = program.opts().colors === false;
+    });
 
     program
         .command('snipe')
@@ -191,11 +228,15 @@ async function main() {
         .description('Start the snipe bot')
         .addOption(get_from_option(wallet_cnt))
         .addOption(get_json_config_option())
+        .addOption(
+            new Option('-s, --subscriber <type>', 'specify subscriber type')
+                .choices(Object.values(SubscriberType) as string[])
+                .default(SubscriberType.Tx, SubscriberType.Tx)
+        )
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
-            let { config, from } = options;
-            const pg = program.opts().program;
-            await commands.snipe(common.filter_wallets(wallets, from), pg, config);
+            let { config, from, subscriber } = options;
+            await commands.snipe(common.filter_wallets(wallets, from), subscriber, config);
         });
 
     program
@@ -207,9 +248,8 @@ async function main() {
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             const { config, simulate } = options;
-            const pg = program.opts().program;
             const funder = common.get_reserve_wallet(wallets);
-            await commands.start_volume(funder!.keypair, pg, simulate, config);
+            await commands.start_volume(funder!.keypair, simulate, config);
         });
 
     program
@@ -247,7 +287,7 @@ async function main() {
         .command('balance')
         .alias('b')
         .description('Get the balance of the wallets')
-        .option('--format <type>', 'Format of the balance output (e.g., csv, table)', 'table')
+        .option('--fm, --format <type>', 'Format of the balance output (e.g., csv, table)', 'table')
         .action(async (options) => {
             let { format } = options;
             if (!['csv', 'table'].includes(format))
@@ -272,14 +312,14 @@ async function main() {
         .addOption(get_from_option(wallet_cnt))
         .addOption(get_to_option(wallet_cnt))
         .addOption(get_list_option(wallet_cnt))
-        .option('--min <number>', 'Minimum amount of tokens for each wallet', (value) => {
+        .option('--mn, --min <number>', 'Minimum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 1)
                 throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.');
             return parsed_value;
         })
-        .option('--max <number>', 'Maximum amount of tokens for each wallet', (value) => {
+        .option('--mx, --max <number>', 'Maximum amount of tokens for each wallet', (value) => {
             const parsed_value = parseInt(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value < 1 || parsed_value > 50)
@@ -302,23 +342,14 @@ async function main() {
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options) => {
             const { from, to, list, bundle, priority, min, max, interval } = options;
-            const pg = program.opts().program;
-            await commands.warmup(
-                common.filter_wallets(wallets, from, to, list),
-                priority,
-                pg,
-                bundle,
-                interval,
-                min,
-                max
-            );
+            await commands.warmup(common.filter_wallets(wallets, from, to, list), priority, bundle, interval, min, max);
         });
 
     program
         .command('clean')
         .alias('cl')
         .description('Clean the wallets by closing zero balance token accounts')
-        .option('--burn', 'Burn non-SOL token balances before closing their accounts', false)
+        .option('--bu, --burn', 'Burn non-SOL token balances before closing their accounts', false)
         .action(async (options) => await commands.clean(wallets, options.burn));
 
     program
@@ -332,8 +363,7 @@ async function main() {
         .addOption(get_priority_option())
         .action(async (options) => {
             const { print, from, to, list, priority } = options;
-            const pg = program.opts().program;
-            await commands.claim_fees(common.filter_wallets(wallets, from, to, list), pg, print, priority);
+            await commands.claim_fees(common.filter_wallets(wallets, from, to, list), print, priority);
         });
 
     program
@@ -504,12 +534,12 @@ async function main() {
         })
         .addOption(get_slippage_option())
         .addOption(get_protection_tip_option())
+        .addOption(get_mev_protect_option())
         .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (amount, mint, buyer, options) => {
-            const { slippage, mev, priority } = options;
-            const pg = program.opts().program;
-            await commands.buy_token_once(amount, mint, buyer, slippage, mev, priority, pg);
+            const { slippage, protectionTip, mev, priority } = options;
+            await commands.buy_token_once(amount, mint, buyer, slippage, protectionTip, mev, priority);
         });
 
     program
@@ -530,12 +560,12 @@ async function main() {
         .addOption(get_percent_option())
         .addOption(get_slippage_option())
         .addOption(get_protection_tip_option())
+        .addOption(get_mev_protect_option())
         .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, seller, options) => {
-            const { percent, slippage, mev, priority } = options;
-            const pg = program.opts().program;
-            await commands.sell_token_once(mint, seller, percent, slippage, mev, priority, pg);
+            const { percent, slippage, protectionTip, mev, priority } = options;
+            await commands.sell_token_once(mint, seller, percent, slippage, protectionTip, mev, priority);
         });
 
     program
@@ -552,7 +582,7 @@ async function main() {
             return parsed_value;
         })
         .option(
-            '--min <number>',
+            '--mn, --min <number>',
             'Minimum amount for random buy in SOL (cannot be used with --amount parameter)',
             (value) => {
                 const parsed_value = parseFloat(value);
@@ -563,7 +593,7 @@ async function main() {
             }
         )
         .option(
-            '--max <number>',
+            '--mx, --max <number>',
             'Maximum amount for random buy in SOL (cannot be used with "--amount" parameter)',
             (value) => {
                 const parsed_value = parseFloat(value);
@@ -579,16 +609,16 @@ async function main() {
         .addOption(get_list_option(wallet_cnt))
         .addOption(get_bundle_tip_option())
         .addOption(get_protection_tip_option())
+        .addOption(get_mev_protect_option())
         .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { amount, min, max, slippage, from, to, list, bundle, mev, priority } = options;
-            const pg = program.opts().program;
+            const { amount, min, max, slippage, from, to, list, bundle, protectionTip, mev, priority } = options;
             await commands.buy_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
-                pg,
+                protectionTip,
                 mev,
                 bundle,
                 amount,
@@ -613,16 +643,16 @@ async function main() {
         .addOption(get_list_option(wallet_cnt))
         .addOption(get_bundle_tip_option())
         .addOption(get_protection_tip_option())
+        .addOption(get_mev_protect_option())
         .addOption(get_priority_option())
         .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (mint, options) => {
-            const { percent, slippage, from, to, list, bundle, mev, priority } = options;
-            const pg = program.opts().program;
+            const { percent, slippage, from, to, list, bundle, protectionTip, mev, priority } = options;
             await commands.sell_token(
                 common.filter_wallets(wallets, from, to, list),
                 mint,
                 priority,
-                pg,
+                protectionTip,
                 mev,
                 bundle,
                 percent,
@@ -708,8 +738,7 @@ async function main() {
             return value;
         })
         .action(async (json, image_path) => {
-            const pg = program.opts().program;
-            await commands.create_token_metadata(json, image_path, pg);
+            await commands.create_token_metadata(json, image_path);
         });
 
     program
@@ -731,8 +760,7 @@ async function main() {
             return creator_wallet.keypair;
         })
         .action(async (count, cid, creator) => {
-            const pg = program.opts().program;
-            await commands.promote(count, cid, creator, pg);
+            await commands.promote(count, cid, creator);
         });
 
     program
@@ -759,14 +787,14 @@ async function main() {
             if (isNaN(parsed_value) || parsed_value <= 0) throw new InvalidOptionArgumentError('Not a number.');
             return parsed_value;
         })
-        .option('--min <number>', 'Minimum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
+        .option('--mn, --min <number>', 'Minimum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value <= 0.0)
                 throw new InvalidOptionArgumentError('Invalid minimum amount. Must be greater than 0.0.');
             return parsed_value;
         })
-        .option('--max <number>', 'Maximum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
+        .option('--mx, --max <number>', 'Maximum amount for random buy in SOL (if bundle buy is enabled)', (value) => {
             const parsed_value = parseFloat(value);
             if (isNaN(parsed_value)) throw new InvalidOptionArgumentError('Not a number.');
             if (parsed_value <= 0.0)
@@ -780,11 +808,10 @@ async function main() {
         .addOption(get_json_config_option())
         .action(async (cid, creator, options) => {
             const { mint, amount, from, to, list, bundle, min, max, config } = options;
-            const pg = program.opts().program;
             let buyers: common.Wallet[] | undefined = undefined;
             if (from !== undefined || to !== undefined || list !== undefined)
                 buyers = common.filter_wallets(wallets, from, to, list);
-            await commands.create_token(cid, creator, pg, amount, mint, buyers, min, max, bundle, config);
+            await commands.create_token(cid, creator, amount, mint, buyers, min, max, bundle, config);
         });
 
     program
@@ -924,6 +951,12 @@ async function main() {
             const { thread, interval } = options;
             await commands.benchmark(requests, '7536JKDpY6bGNq3qUcn87CAmwGPA4WcRctzsFDTr9i8N', thread, interval);
         });
+
+    program
+        .command('get-sender-endpoint')
+        .alias('gse')
+        .description('Get the Sender endpoint with the lowest latency')
+        .action(async () => await commands.get_sender_endpoint());
 
     program
         .command('convert-key')

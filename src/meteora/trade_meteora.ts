@@ -1,6 +1,7 @@
 import {
     AddressLookupTableAccount,
     AccountInfo,
+    Commitment,
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
@@ -24,11 +25,11 @@ import {
     METEORA_DBC_PROGRAM_ID,
     METEORA_DBC_STATE_HEADER,
     METEORA_LTA_ACCOUNT,
-    ACCOUNT_SUBSCRIPTION_FLUSH_MS,
     METEORA_SWAP_DISCRIMINATOR,
     PriorityLevel,
     SOL_MINT,
-    TRADE_MAX_SLIPPAGE
+    TRADE_MAX_SLIPPAGE,
+    PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import base58 from 'bs58';
 import {
@@ -58,6 +59,8 @@ import {
     u64
 } from '../common/struct_decoder';
 import { quote_exact_in, TradeDirection } from './damm_math';
+
+const METEORA_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Meteora];
 
 class MeteoraMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -360,13 +363,13 @@ export class Trader implements trade.IProgramTrader {
 
                 const config_info = await global.CONNECTION.getAccountInfo(state.config, COMMITMENT);
                 if (!config_info) {
-                    common.warn('DBC configuration account is missing.');
+                    // common.warn('DBC configuration account is missing.');
                     return [];
                 }
 
                 const config = DBCConfigStruct.decode(config_info.data);
                 if (config.token_type !== 0 || config.quote_token_flag !== 0) {
-                    common.warn('DBC Token-2022 or transfer-hook creator-fee claims are not supported.');
+                    // common.warn('DBC Token-2022 or transfer-hook creator-fee claims are not supported.');
                     return [];
                 }
                 const claimable: MeteoraClaimableAsset[] = [];
@@ -559,7 +562,15 @@ export class Trader implements trade.IProgramTrader {
         }
 
         if (instructions.length === 0) throw new Error('Invalid assets were provided, no tx was derived');
-        return await trade.send_tx(instructions, [trader], priority);
+        return await trade.send_tx(
+            instructions,
+            [trader],
+            priority,
+            undefined,
+            false,
+            undefined,
+            METEORA_COMPUTE_UNIT_LIMIT
+        );
     }
 
     private damm_u256_le(data: Buffer): bigint {
@@ -631,7 +642,7 @@ export class Trader implements trade.IProgramTrader {
             if (!info || !info.owner.equals(METEORA_DAMM_V2_PROGRAM_ID)) continue;
             try {
                 pool_states.set(pools[i].toBase58(), DAMMV2StateStruct.decode(info.data));
-            } catch {}
+            } catch { }
         }
         if (pool_states.size === 0) return [];
         const slot = await global.CONNECTION.getSlot(COMMITMENT);
@@ -696,7 +707,7 @@ export class Trader implements trade.IProgramTrader {
                     (((BigInt.asUintN(64, current_time < reward.end ? current_time : reward.end) - reward.last_update) *
                         reward.rate) <<
                         128n) /
-                        pool_state.liquidity;
+                    pool_state.liquidity;
                 const amount = pending + ((liquidity * (stored - checkpoint)) >> 192n);
                 if (amount <= 0n) continue;
                 const token_program = await this.get_token_program(reward.mint);
@@ -725,10 +736,19 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: MeteoraMintMeta,
         slippage: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const [instructions, ltas] = await this.buy_token_instructions(sol_amount, buyer, mint_meta, slippage);
-        return await trade.send_tx(instructions, [buyer], priority, protection_tip, ltas);
+        return await trade.send_tx(
+            instructions,
+            [buyer],
+            priority,
+            protection_tip,
+            mev_protect,
+            ltas,
+            METEORA_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async sell_token(
@@ -737,10 +757,19 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: MeteoraMintMeta,
         slippage: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const [instructions, ltas] = await this.sell_token_instructions(token_amount, seller, mint_meta, slippage);
-        return await trade.send_tx(instructions, [seller], priority, protection_tip, ltas);
+        return await trade.send_tx(
+            instructions,
+            [seller],
+            priority,
+            protection_tip,
+            mev_protect,
+            ltas,
+            METEORA_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async buy_token_instructions(
@@ -817,7 +846,14 @@ export class Trader implements trade.IProgramTrader {
             mint_meta,
             slippage
         );
-        return await trade.send_bundle([buy_instructions, sell_instructions], [[trader], [trader]], tip, priority, lta);
+        return await trade.send_bundle(
+            [buy_instructions, sell_instructions],
+            [[trader], [trader]],
+            tip,
+            priority,
+            lta,
+            METEORA_COMPUTE_UNIT_LIMIT
+        );
     }
 
     public async buy_sell(
@@ -827,7 +863,8 @@ export class Trader implements trade.IProgramTrader {
         slippage: number,
         interval_ms?: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<[String, String]> {
         const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
@@ -837,14 +874,24 @@ export class Trader implements trade.IProgramTrader {
         );
 
         if (interval_ms && interval_ms > 0) {
-            const buy_signature = await trade.send_tx(buy_instructions, [trader], priority, protection_tip, ltas);
+            const buy_signature = await trade.send_tx(
+                buy_instructions,
+                [trader],
+                priority,
+                protection_tip,
+                mev_protect,
+                ltas,
+                METEORA_COMPUTE_UNIT_LIMIT
+            );
             await common.sleep(interval_ms);
             const sell_signature = await trade.retry_send_tx(
                 sell_instructions,
                 [trader],
                 priority,
                 protection_tip,
-                ltas
+                mev_protect,
+                ltas,
+                METEORA_COMPUTE_UNIT_LIMIT
             );
             return [buy_signature, sell_signature];
         }
@@ -854,7 +901,9 @@ export class Trader implements trade.IProgramTrader {
             [trader],
             priority,
             protection_tip,
-            ltas
+            mev_protect,
+            ltas,
+            METEORA_COMPUTE_UNIT_LIMIT
         );
         return [signature, signature];
     }
@@ -895,93 +944,101 @@ export class Trader implements trade.IProgramTrader {
     public async subscribe_mint_meta(
         mint_meta: MeteoraMintMeta,
         callback: (mint_meta: MeteoraMintMeta) => void,
-        sol_price: number = 0
+        sol_price: number = 0,
+        commitment: Commitment = COMMITMENT
     ): Promise<() => void> {
         let dbc_sub: number | undefined;
         let damm_sub: number | undefined;
-        let flush_timeout: NodeJS.Timeout | null = null;
-        let latest_update: MeteoraMintMeta | null = null;
         let stopped = false;
+        let current_mint_meta = mint_meta;
+        let latest_slot = 0;
+        let damm_started = false;
 
-        const publish = (update: MeteoraMintMeta) => {
-            latest_update = update;
-            if (flush_timeout || stopped) return;
-            flush_timeout = setTimeout(() => {
-                flush_timeout = null;
-                if (!latest_update || stopped) return;
-                callback(latest_update);
-                latest_update = null;
-            }, ACCOUNT_SUBSCRIPTION_FLUSH_MS);
+        const publish = (update: MeteoraMintMeta, slot: number = 0) => {
+            if (stopped || (slot && slot < latest_slot)) return;
+            if (slot) latest_slot = slot;
+            current_mint_meta = update;
+            callback(update);
         };
         const unsubscribe = (id: number | undefined) => {
-            if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => {});
+            if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => { });
         };
-        const subscribe_damm = (pool: PublicKey) => {
+        const subscribe_damm = (pool: trade.ProgramAccount, slot: number = 0) => {
+            if (damm_started) return;
+            damm_started = true;
+            publish(this.damm_v2_mint_meta(current_mint_meta, pool, sol_price), slot);
             damm_sub = global.CONNECTION.onAccountChange(
-                pool,
-                (account) => {
+                pool.pubkey,
+                (account, context) => {
                     if (stopped) return;
-                    publish(this.damm_v2_mint_meta(mint_meta, { pubkey: pool, account }, sol_price));
+                    publish(
+                        this.damm_v2_mint_meta(current_mint_meta, { pubkey: pool.pubkey, account }, sol_price),
+                        context.slot
+                    );
                 },
-                { commitment: COMMITMENT }
+                { commitment }
             );
         };
         const mint = new PublicKey(mint_meta.mint);
         const damm = await this.get_damm_from_mint(mint);
         if (damm) {
-            subscribe_damm(damm.pubkey);
+            subscribe_damm(damm);
         } else {
             const dbc_pool = new PublicKey(mint_meta.pool);
+            const process_dbc = async (account: AccountInfo<Buffer>, slot: number = 0) => {
+                if (stopped || (slot && slot < latest_slot)) return;
+                const state = DBCStateStruct.decode(account.data);
+                const metrics = this.get_dbc_token_metrics({
+                    pool: dbc_pool,
+                    base_mint: mint,
+                    config: state.config,
+                    quote_mint: SOL_MINT,
+                    token_decimals: current_mint_meta.token_decimal,
+                    total_supply: current_mint_meta.total_supply,
+                    base_vault: state.base_vault,
+                    quote_vault: state.quote_vault,
+                    base_reserve: state.base_reserve,
+                    quote_reserve: state.quote_reserve,
+                    sqrt_price: common.read_biguint_le(state.sqrt_price, 0, 16),
+                    is_migrated: state.is_migrated === 1,
+                    creator: new PublicKey(Buffer.alloc(32))
+                });
+                publish(
+                    new MeteoraMintMeta({
+                        ...current_mint_meta,
+                        pool: dbc_pool.toBase58(),
+                        sol_reserves: state.quote_reserve,
+                        token_reserves: state.base_reserve,
+                        dbc_data: {
+                            sqrt_price: common.read_biguint_le(state.sqrt_price, 0, 16),
+                            base_vault: state.base_vault.toBase58(),
+                            quote_vault: state.quote_vault.toBase58(),
+                            config: state.config.toBase58()
+                        },
+                        complete: false,
+                        market_cap: metrics.mcap_sol,
+                        usd_market_cap: metrics.mcap_sol * sol_price
+                    }),
+                    slot
+                );
+                if (state.is_migrated !== 1 || damm_started) return;
+                const migrated = await this.get_damm_from_mint(mint);
+                if (!migrated || (slot && slot < latest_slot)) return;
+                unsubscribe(dbc_sub);
+                dbc_sub = undefined;
+                subscribe_damm(migrated, slot);
+            };
+
             dbc_sub = global.CONNECTION.onAccountChange(
                 dbc_pool,
-                async (account: AccountInfo<Buffer>) => {
-                    if (stopped) return;
-                    const state = DBCStateStruct.decode(account.data);
-                    const metrics = this.get_dbc_token_metrics({
-                        pool: dbc_pool,
-                        base_mint: mint,
-                        config: state.config,
-                        quote_mint: SOL_MINT,
-                        token_decimals: mint_meta.token_decimal,
-                        total_supply: mint_meta.total_supply,
-                        base_vault: state.base_vault,
-                        quote_vault: state.quote_vault,
-                        base_reserve: state.base_reserve,
-                        quote_reserve: state.quote_reserve,
-                        sqrt_price: common.read_biguint_le(state.sqrt_price, 0, 16),
-                        is_migrated: state.is_migrated === 1,
-                        creator: new PublicKey(Buffer.alloc(32))
-                    });
-                    publish(
-                        new MeteoraMintMeta({
-                            ...mint_meta,
-                            pool: dbc_pool.toBase58(),
-                            sol_reserves: state.quote_reserve,
-                            token_reserves: state.base_reserve,
-                            dbc_data: {
-                                sqrt_price: common.read_biguint_le(state.sqrt_price, 0, 16),
-                                base_vault: state.base_vault.toBase58(),
-                                quote_vault: state.quote_vault.toBase58(),
-                                config: state.config.toBase58()
-                            },
-                            complete: state.is_migrated === 1,
-                            market_cap: metrics.mcap_sol,
-                            usd_market_cap: metrics.mcap_sol * sol_price
-                        })
-                    );
-                    if (state.is_migrated !== 1) return;
-                    const migrated = await this.get_damm_from_mint(mint);
-                    if (!migrated) return;
-                    unsubscribe(dbc_sub);
-                    dbc_sub = undefined;
-                    subscribe_damm(migrated.pubkey);
-                },
-                { commitment: COMMITMENT }
+                (account, context) => void process_dbc(account, context.slot),
+                { commitment }
             );
+            const response = await global.CONNECTION.getAccountInfoAndContext(dbc_pool, commitment);
+            if (response.value) await process_dbc(response.value, response.context.slot);
         }
         return () => {
             stopped = true;
-            if (flush_timeout) clearTimeout(flush_timeout);
             unsubscribe(dbc_sub);
             unsubscribe(damm_sub);
         };
@@ -1051,19 +1108,29 @@ export class Trader implements trade.IProgramTrader {
         return mint_meta;
     }
 
-    public async default_mint_meta(mint: PublicKey, sol_price: number = 0): Promise<MeteoraMintMeta> {
-        const meta = await trade.get_token_meta(mint).catch(() => {
-            return {
-                token_name: 'Unknown',
-                token_symbol: 'Unknown',
+    public async default_mint_meta(mint: PublicKey, sol_price: number = 0, data?: object): Promise<MeteoraMintMeta> {
+        const decoded = data as Record<string, unknown> | undefined;
+        const meta = decoded
+            ? {
+                token_name: typeof decoded.name === 'string' ? decoded.name : 'Unknown',
+                token_symbol: typeof decoded.symbol === 'string' ? decoded.symbol : 'Unknown',
                 token_supply: 10 ** 18,
                 token_decimal: 9,
                 token_program: TOKEN_PROGRAM_ID
-            };
-        });
+            }
+            : await trade.get_token_meta(mint).catch(() => {
+                return {
+                    token_name: 'Unknown',
+                    token_symbol: 'Unknown',
+                    token_supply: 10 ** 18,
+                    token_decimal: 9,
+                    token_program: TOKEN_PROGRAM_ID
+                };
+            });
 
         return new MeteoraMintMeta({
             mint: mint.toString(),
+            pool: typeof decoded?.pool === 'string' ? decoded.pool : undefined,
             symbol: meta.token_symbol,
             name: meta.token_name,
             complete: false,
@@ -1079,7 +1146,7 @@ export class Trader implements trade.IProgramTrader {
 
     private get_dbc_token_metrics(state: DBCState): trade.TokenMetrics {
         const price_sol = this.calc_token_price(state.sqrt_price);
-        const mcap_sol = price_sol * Number(state.base_reserve / 10n ** BigInt(state.token_decimals));
+        const mcap_sol = (price_sol * Number(state.total_supply)) / LAMPORTS_PER_SOL;
         return { price_sol, mcap_sol };
     }
 
@@ -1189,7 +1256,7 @@ export class Trader implements trade.IProgramTrader {
         const token_reserves = mint_is_token_a ? state.token_a_amount : state.token_b_amount;
         const sol_reserves = mint_is_token_a ? state.token_b_amount : state.token_a_amount;
         const price_sol = Number(sol_reserves) / Number(token_reserves);
-        const market_cap = (price_sol * Number(mint_meta.total_supply)) / 10 ** mint_meta.token_decimal;
+        const market_cap = (price_sol * Number(mint_meta.total_supply)) / LAMPORTS_PER_SOL;
 
         return new MeteoraMintMeta({
             ...mint_meta,

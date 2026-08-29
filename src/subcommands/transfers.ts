@@ -2,7 +2,6 @@ import { Keypair, LAMPORTS_PER_SOL, Signer, SystemProgram, TokenAmount, Transact
 import {
     COMMANDS_INTERVAL_MS,
     COMMITMENT,
-    JITO_BUNDLE_INTERVAL_MS,
     PriorityLevel,
     TRANSFER_INTERVAL_MS,
     TRANSFER_MAX_DEPTH,
@@ -355,7 +354,7 @@ export async function execute_depth_sol_fund(
                     failed.push({ name: wallet.name, id: wallet.id });
                 })
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
     }
     await Promise.allSettled(promises);
 
@@ -481,7 +480,7 @@ export async function execute_depth_dist_token(
                     failed.push({ name: wallet.name, id: wallet.id });
                 })
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
     }
     await Promise.allSettled(promises);
 

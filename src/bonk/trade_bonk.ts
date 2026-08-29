@@ -22,12 +22,15 @@ import {
     SYSTEM_PROGRAM_ID,
     TRADE_DEFAULT_TOKEN_DECIMALS,
     TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
-    TRADE_MAX_WALLETS_PER_CREATE_TX
+    TRADE_MAX_WALLETS_PER_CREATE_TX,
+    PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import { RaydiumMintMeta, RaydiumTrader } from '../raydium/trade_raydium';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+
+const BONK_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Bonk];
 
 export class BonkTrader extends RaydiumTrader {
     public override get_name(): string {
@@ -65,7 +68,11 @@ export class BonkTrader extends RaydiumTrader {
         priority?: PriorityLevel
     ): Promise<String> {
         if ((traders && !bundle_tip) || (!traders && bundle_tip)) throw new Error('Invalid create bundle parameters');
-        if (traders && (traders.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE || traders.length < 1))
+        const max_bundle_wallets = Math.min(
+            TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+            (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
+        );
+        if (traders && (traders.length > max_bundle_wallets || traders.length < 1))
             throw new Error(`Invalid traders count: ${traders.length}`);
         let mint_meta = await this.default_mint_meta(mint.publicKey);
         const create_instructions = this.get_create_token_instructions(
@@ -79,7 +86,15 @@ export class BonkTrader extends RaydiumTrader {
             create_instructions.push(...(await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.005)));
         const ltas = await trade.get_ltas(this.get_lta_addresses());
         if (!traders)
-            return await trade.send_tx(create_instructions, [creator, mint], PriorityLevel.HIGH, undefined, ltas);
+            return await trade.send_tx(
+                create_instructions,
+                [creator, mint],
+                PriorityLevel.HIGH,
+                undefined,
+                false,
+                ltas,
+                BONK_COMPUTE_UNIT_LIMIT
+            );
         const generated_lta = await trade.generate_trade_lta(
             creator,
             traders.map(([trader]) => Keypair.fromSecretKey(trader.secretKey)),
@@ -88,7 +103,8 @@ export class BonkTrader extends RaydiumTrader {
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
         const buy_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Signer[][] = [];
-        for (const group of common.chunks(traders, TRADE_MAX_WALLETS_PER_CREATE_TX - 1)) {
+        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
+        for (const group of common.chunks(traders, chunk_size)) {
             const instructions: TransactionInstruction[] = [];
             for (const [buyer, amount] of group) {
                 instructions.push(...(await this.get_buy_instructions(amount, buyer, mint_meta, 0.05)));
@@ -102,7 +118,8 @@ export class BonkTrader extends RaydiumTrader {
             [[creator, mint], ...bundle_signers],
             bundle_tip!,
             priority,
-            [generated_lta, ...ltas]
+            [generated_lta, ...ltas],
+            BONK_COMPUTE_UNIT_LIMIT
         );
     }
 

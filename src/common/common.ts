@@ -413,6 +413,17 @@ export function print_footer(columns: { width: number }[]) {
     log(`${BORDER_CHARS.bottomLeft}${bottomBorder}${BORDER_CHARS.bottomRight}`);
 }
 
+export function compute_backoff_delay(
+    attempt: number,
+    retry: { initial_delay_ms: number; backoff_multiplier: number; max_delay_ms: number },
+    jitterRatio = 0.3
+): number {
+    const exponential = retry.initial_delay_ms * Math.pow(retry.backoff_multiplier, Math.max(0, attempt));
+    const capped = Math.min(exponential, retry.max_delay_ms);
+    const jitter = Math.random() * jitterRatio * capped;
+    return capped + jitter;
+}
+
 export async function retry_with_backoff<T>(operation: () => Promise<T>, retries = 5, delay_ms = 100): Promise<T> {
     try {
         await sleep(delay_ms);

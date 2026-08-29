@@ -18,7 +18,10 @@ export class Runner extends snipe.SniperBase {
         return logs.some((log) => log.includes('Program log: Instruction: Create'));
     }
 
-    protected decode_create_instr(data: Uint8Array): { name: string; symbol: string; misc?: object } | null {
+    protected decode_create_instr(
+        data: Uint8Array,
+        _accounts: PublicKey[]
+    ): { name: string; symbol: string; misc?: object } | null {
         const prefix_v1 = Buffer.from(PUMP_CREATE_V1_DISCRIMINATOR);
         const prefix_v2 = Buffer.from(PUMP_CREATE_V2_DISCRIMINATOR);
         const data_prefix = Buffer.from(data.subarray(0, 8));

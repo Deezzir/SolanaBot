@@ -11,17 +11,15 @@ import {
 } from '@solana/web3.js';
 import * as trade from '../common/trade_common';
 import {
-    JITO_BUNDLE_SIZE,
     VOLUME_MAX_WALLETS_PER_EXEC,
     VOLUME_TRADE_SLIPPAGE,
-    JITO_BUNDLE_INTERVAL_MS,
     VOLUME_MAX_WALLETS_PER_COLLECT_TX,
     VOLUME_MAX_WALLETS_PER_FUND_TX,
     VOLUME_MAX_WALLETS_PER_TRADE_TX,
-    VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE,
     COMMITMENT
 } from '../constants';
 import { createCloseAccountInstruction } from '@solana/spl-token';
+import { get_program_compute_unit_limit } from '../common/get_trader';
 
 type VolumeConfig = {
     type: VolumeType;
@@ -118,7 +116,7 @@ export async function simulate(sol_price: number, volume_config: VolumeConfig, t
             let total_sol_utilization = volume_config.max_sol_amount * volume_config.wallet_cnt;
 
             total_fee_sol +=
-                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_FUND_TX * JITO_BUNDLE_SIZE)) *
+                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_FUND_TX * trade.get_bundle_size())) *
                 volume_config.bundle_tip;
             for (let i = 0; i < volume_config.executions; i++) {
                 for (let j = 0; j < volume_config.wallet_cnt; j++) {
@@ -131,9 +129,10 @@ export async function simulate(sol_price: number, volume_config: VolumeConfig, t
                 }
             }
             total_fee_sol +=
-                Math.ceil(total_wallet_cnt / VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE) * volume_config.bundle_tip;
+                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_TRADE_TX * trade.get_bundle_size())) *
+                volume_config.bundle_tip;
             total_fee_sol +=
-                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_COLLECT_TX * JITO_BUNDLE_SIZE)) *
+                Math.ceil(total_wallet_cnt / (VOLUME_MAX_WALLETS_PER_COLLECT_TX * trade.get_bundle_size())) *
                 volume_config.bundle_tip;
 
             return {
@@ -187,7 +186,7 @@ async function fund_bundles(
         );
     });
 
-    const bundles = common.chunks(common.chunks(instructions, VOLUME_MAX_WALLETS_PER_FUND_TX), JITO_BUNDLE_SIZE);
+    const bundles = common.chunks(common.chunks(instructions, VOLUME_MAX_WALLETS_PER_FUND_TX), trade.get_bundle_size());
     const promises: Promise<void>[] = [];
     for (const bundle_instructions of bundles) {
         promises.push(
@@ -204,7 +203,7 @@ async function fund_bundles(
                     throw error;
                 })
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
     }
     await Promise.all(promises);
 }
@@ -227,7 +226,7 @@ async function collect_bundles(
     ).filter((pair) => pair !== undefined);
     const bundles = common.chunks(
         common.chunks(filtered_keypairs, VOLUME_MAX_WALLETS_PER_COLLECT_TX),
-        JITO_BUNDLE_SIZE
+        trade.get_bundle_size()
     );
 
     const promises: Promise<void>[] = [];
@@ -260,7 +259,7 @@ async function collect_bundles(
                 .then((signature) => common.log(common.green(`Collect Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Collect Bundle failed: ${error}`)))
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
     }
     await Promise.all(promises);
 }
@@ -274,7 +273,7 @@ async function buy_sell_bundles(
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets to buy/sell');
     const bundles = common
-        .chunks(wallets, VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE)
+        .chunks(wallets, VOLUME_MAX_WALLETS_PER_TRADE_TX * trade.get_bundle_size())
         .map((chunk) => common.chunks(chunk, VOLUME_MAX_WALLETS_PER_TRADE_TX));
 
     const promises: Promise<void>[] = [];
@@ -314,11 +313,18 @@ async function buy_sell_bundles(
         }
         promises.push(
             trade
-                .send_bundle(bundle_instructions, bundle_signers, bundle_tip, undefined, ltas)
+                .send_bundle(
+                    bundle_instructions,
+                    bundle_signers,
+                    bundle_tip,
+                    undefined,
+                    ltas,
+                    get_program_compute_unit_limit()
+                )
                 .then((signature) => common.log(common.green(`Trade Bundle completed, signature: ${signature}`)))
                 .catch((error) => common.error(common.red(`Trade Bundle failed: ${error}`)))
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.all(promises);

@@ -1,7 +1,8 @@
 import { AddressLookupTableAccount, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common';
 import * as trade from '../common/trade_common';
-import { COMMITMENT, JITO_BUNDLE_INTERVAL_MS, JITO_BUNDLE_SIZE, PriorityLevel, SENDER_INTERVAL_MS } from '../constants';
+import { COMMITMENT, PriorityLevel } from '../constants';
+import { get_program_compute_unit_limit } from '../common/get_trader';
 
 export async function bundle_buy(
     mint_meta: trade.IMintMeta,
@@ -11,7 +12,7 @@ export async function bundle_buy(
     bundle_tip: number,
     priority: PriorityLevel
 ): Promise<void> {
-    const wallet_bundles = common.chunks(entries, JITO_BUNDLE_SIZE);
+    const wallet_bundles = common.chunks(entries, trade.get_bundle_size());
     const bundles: Promise<void>[] = [];
     const ltas: AddressLookupTableAccount[] = [];
     let failed = 0;
@@ -48,14 +49,14 @@ export async function bundle_buy(
         if (instructions.length === 0) continue;
         bundles.push(
             trade
-                .send_bundle(instructions, signers, bundle_tip, priority, ltas)
+                .send_bundle(instructions, signers, bundle_tip, priority, ltas, get_program_compute_unit_limit())
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => {
                     failed++;
                     common.error(common.red(`Bundle failed: ${error}`));
                 })
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
@@ -93,7 +94,7 @@ export async function bundle_sell(
         .filter((wallet) => wallet !== null)
         .sort((a, b) => b!.token_amount.uiAmount! - a!.token_amount.uiAmount!);
 
-    const wallet_bundles = common.chunks(wallets_with_balance, JITO_BUNDLE_SIZE);
+    const wallet_bundles = common.chunks(wallets_with_balance, trade.get_bundle_size());
     const bundles: Promise<void>[] = [];
     const ltas: AddressLookupTableAccount[] = [];
     let failed = 0;
@@ -128,14 +129,14 @@ export async function bundle_sell(
         if (instructions.length === 0) continue;
         bundles.push(
             trade
-                .send_bundle(instructions, signers, bundle_tip, priority, ltas)
+                .send_bundle(instructions, signers, bundle_tip, priority, ltas, get_program_compute_unit_limit())
                 .then((signature) => common.log(common.green(`Bundle completed, signature: ${signature}`)))
                 .catch((error) => {
                     failed++;
                     common.error(common.red(`Bundle failed: ${error}`));
                 })
         );
-        await common.sleep(JITO_BUNDLE_INTERVAL_MS);
+        await common.sleep(trade.get_bundle_interval_ms());
         mint_meta = await trader.update_mint_meta(mint_meta);
     }
     await Promise.allSettled(bundles);
@@ -148,9 +149,9 @@ export async function seq_buy(
     trader: trade.IProgramTrader,
     slippage: number,
     priority: PriorityLevel,
-    protection_tip?: number
+    protection_tip?: number,
+    mev_protect: boolean = false
 ): Promise<void> {
-    const transactions: Promise<void>[] = [];
     let failed = 0;
 
     for (const entry of entries) {
@@ -162,28 +163,28 @@ export async function seq_buy(
             common.log(
                 `Buying ${amount.toFixed(6)} SOL worth of tokens with ${buyer.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
-            transactions.push(
-                trader
-                    .buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip)
-                    .then((signature) =>
-                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
-                    )
-                    .catch((error) => {
-                        failed++;
-                        common.error(
-                            common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${error.message}`)
-                        );
-                    })
-            );
-            mint_meta = trader.update_mint_meta_reserves(mint_meta, amount);
-            if (protection_tip) await common.sleep(SENDER_INTERVAL_MS);
+            try {
+                const signature = await trader.buy_token(
+                    amount,
+                    buyer,
+                    mint_meta,
+                    slippage,
+                    priority,
+                    protection_tip,
+                    mev_protect
+                );
+                common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
+            } catch (error) {
+                failed++;
+                const message = error instanceof Error ? error.message : String(error);
+                common.error(common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${message}`));
+            }
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             failed++;
             common.error(common.red(`Failed to buy the token for ${wallet.name}: ${error}`));
         }
     }
-    await Promise.allSettled(transactions);
     if (failed > 0) throw new Error(`${failed} sequential buy operation(s) failed.`);
 }
 
@@ -194,9 +195,9 @@ export async function seq_sell(
     percent: number,
     slippage: number,
     priority: PriorityLevel,
-    protection_tip?: number
+    protection_tip?: number,
+    mev_protect: boolean = false
 ): Promise<void> {
-    const transactions: Promise<void>[] = [];
     let failed = 0;
 
     for (const wallet of wallets) {
@@ -213,27 +214,27 @@ export async function seq_sell(
             common.log(
                 `Selling ${token_amount_to_sell.uiAmount} tokens from ${seller.publicKey.toString().padEnd(44, ' ')} (${wallet.name})...`
             );
-            transactions.push(
-                trader
-                    .sell_token(token_amount_to_sell, seller, mint_meta, slippage, priority, protection_tip)
-                    .then((signature) =>
-                        common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
-                    )
-                    .catch((error) => {
-                        failed++;
-                        common.error(
-                            common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${error.message}`)
-                        );
-                    })
-            );
-            mint_meta = trader.update_mint_meta_reserves(mint_meta, token_amount_to_sell);
-            if (protection_tip) await common.sleep(SENDER_INTERVAL_MS);
+            try {
+                const signature = await trader.sell_token(
+                    token_amount_to_sell,
+                    seller,
+                    mint_meta,
+                    slippage,
+                    priority,
+                    protection_tip,
+                    mev_protect
+                );
+                common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`));
+            } catch (error) {
+                failed++;
+                const message = error instanceof Error ? error.message : String(error);
+                common.error(common.red(`Transaction failed for ${wallet.name} (${wallet.id}): ${message}`));
+            }
             mint_meta = await trader.update_mint_meta(mint_meta);
         } catch (error) {
             failed++;
             common.error(common.red(`Failed to sell the token for ${wallet.name}: ${error}`));
         }
     }
-    await Promise.allSettled(transactions);
     if (failed > 0) throw new Error(`${failed} sequential sell operation(s) failed.`);
 }

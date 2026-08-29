@@ -1,5 +1,6 @@
 import {
     AddressLookupTableAccount,
+    Commitment,
     Keypair,
     PublicKey,
     Signer,
@@ -9,6 +10,7 @@ import {
 import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import {
+    COMMITMENT,
     JUPITER_API_URL,
     PriorityLevel,
     SOL_MINT,
@@ -174,11 +176,21 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
         const mint = new PublicKey(mint_meta.mint);
-        return await this.swap_jupiter(sol_token_amount, buyer, SOL_MINT, mint, slippage, priority, protection_tip);
+        return await this.swap_jupiter(
+            sol_token_amount,
+            buyer,
+            SOL_MINT,
+            mint,
+            slippage,
+            priority,
+            protection_tip,
+            mev_protect
+        );
     }
 
     public async buy_token_instructions(
@@ -199,10 +211,20 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05,
         priority: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const mint = new PublicKey(mint_meta.mint);
-        return await this.swap_jupiter(token_amount, seller, mint, SOL_MINT, slippage, priority, protection_tip);
+        return await this.swap_jupiter(
+            token_amount,
+            seller,
+            mint,
+            SOL_MINT,
+            slippage,
+            priority,
+            protection_tip,
+            mev_protect
+        );
     }
 
     public async sell_token_instructions(
@@ -247,7 +269,8 @@ export class Trader implements trade.IProgramTrader {
         slippage: number = 0.05,
         interval_ms?: number,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<[String, String]> {
         const [buy_instructions, sell_instructions, ltas] = await this.buy_sell_instructions(
             sol_amount,
@@ -257,13 +280,21 @@ export class Trader implements trade.IProgramTrader {
         );
 
         if (interval_ms && interval_ms > 0) {
-            const buy_signature = await trade.send_tx(buy_instructions, [trader], priority, protection_tip, ltas);
+            const buy_signature = await trade.send_tx(
+                buy_instructions,
+                [trader],
+                priority,
+                protection_tip,
+                mev_protect,
+                ltas
+            );
             await common.sleep(interval_ms);
             const sell_signature = await trade.retry_send_tx(
                 sell_instructions,
                 [trader],
                 priority,
                 protection_tip,
+                mev_protect,
                 ltas
             );
             return [buy_signature, sell_signature];
@@ -274,6 +305,7 @@ export class Trader implements trade.IProgramTrader {
             [trader],
             priority,
             protection_tip,
+            mev_protect,
             ltas
         );
         return [signature, signature];
@@ -364,7 +396,9 @@ export class Trader implements trade.IProgramTrader {
 
     public async subscribe_mint_meta(
         _mint_meta: JupiterMintMeta,
-        _callback: (mint_meta: JupiterMintMeta) => void
+        _callback: (mint_meta: JupiterMintMeta) => void,
+        _sol_price: number = 0,
+        _commitment: Commitment = COMMITMENT
     ): Promise<() => void> {
         throw new Error('Not implemented');
     }
@@ -394,11 +428,12 @@ export class Trader implements trade.IProgramTrader {
         to: PublicKey,
         slippage: number = 0.05,
         priority?: PriorityLevel,
-        protection_tip?: number
+        protection_tip?: number,
+        mev_protect: boolean = false
     ): Promise<String> {
         const quote = await this.quote_jupiter(amount, from, to, slippage);
         const [instructions, lta_accounts] = await this.swap_jupiter_instructions(seller, quote);
-        return await trade.send_tx(instructions, [seller], priority, protection_tip, lta_accounts);
+        return await trade.send_tx(instructions, [seller], priority, protection_tip, mev_protect, lta_accounts);
     }
 
     private async quote_jupiter(

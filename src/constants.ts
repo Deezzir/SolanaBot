@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import type { Program } from './common/common';
 dotenv.config({ path: './.env', quiet: true });
 
 function get_env_variable(var_name: string, default_value: string = ''): any {
@@ -14,6 +15,7 @@ function get_env_variable(var_name: string, default_value: string = ''): any {
 // NETWORK CONSTANTS
 const HELIUS_API_KEY = get_env_variable('HELIUS_API_KEY');
 export const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+export const WS_URL = `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 export const RPC_REQUESTS_PER_SECOND = Number(get_env_variable('RPC_REQUESTS_PER_SECOND', '50'));
 export const COMMITMENT = 'confirmed';
 
@@ -87,14 +89,32 @@ export const JITO_ENDPOINTS = [
     'https://tokyo.mainnet.block-engine.jito.wtf/api/v1'
 ];
 export const SENDER_ENDPOINTS = [
-    'http://slc-sender.helius-rpc.com/fast',
-    'http://ewr-sender.helius-rpc.com/fast',
-    'http://lon-sender.helius-rpc.com/fast',
-    'http://fra-sender.helius-rpc.com/fast',
-    'http://ams-sender.helius-rpc.com/fast',
-    'http://sg-sender.helius-rpc.com/fast',
-    'http://tyo-sender.helius-rpc.com/fast'
+    'http://slc-sender.helius-rpc.com',
+    'http://ewr-sender.helius-rpc.com',
+    'http://lon-sender.helius-rpc.com',
+    'http://fra-sender.helius-rpc.com',
+    'http://ams-sender.helius-rpc.com',
+    'http://sg-sender.helius-rpc.com',
+    'http://tyo-sender.helius-rpc.com'
 ];
+export const SENDER_ENDPOINT: string | null = process.env['SENDER_ENDPOINT'] || null;
+export const SENDER_MAX_MIN_TIP: number = 1000000 / LAMPORTS_PER_SOL;
+export const SENDER_MAX_BUNDLE_SIZE = 4;
+export const SENDER_MAX_MIN_PRIORITY_FEE = 5000;
+export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
+export const COMPUTE_UNIT_BUFFER = 1.1;
+export const PROGRAM_COMPUTE_UNIT_LIMITS: Partial<Record<Program, number>> = {
+    pump: 250_000,
+    raydium: 300_000,
+    bonk: 300_000,
+    meteora: 400_000
+};
+
+export enum TransactionRelay {
+    Sender = 'sender',
+    Jito = 'jito'
+}
+
 export enum PriorityLevel {
     MIN = 'Min',
     LOW = 'Low',
@@ -104,7 +124,6 @@ export enum PriorityLevel {
     UNSAFE_MAX = 'UnsafeMax',
     DEFAULT = 'Default'
 }
-export const ACCOUNT_SUBSCRIPTION_FLUSH_MS = 50;
 export const ACCOUNT_READ_CACHE_TTL_MS = 50;
 export const CACHE_SIZE_MAX = 100;
 
@@ -236,6 +255,7 @@ export const MAYHEM_SOL_VAULT = new PublicKey('BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFez
 export const MAYHEM_STATE_SEED = new Uint8Array([109, 97, 121, 104, 101, 109, 45, 115, 116, 97, 116, 101]);
 
 // SNIPE CONSTANTS
+export const SNIPE_SUB_COMMITMENT = 'processed';
 export const SNIPE_BUY_SLIPPAGE = 0.85;
 export const SNIPE_SELL_SLIPPAGE = 0.5;
 export const SNIPE_MIN_BUY = 0.005;
@@ -258,7 +278,6 @@ export const DROP_PRESALE_CSV = 'presaleusers.csv';
 // VOLUME CONSTANTS
 export const VOLUME_MAX_WALLETS_PER_EXEC = 20;
 export const VOLUME_TRADE_SLIPPAGE = 0.9;
-export const VOLUME_MAX_WALLETS_PER_TRADE_BUNDLE = 10;
 export const VOLUME_MAX_WALLETS_PER_TRADE_TX = 2;
 export const VOLUME_MAX_WALLETS_PER_COLLECT_TX = 10;
 export const VOLUME_MAX_WALLETS_PER_FUND_TX = 20;

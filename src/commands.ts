@@ -8,8 +8,10 @@ import {
     COMMITMENT,
     HELIUS_RPC,
     PriorityLevel,
+    SENDER_ENDPOINTS,
     SOL_MINT,
     TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+    TRADE_MAX_WALLETS_PER_CREATE_TX,
     WALLETS_FILE_HEADERS
 } from './constants';
 import * as common from './common/common';
@@ -20,9 +22,10 @@ import * as token_drop from './subcommands/token_drop';
 import * as pnl from './subcommands/pnl';
 import * as mass_trade from './subcommands/mass_trade';
 import { get_trader, get_sniper } from './common/get_trader';
+import { SubscriberType } from './common/subscriber';
 
-function require_program(program: common.Program, supported: common.Program[], command: string): void {
-    if (!supported.includes(program)) throw new Error(`${command} is not supported for ${program}.`);
+function require_program(supported: common.Program[], command: string): void {
+    if (!supported.includes(global.PROGRAM)) throw new Error(`${command} is not supported for ${global.PROGRAM}.`);
 }
 
 export async function burn_token(mint: PublicKey, burner: Signer, amount?: number, percent?: number): Promise<void> {
@@ -144,17 +147,15 @@ export async function clean(wallets: common.Wallet[], burn: boolean = false): Pr
 
 export async function claim_fees(
     wallets: common.Wallet[],
-    program: common.Program,
     print_only: boolean,
     priority?: PriorityLevel
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
     require_program(
-        program,
         [common.Program.Pump, common.Program.Meteora, common.Program.Raydium, common.Program.Bonk],
         'Reward claims'
     );
-    const trader = get_trader(program);
+    const trader = get_trader();
     let total_sol_raw = 0n;
     let failed = 0;
     for (const wallet of wallets) {
@@ -192,13 +193,9 @@ export async function claim_fees(
     if (!print_only && failed > 0) throw new Error(`${failed} reward claim(s) failed.`);
 }
 
-export async function create_token_metadata(
-    json: common.IPFSMetadata,
-    image_path: string,
-    program = common.Program.Pump
-) {
-    require_program(program, [common.Program.Pump, common.Program.Bonk], 'Metadata creation');
-    const trader = get_trader(program);
+export async function create_token_metadata(json: common.IPFSMetadata, image_path: string) {
+    require_program([common.Program.Pump, common.Program.Bonk], 'Metadata creation');
+    const trader = get_trader();
     common.log(common.yellow('Uploading metadata...'));
     common.log(JSON.stringify(json, null, 2));
     const cid = await trader.create_token_metadata(json, image_path);
@@ -208,7 +205,6 @@ export async function create_token_metadata(
 export async function create_token(
     meta_cid: string,
     dev: common.Wallet,
-    program: common.Program = common.Program.Pump,
     dev_buy?: number,
     mint?: Keypair,
     wallets?: common.Wallet[],
@@ -217,10 +213,14 @@ export async function create_token(
     bundle_tip?: number,
     config?: object
 ): Promise<void> {
-    require_program(program, [common.Program.Pump, common.Program.Bonk], 'Token creation');
-    if (wallets && (wallets.length === 0 || wallets.length > TRADE_MAX_WALLETS_PER_CREATE_BUNDLE))
+    require_program([common.Program.Pump, common.Program.Bonk], 'Token creation');
+    const max_bundle_wallets = Math.min(
+        TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+        (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
+    );
+    if (wallets && (wallets.length === 0 || wallets.length > max_bundle_wallets))
         throw new Error(
-            `Invalid wallet count: ${wallets.length}. The number of wallets should be between 1 and ${TRADE_MAX_WALLETS_PER_CREATE_BUNDLE}`
+            `Invalid wallet count: ${wallets.length}. The number of wallets should be between 1 and ${max_bundle_wallets}`
         );
     if (bundle_tip && !wallets) throw new Error('Bundle tip is only available for bundle buy.');
     if (wallets && !bundle_tip) throw new Error('Bundle tip is required for bundle buy.');
@@ -229,7 +229,7 @@ export async function create_token(
     common.log('Creating a token...\n');
     dev_buy = dev_buy || 0;
 
-    const trader = get_trader(program);
+    const trader = get_trader();
     const balance = (await trade.get_balance(dev.keypair.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     const meta = await common.fetch_ipfs_json(meta_cid);
 
@@ -270,16 +270,11 @@ export async function create_token(
     }
 }
 
-export async function promote(
-    times: number,
-    meta_cid: string,
-    dev: Keypair,
-    program: common.Program = common.Program.Pump
-): Promise<void> {
-    require_program(program, [common.Program.Pump, common.Program.Bonk], 'Token promotion');
+export async function promote(times: number, meta_cid: string, dev: Keypair): Promise<void> {
+    require_program([common.Program.Pump, common.Program.Bonk], 'Token promotion');
     common.log(common.yellow(`Creating ${times} tokens with CID ${meta_cid}...\n`));
 
-    const trader = get_trader(program);
+    const trader = get_trader();
     const balance = (await trade.get_balance(dev.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     const meta = await common.fetch_ipfs_json(meta_cid);
 
@@ -535,14 +530,14 @@ export async function sell_token_once(
     percent?: number,
     slippage?: number,
     protection_tip?: number,
-    priority: PriorityLevel = PriorityLevel.DEFAULT,
-    program: common.Program = common.Program.Pump
+    mev_protect?: boolean,
+    priority: PriorityLevel = PriorityLevel.DEFAULT
 ): Promise<void> {
     slippage = slippage || COMMANDS_SELL_SLIPPAGE;
     percent ??= 1.0;
-    const trader = get_trader(program);
+    const trader = get_trader();
     const mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${global.PROGRAM}.`);
 
     common.log(common.yellow(`Selling the token by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...`));
@@ -565,7 +560,8 @@ export async function sell_token_once(
         mint_meta,
         slippage,
         priority,
-        protection_tip
+        protection_tip,
+        mev_protect
     );
     common.log(common.green(`Transaction completed, signature: ${signature}`));
 }
@@ -576,13 +572,13 @@ export async function buy_token_once(
     buyer: Keypair,
     slippage?: number,
     protection_tip?: number,
-    priority: PriorityLevel = PriorityLevel.DEFAULT,
-    program: common.Program = common.Program.Pump
+    mev_protect?: boolean,
+    priority: PriorityLevel = PriorityLevel.DEFAULT
 ): Promise<void> {
     slippage = slippage || COMMANDS_BUY_SLIPPAGE;
-    const trader = get_trader(program);
+    const trader = get_trader();
     const mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${global.PROGRAM}.`);
 
     common.log(common.yellow(`Buying ${amount} SOL of the token with mint ${mint.toString()}...`));
 
@@ -590,20 +586,19 @@ export async function buy_token_once(
     common.log(common.bold(`\nBuyer address: ${buyer.publicKey.toString()} | Balance: ${balance.toFixed(5)} SOL\n`));
     if (balance < amount) throw new Error(`Buyer balance is not enough to buy ${amount} SOL`);
 
-    const signature = await trader.buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip);
+    const signature = await trader.buy_token(amount, buyer, mint_meta, slippage, priority, protection_tip, mev_protect);
     common.log(common.green(`Transaction completed, signature: ${signature}`));
 }
 
 export async function warmup(
     wallets: common.Wallet[],
     priority: PriorityLevel = PriorityLevel.DEFAULT,
-    program: common.Program = common.Program.Pump,
     bundle_tip?: number,
     interval?: number,
     min?: number,
     max?: number
 ): Promise<void> {
-    require_program(program, [common.Program.Pump, common.Program.Bonk], 'Warmup');
+    require_program([common.Program.Pump, common.Program.Bonk], 'Warmup');
     const get_random_mints = async (trader: trade.IProgramTrader, count: number) => {
         let mints = [];
         do {
@@ -625,7 +620,7 @@ export async function warmup(
 
     const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (max - min) + min));
     if (token_cnts.length !== wallets.length) throw new Error();
-    const trader = get_trader(program);
+    const trader = get_trader();
 
     for (const [i, wallet] of wallets.entries()) {
         const buyer = wallet.keypair;
@@ -764,8 +759,8 @@ export async function buy_token(
     wallets: common.Wallet[],
     mint: PublicKey,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
-    program: common.Program = common.Program.Pump,
     protection_tip?: number,
+    mev_protect?: boolean,
     bundle_tip?: number,
     amount?: number,
     min?: number,
@@ -775,21 +770,23 @@ export async function buy_token(
     const SLIPPAGE = slippage || COMMANDS_BUY_SLIPPAGE;
 
     if (protection_tip && bundle_tip) throw new Error('Protection tip and bundle tip cannot be used together.');
+    if (mev_protect && bundle_tip) throw new Error('MEV protection and bundle tip cannot be used together.');
     if (wallets.length === 0) throw new Error('No wallets available.');
     if (!amount && (!min || !max)) throw new Error('Either amount or min and max should be provided.');
     if ((min && !max) || (!min && max)) throw new Error('Both min and max should be provided.');
     if (max && min && max < min) throw new Error('Invalid min and max values.');
 
-    const trader = get_trader(program);
+    const trader = get_trader();
     const entries: [common.Wallet, number][] = wallets.map((w) => [
         w,
         amount || common.uniform_random(min ?? 0, max ?? 0)
     ]);
     let mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${global.PROGRAM}.`);
     common.log(common.yellow(`Buying the tokens by the mint ${mint.toString()}...`));
 
-    if (!bundle_tip) return await mass_trade.seq_buy(mint_meta, entries, trader, SLIPPAGE, priority, protection_tip);
+    if (!bundle_tip)
+        return await mass_trade.seq_buy(mint_meta, entries, trader, SLIPPAGE, priority, protection_tip, mev_protect);
     return await mass_trade.bundle_buy(mint_meta, entries, trader, SLIPPAGE, bundle_tip, priority);
 }
 
@@ -797,8 +794,8 @@ export async function sell_token(
     wallets: common.Wallet[],
     mint: PublicKey,
     priority: PriorityLevel = PriorityLevel.DEFAULT,
-    program: common.Program = common.Program.Pump,
     protection_tip?: number,
+    mev_protect?: boolean,
     bundle_tip?: number,
     percent?: number,
     slippage?: number
@@ -806,17 +803,27 @@ export async function sell_token(
     slippage = slippage || COMMANDS_SELL_SLIPPAGE;
     percent ??= 1.0;
 
-    if (protection_tip && bundle_tip) throw new Error(' Protection tip and bundle tip cannot be used together.');
+    if (protection_tip && bundle_tip) throw new Error('Protection tip and bundle tip cannot be used together.');
+    if (mev_protect && bundle_tip) throw new Error('MEV protection and bundle tip cannot be used together.');
     if (wallets.length === 0) throw new Error('No wallets available.');
-    const trader = get_trader(program);
+    const trader = get_trader();
     let mint_meta = await trader.get_mint_meta(mint);
-    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${program}.`);
+    if (!mint_meta) throw new Error(`Mint metadata not found for program: ${global.PROGRAM}.`);
 
     common.log(common.yellow(`Selling all the tokens from the accounts by the mint ${mint.toString()}...`));
     common.log(common.yellow(`Selling ${percent * 100}% of the tokens...\n`));
 
     if (!bundle_tip)
-        return await mass_trade.seq_sell(mint_meta, wallets, trader, percent, slippage, priority, protection_tip);
+        return await mass_trade.seq_sell(
+            mint_meta,
+            wallets,
+            trader,
+            percent,
+            slippage,
+            priority,
+            protection_tip,
+            mev_protect
+        );
     return await mass_trade.bundle_sell(mint_meta, wallets, trader, percent, slippage, bundle_tip, priority);
 }
 
@@ -935,7 +942,7 @@ export async function distribute_token(
 
 export async function snipe(
     wallets: common.Wallet[],
-    program: common.Program = common.Program.Pump,
+    subscriber_type: SubscriberType = SubscriberType.Tx,
     json_config?: object
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
@@ -943,7 +950,7 @@ export async function snipe(
     if (worker_count === 0) throw new Error('No non-reserve wallets available for sniping.');
 
     const sol_price = await common.fetch_sol_price();
-    const sniper = get_sniper(program);
+    const sniper = get_sniper(subscriber_type);
     await sniper.setup_config(worker_count, json_config);
     await sniper.snipe(wallets, sol_price);
 }
@@ -1092,13 +1099,8 @@ export async function wallet_pnl(public_key: PublicKey): Promise<void> {
     common.log(`Total PnL: ${accent(total_pnl.toFixed(2) + '%')}\n`);
 }
 
-export async function start_volume(
-    funder: Keypair,
-    program: common.Program = common.Program.Pump,
-    simulate: boolean = false,
-    json_config?: object
-): Promise<void> {
-    const trader = get_trader(program);
+export async function start_volume(funder: Keypair, simulate: boolean = false, json_config?: object): Promise<void> {
+    const trader = get_trader();
     const volume_config = await volume.setup_config(json_config);
     const volume_type_name = volume.VolumeType[volume_config.type];
 
@@ -1323,4 +1325,44 @@ export async function close_ltas(wallet: common.Wallet): Promise<void> {
     close_sigs.forEach((sig) => common.log(`${sig}`));
 
     common.log(common.green(`\nClosed Address Lookup Tables:\n${ltas.map((lta) => lta.key.toBase58()).join('\n')}`));
+}
+
+export async function get_sender_endpoint(): Promise<void> {
+    common.log(common.yellow(`Finding the lowest latency endpoint...\n`));
+
+    const measure_latency = async (url: string, samples: number = 5): Promise<number> => {
+        const m: number[] = [];
+
+        for (let i = 0; i < samples; i++) {
+            const start = performance.now();
+
+            try {
+                const res = await fetch(url, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (!res.ok) throw new Error(`HTTP: ${res.status}`);
+                m.push(performance.now() - start);
+            } catch {
+                m.push(Infinity);
+            }
+        }
+
+        m.sort((a, b) => a - b);
+        return m[Math.floor(m.length / 2)];
+    };
+
+    const results = await Promise.all(
+        SENDER_ENDPOINTS.map(async (e) => ({
+            endpoint: e,
+            latency: await measure_latency(`${e}/ping`)
+        }))
+    );
+
+    results.sort((a, b) => a.latency - b.latency);
+    for (const result of results) {
+        common.log(`${result.endpoint.padEnd(32)} - ${result.latency.toFixed(2).padStart(7)} ms`);
+    }
+    common.log(common.green(`\nLowest latency endpoint: ${results[0].endpoint} - ${results[0].latency.toFixed(2)} ms`));
+    common.log(`\nSet SENDER_ENDPOINT=${results[0].endpoint} in your .env`);
 }
