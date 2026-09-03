@@ -350,6 +350,7 @@ export const COLUMN_WIDTHS = {
     symbol: 7,
     publicKey: 44,
     solBalance: 14,
+    usdBalance: 12,
     allocation: 10,
     tokenBalance: 20,
     parameter: 20,

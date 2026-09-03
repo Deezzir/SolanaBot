@@ -24,6 +24,8 @@ import * as mass_trade from './subcommands/mass_trade';
 import { get_trader, get_sniper } from './common/get_trader';
 import { SubscriberType } from './common/subscriber';
 
+type OutputFormat = 'table' | 'csv';
+
 function require_program(supported: common.Program[], command: string): void {
     if (!supported.includes(global.PROGRAM)) throw new Error(`${command} is not supported for ${global.PROGRAM}.`);
 }
@@ -305,44 +307,13 @@ export async function promote(times: number, meta_cid: string, dev: Keypair): Pr
     if (failed > 0) throw new Error(`${failed} token promotion(s) failed.`);
 }
 
-export async function token_balance(wallets: common.Wallet[], mint: PublicKey): Promise<void> {
+export async function token_balance(wallets: common.Wallet[], mint: PublicKey, format: OutputFormat): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
     const sol_price = await common.fetch_sol_price();
-
-    common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
 
     let decimals, supply, supply_raw;
     let token_name, token_symbol;
     let token_program;
-
-    try {
-        ({ token_name, token_symbol, token_program } = await trade.get_token_meta(mint));
-        ({ supply: supply_raw, decimals } = await trade.get_token_supply(mint));
-        supply = Number(supply_raw);
-    } catch (error) {
-        throw new Error(`Failed to get the token information: ${error}`);
-    }
-    const [token_balances, cost_basiss] = await Promise.all([
-        Promise.all(
-            wallets.map((wallet) => trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT, token_program))
-        ),
-        Promise.all(
-            wallets.map((wallet) => trade.get_cost_basis(wallet.keypair.publicKey, mint, COMMITMENT, token_program))
-        )
-    ]);
-
-    const wallet_count = token_balances.filter((balance) => (balance.uiAmount || 0) > 0).length;
-    common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}`));
-    common.log(common.green(`Wallet Count: ${wallet_count}\n`));
-
-    common.print_header([
-        { title: 'Id', width: common.COLUMN_WIDTHS.id },
-        { title: 'Name', width: common.COLUMN_WIDTHS.name },
-        { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
-        { title: 'Allocation', width: common.COLUMN_WIDTHS.allocation, align: 'right' },
-        { title: `$${token_symbol} Balance`, width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
-        { title: `Entry MC`, width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
-    ]);
 
     let total_tokens_all = 0;
     let total_tokens_cur = 0;
@@ -351,28 +322,74 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
     let total_fees_all = 0;
     let total_fees_cur = 0;
 
+    try {
+        ({ token_name, token_symbol, token_program } = await trade.get_token_meta(mint));
+        ({ supply: supply_raw, decimals } = await trade.get_token_supply(mint));
+        supply = Number(supply_raw);
+    } catch (error) {
+        throw new Error(`Failed to get the token information: ${error}`);
+    }
+    const wallet_results = await Promise.all(
+        wallets.map(async (wallet) => {
+            try {
+                return await Promise.all([
+                    trade.get_token_balance(wallet.keypair.publicKey, mint, COMMITMENT, token_program),
+                    trade.get_cost_basis(wallet.keypair.publicKey, mint, COMMITMENT, token_program)
+                ]);
+            } catch (error) {
+                throw new Error(`Failed to get token data for wallet ${wallet.id}: ${error}`);
+            }
+        })
+    );
+    const token_balances: TokenAmount[] = wallet_results.map(([token_balance]) => token_balance);
+    const cost_basiss = wallet_results.map(([, cost_basis]) => cost_basis);
+
+    const wallet_count = token_balances.filter((balance) => (balance.uiAmount || 0) > 0).length;
+
+    if (format === 'csv') {
+        common.log(common.yellow(`id,name,pubkey,mint,allocation,token_balance,entry_mcap`));
+    } else if (format === 'table') {
+        common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
+        common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}`));
+        common.log(common.green(`Wallet Count: ${wallet_count}\n`));
+
+        common.print_header([
+            { title: 'Id', width: common.COLUMN_WIDTHS.id },
+            { title: 'Name', width: common.COLUMN_WIDTHS.name },
+            { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
+            { title: 'Allocation', width: common.COLUMN_WIDTHS.allocation, align: 'right' },
+            { title: `$${token_symbol} Balance`, width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
+            { title: `Entry MC`, width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
+        ]);
+    } else {
+        throw new Error("Invalid output format. Supported formats are 'table' and 'csv'.");
+    }
+
     for (let i = 0; i < wallets.length; i++) {
         const wallet = wallets[i];
         const cost_basis = cost_basiss[i];
         const ui_balance = token_balances[i].uiAmount || 0;
         if (!cost_basis) {
-            common.print_row([
-                { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
-                { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
-                { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
-                {
-                    content: `${((ui_balance / (supply / 10 ** decimals)) * 100).toFixed(2)}%`,
-                    width: common.COLUMN_WIDTHS.allocation,
-                    align: 'right'
-                },
-                { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
-                { content: 'N/A', width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
-            ]);
+            const allocation = ((ui_balance / (supply / 10 ** decimals)) * 100).toFixed(2);
+            if (format === 'csv') {
+                common.log(
+                    `${wallet.id.toString()},${common.format_name(wallet.name)},${wallet.keypair.publicKey.toString()},${mint.toString()},${allocation},${ui_balance.toFixed(2)},null`
+                );
+            } else {
+                common.print_row([
+                    { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
+                    { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
+                    { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
+                    { content: `${allocation}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
+                    { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
+                    { content: 'N/A', width: common.COLUMN_WIDTHS.entryMcap, align: 'right' }
+                ]);
+            }
             total_tokens_cur += ui_balance;
             continue;
         }
 
-        const entry_mcap = (((cost_basis.average_cost_basis * supply) / 10 ** decimals) * sol_price) / 1000;
+        const entry_mcap = ((cost_basis.average_cost_basis * supply) / 10 ** decimals) * sol_price;
         const alloc = (ui_balance / (supply / 10 ** decimals)) * 100;
 
         total_tokens_cur += ui_balance;
@@ -382,19 +399,27 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey): 
         total_fees_all += cost_basis.total_fees;
         if (ui_balance > 0) total_fees_cur += cost_basis.total_fees;
 
-        common.print_row([
-            { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
-            { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
-            { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
-            { content: `${alloc.toFixed(2)}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
-            { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
-            {
-                content: `${entry_mcap.toFixed(1)}K$`,
-                width: common.COLUMN_WIDTHS.entryMcap,
-                align: 'right'
-            }
-        ]);
+        if (format === 'csv') {
+            common.log(
+                `${wallet.id.toString()},${common.format_name(wallet.name)},${wallet.keypair.publicKey.toString()},${mint.toString()},${alloc.toFixed(2)},${ui_balance.toFixed(2)},${entry_mcap.toFixed(2)}`
+            );
+        } else {
+            common.print_row([
+                { content: wallet.id.toString(), width: common.COLUMN_WIDTHS.id },
+                { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
+                { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
+                { content: `${alloc.toFixed(2)}%`, width: common.COLUMN_WIDTHS.allocation, align: 'right' },
+                { content: ui_balance.toFixed(2), width: common.COLUMN_WIDTHS.tokenBalance, align: 'right' },
+                {
+                    content: `${(entry_mcap / 1000).toFixed(2)}K$`,
+                    width: common.COLUMN_WIDTHS.entryMcap,
+                    align: 'right'
+                }
+            ]);
+        }
     }
+
+    if (format === 'csv') return;
 
     common.print_footer([
         { width: common.COLUMN_WIDTHS.id },
@@ -470,57 +495,72 @@ export async function transfer_token(
     common.log(common.green(`Transaction completed, signature: ${signature}`));
 }
 
-export async function balance(wallets: common.Wallet[], format: 'csv' | 'table'): Promise<void> {
+export async function balance(wallets: common.Wallet[], format: OutputFormat): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets available.');
 
     let total = 0;
-    common.log(common.yellow('Getting the balance of the wallets...'));
-    common.log(common.yellow(`Wallet Count: ${wallets.length}\n`));
-
+    const sol_price = await common.fetch_sol_price();
     const balances = await Promise.all(
         wallets.map((wallet) => trade.get_balance(wallet.keypair.publicKey, COMMITMENT))
     );
-
-    if (format === 'csv') {
-        common.log(common.yellow('Wallet Id,Name,Public Key,SOL Balance'));
-        for (let i = 0; i < wallets.length; i++) {
-            const wallet = wallets[i];
-            const balance = balances[i] / LAMPORTS_PER_SOL;
-            total += balance;
-            common.log(
-                `${wallet.id.toString().concat(wallet.is_reserve ? '*' : '')},${common.format_name(wallet.name)},${wallet.keypair.publicKey.toString()},${balance.toFixed(9)}`
-            );
+    switch (format) {
+        case 'csv': {
+            common.log(common.yellow('id,name,pubkey,sol_balance,usd_balance'));
+            for (let i = 0; i < wallets.length; i++) {
+                const wallet = wallets[i];
+                const balance = balances[i] / LAMPORTS_PER_SOL;
+                const usd_value = balance * sol_price;
+                total += balance;
+                common.log(
+                    `${wallet.id.toString()},${common.format_name(wallet.name)},${wallet.keypair.publicKey.toString()},${balance.toFixed(9)},${usd_value.toFixed(2)}`
+                );
+            }
+            return;
         }
-        common.log(`\nTotal balance: ${common.bold(common.format_currency(total) + ' SOL')}\n`);
-    } else if (format === 'table') {
-        common.print_header([
-            { title: 'Id', width: common.COLUMN_WIDTHS.id },
-            { title: 'Name', width: common.COLUMN_WIDTHS.name },
-            { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
-            { title: 'SOL Balance', width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
-        ]);
+        case 'table': {
+            common.log(common.yellow('Getting the balance of the wallets...'));
+            common.log(common.yellow(`Wallet Count: ${wallets.length}\n`));
 
-        for (let i = 0; i < wallets.length; i++) {
-            const wallet = wallets[i];
-            const balance = balances[i] / LAMPORTS_PER_SOL;
-            total += balance;
-
-            common.print_row([
-                { content: wallet.id.toString().concat(wallet.is_reserve ? '*' : ''), width: common.COLUMN_WIDTHS.id },
-                { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
-                { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
-                { content: balance.toFixed(9), width: common.COLUMN_WIDTHS.solBalance, align: 'right' }
+            common.print_header([
+                { title: 'Id', width: common.COLUMN_WIDTHS.id },
+                { title: 'Name', width: common.COLUMN_WIDTHS.name },
+                { title: 'Public Key', width: common.COLUMN_WIDTHS.publicKey },
+                { title: 'SOL Balance', width: common.COLUMN_WIDTHS.solBalance, align: 'right' },
+                { title: 'USD Value', width: common.COLUMN_WIDTHS.usdBalance, align: 'right' }
             ]);
+
+            for (let i = 0; i < wallets.length; i++) {
+                const wallet = wallets[i];
+                const balance = balances[i] / LAMPORTS_PER_SOL;
+                const usd_value = balance * sol_price;
+                total += balance;
+
+                common.print_row([
+                    {
+                        content: wallet.id.toString().concat(wallet.is_reserve ? '*' : ''),
+                        width: common.COLUMN_WIDTHS.id
+                    },
+                    { content: common.format_name(wallet.name), width: common.COLUMN_WIDTHS.name },
+                    { content: wallet.keypair.publicKey.toString(), width: common.COLUMN_WIDTHS.publicKey },
+                    { content: balance.toFixed(9), width: common.COLUMN_WIDTHS.solBalance, align: 'right' },
+                    { content: usd_value.toFixed(2), width: common.COLUMN_WIDTHS.usdBalance, align: 'right' }
+                ]);
+            }
+
+            common.print_footer([
+                { width: common.COLUMN_WIDTHS.id },
+                { width: common.COLUMN_WIDTHS.name },
+                { width: common.COLUMN_WIDTHS.publicKey },
+                { width: common.COLUMN_WIDTHS.solBalance },
+                { width: common.COLUMN_WIDTHS.usdBalance }
+            ]);
+
+            common.log(`\nTotal balance: ${common.bold(common.format_currency(total) + ' SOL')}`);
+            common.log(`Total USD value: ${common.bold('$' + common.format_currency(total * sol_price))}\n`);
+            return;
         }
-
-        common.print_footer([
-            { width: common.COLUMN_WIDTHS.id },
-            { width: common.COLUMN_WIDTHS.name },
-            { width: common.COLUMN_WIDTHS.publicKey },
-            { width: common.COLUMN_WIDTHS.solBalance }
-        ]);
-
-        common.log(`\nTotal balance: ${common.bold(common.format_currency(total) + ' SOL')}\n`);
+        default:
+            throw new Error("Invalid output format. Supported formats are 'table' and 'csv'.");
     }
 }
 

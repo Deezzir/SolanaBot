@@ -57,7 +57,8 @@ import {
     SENDER_MAX_MIN_TIP,
     TransactionRelay,
     MAX_COMPUTE_UNIT_LIMIT,
-    COMPUTE_UNIT_BUFFER
+    COMPUTE_UNIT_BUFFER,
+    COST_BASIS_TRANSACTION_PAGE_SIZE
 } from '../constants';
 import * as common from './common';
 import bs58 from 'bs58';
@@ -95,6 +96,11 @@ export type ProgramAccount = { pubkey: PublicKey; account: { data: Buffer } };
 type HeliusProgramAccountsPage = {
     accounts: { pubkey: string; account: { data: [string, string] } }[];
     paginationKey: string | null;
+};
+
+type HeliusTransactionsForAddressPage = {
+    data: ParsedTransactionWithMeta[];
+    paginationToken: string | null;
 };
 
 async function helius_rpc<T>(method: string, params: unknown[]): Promise<T> {
@@ -404,7 +410,12 @@ export function calc_token_balance_changes(
 ): TxBalanceChanges | null {
     if (!tx.meta || tx.meta.err || !tx.meta.postTokenBalances || !tx.meta.preTokenBalances) return null;
 
-    const change_sol_index = tx.transaction.message.accountKeys.findIndex((acc) => acc.pubkey.equals(account));
+    const account_address = account.toBase58();
+    const change_sol_index = tx.transaction.message.accountKeys.findIndex((acc) => {
+        const pubkey = acc.pubkey as PublicKey | string;
+        return typeof pubkey === 'string' ? pubkey === account_address : pubkey.equals(account);
+    });
+    if (change_sol_index === -1) return null;
     const pre_token_balance_index = tx.meta.preTokenBalances.findIndex(
         (change) => change.owner === account.toString() && (!mint || change.mint === mint)
     );
@@ -430,7 +441,12 @@ export function calc_token_balance_changes(
     const tips_instructions: ParsedInstruction[] = [];
     for (let i = tx.transaction.message.instructions.length - 1; i >= 0; i--) {
         const instr = tx.transaction.message.instructions[i];
-        if ('parsed' in instr && instr.programId.equals(SYSTEM_PROGRAM_ID) && instr.parsed.type === 'transfer') {
+        const program_id = instr.programId as PublicKey | string;
+        const is_system_program =
+            typeof program_id === 'string'
+                ? program_id === SYSTEM_PROGRAM_ID.toBase58()
+                : program_id.equals(SYSTEM_PROGRAM_ID);
+        if ('parsed' in instr && is_system_program && instr.parsed.type === 'transfer') {
             tips_instructions.push(instr);
         }
         break;
@@ -441,10 +457,14 @@ export function calc_token_balance_changes(
 
     let tx_fees = 0;
     const compute_budget_data = tx.transaction.message.instructions
-        .filter(
-            (instr): instr is PartiallyDecodedInstruction =>
-                'data' in instr && instr.programId.equals(COMPUTE_BUDGET_PROGRAM_ID)
-        )
+        .filter((instr): instr is PartiallyDecodedInstruction => {
+            const program_id = instr.programId as PublicKey | string;
+            const is_compute_budget_program =
+                typeof program_id === 'string'
+                    ? program_id === COMPUTE_BUDGET_PROGRAM_ID.toBase58()
+                    : program_id.equals(COMPUTE_BUDGET_PROGRAM_ID);
+            return 'data' in instr && is_compute_budget_program;
+        })
         .map((instr) => {
             const buff = Buffer.from(bs58.decode(instr.data));
             if (buff.length === 5) return common.read_biguint_le(buff, 1, 4);
@@ -469,25 +489,37 @@ export function calc_token_balance_changes(
 export async function get_cost_basis(
     account: PublicKey,
     mint: PublicKey,
-    commitment: Finality = 'finalized',
-    token_program: PublicKey = TOKEN_PROGRAM_ID
+    _commitment: Finality = 'finalized',
+    _token_program: PublicKey = TOKEN_PROGRAM_ID
 ): Promise<CostBasis | null> {
-    const token_ata = calc_ata(account, mint, token_program);
-
-    const signatures = (await global.CONNECTION.getSignaturesForAddress(token_ata, {}, commitment)).map(
-        (info) => info.signature
-    );
-    if (signatures.length === 0) return null;
-
-    const txs = await global.CONNECTION.getParsedTransactions(signatures, {
-        maxSupportedTransactionVersion: 0,
-        commitment: commitment
-    });
+    const txs: (ParsedTransactionWithMeta | null)[] = [];
+    let pagination_token: string | undefined;
+    do {
+        const page = await helius_rpc<HeliusTransactionsForAddressPage>('getTransactionsForAddress', [
+            account.toBase58(),
+            {
+                transactionDetails: 'full',
+                encoding: 'jsonParsed',
+                maxSupportedTransactionVersion: 0,
+                sortOrder: 'asc',
+                commitment: 'finalized',
+                limit: COST_BASIS_TRANSACTION_PAGE_SIZE,
+                filters: {
+                    status: 'succeeded',
+                    tokenAccounts: 'balanceChanged',
+                    tokenTransfer: { mint: mint.toBase58() }
+                },
+                ...(pagination_token ? { paginationToken: pagination_token } : {})
+            }
+        ]);
+        txs.push(...page.data);
+        pagination_token = page.paginationToken || undefined;
+    } while (pagination_token);
     if (txs.length === 0) return null;
 
     const changes = txs
         .filter((tx) => tx !== null)
-        .map((tx) => calc_token_balance_changes(tx, account))
+        .map((tx) => calc_token_balance_changes(tx, account, mint.toBase58()))
         .filter((change) => change !== null);
     // .filter((change) => change.change_tokens > 0);
 

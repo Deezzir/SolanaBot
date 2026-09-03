@@ -39,6 +39,7 @@ export const TRADE_RAYDIUM_SWAP_TAX = 0.0025; // 0.25%
 export const TRADE_TX_RETRIES = 0;
 export const TRADE_RETRIES = 5;
 export const TRADE_RETRY_INTERVAL_MS = 1000;
+export const COST_BASIS_TRANSACTION_PAGE_SIZE = 1000;
 export const TRADE_MAX_SLIPPAGE = 5.0;
 export const TRADE_DEFAULT_TOKEN_DECIMALS = 6;
 export const TRADE_MAX_WALLETS_PER_CREATE_BUNDLE = 20;

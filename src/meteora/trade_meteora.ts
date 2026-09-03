@@ -642,7 +642,7 @@ export class Trader implements trade.IProgramTrader {
             if (!info || !info.owner.equals(METEORA_DAMM_V2_PROGRAM_ID)) continue;
             try {
                 pool_states.set(pools[i].toBase58(), DAMMV2StateStruct.decode(info.data));
-            } catch { }
+            } catch {}
         }
         if (pool_states.size === 0) return [];
         const slot = await global.CONNECTION.getSlot(COMMITMENT);
@@ -707,7 +707,7 @@ export class Trader implements trade.IProgramTrader {
                     (((BigInt.asUintN(64, current_time < reward.end ? current_time : reward.end) - reward.last_update) *
                         reward.rate) <<
                         128n) /
-                    pool_state.liquidity;
+                        pool_state.liquidity;
                 const amount = pending + ((liquidity * (stored - checkpoint)) >> 192n);
                 if (amount <= 0n) continue;
                 const token_program = await this.get_token_program(reward.mint);
@@ -961,7 +961,7 @@ export class Trader implements trade.IProgramTrader {
             callback(update);
         };
         const unsubscribe = (id: number | undefined) => {
-            if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => { });
+            if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => {});
         };
         const subscribe_damm = (pool: trade.ProgramAccount, slot: number = 0) => {
             if (damm_started) return;
@@ -1112,21 +1112,21 @@ export class Trader implements trade.IProgramTrader {
         const decoded = data as Record<string, unknown> | undefined;
         const meta = decoded
             ? {
-                token_name: typeof decoded.name === 'string' ? decoded.name : 'Unknown',
-                token_symbol: typeof decoded.symbol === 'string' ? decoded.symbol : 'Unknown',
-                token_supply: 10 ** 18,
-                token_decimal: 9,
-                token_program: TOKEN_PROGRAM_ID
-            }
+                  token_name: typeof decoded.name === 'string' ? decoded.name : 'Unknown',
+                  token_symbol: typeof decoded.symbol === 'string' ? decoded.symbol : 'Unknown',
+                  token_supply: 10 ** 18,
+                  token_decimal: 9,
+                  token_program: TOKEN_PROGRAM_ID
+              }
             : await trade.get_token_meta(mint).catch(() => {
-                return {
-                    token_name: 'Unknown',
-                    token_symbol: 'Unknown',
-                    token_supply: 10 ** 18,
-                    token_decimal: 9,
-                    token_program: TOKEN_PROGRAM_ID
-                };
-            });
+                  return {
+                      token_name: 'Unknown',
+                      token_symbol: 'Unknown',
+                      token_supply: 10 ** 18,
+                      token_decimal: 9,
+                      token_program: TOKEN_PROGRAM_ID
+                  };
+              });
 
         return new MeteoraMintMeta({
             mint: mint.toString(),

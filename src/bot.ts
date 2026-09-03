@@ -166,10 +166,7 @@ async function main() {
     let wallets = get_wallets_from_file(WALLETS_FILE);
     let wallet_cnt = wallets.length;
 
-    global.CONNECTION = new Connection(
-        HELIUS_RPC,
-        rpc_connection_config({ disableRetryOnRateLimit: true, commitment: COMMITMENT })
-    );
+    global.CONNECTION = new Connection(HELIUS_RPC, rpc_connection_config({ commitment: COMMITMENT }));
     global.PROGRAM = common.Program.Pump;
     global.TRANSACTION_RELAY = TransactionRelay.Sender;
     global.NO_COLORS = false;
@@ -299,11 +296,17 @@ async function main() {
         .command('token-balance')
         .alias('tb')
         .description('Get the token balance of the wallets')
+        .option('--fm, --format <type>', 'Format of the balance output (e.g., csv, table)', 'table')
         .argument('<mint>', 'Public address of the mint', (value) => {
             if (!common.is_valid_pubkey(value)) throw new InvalidArgumentError('Not an address.');
             return new PublicKey(value);
         })
-        .action(async (mint) => await commands.token_balance(wallets, mint));
+        .action(async (mint, options) => {
+            let { format } = options;
+            if (!['csv', 'table'].includes(format))
+                throw new InvalidOptionArgumentError('Invalid format. Must be either "csv" or "table".');
+            await commands.token_balance(wallets, mint, format);
+        });
 
     program
         .command('warmup')
