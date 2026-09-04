@@ -5,7 +5,7 @@
 1. Open the terminal and clone the repo
 
     ```shell
-    git clone https://github.com/Deezzir/solana-bott.git
+    git clone https://github.com/Deezzir/solana-bot.git
     ```
 
 2. Install Bun if you haven't already, and install the dependencies
