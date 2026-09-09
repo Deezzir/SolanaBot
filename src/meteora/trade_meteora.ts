@@ -5,6 +5,7 @@ import {
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
+    SYSVAR_INSTRUCTIONS_PUBKEY,
     SystemProgram,
     TokenAmount,
     TransactionInstruction
@@ -13,20 +14,30 @@ import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import {
     COMMITMENT,
+    IPFS,
+    METAPLEX_META_SEED,
+    METAPLEX_PROGRAM_ID,
+    METEORA_DAMM_V2_API_URL,
     METEORA_CONFIG_HEADER,
     METEORA_DBC_CLAIM_CREATOR_FEE_DISCRIMINATOR,
+    METEORA_DBC_CREATE_DISCRIMINATOR,
+    METEORA_DBC_CREATE_TOKEN_2022_DISCRIMINATOR,
     METEORA_DAMM_V2_PROGRAM_ID,
     METEORA_DAMM_V2_CLAIM_POSITION_FEE_DISCRIMINATOR,
     METEORA_DAMM_V2_CLAIM_REWARD_DISCRIMINATOR,
     METEORA_DAMM_V2_STATE_HEADER,
     METEORA_DBC_EVENT_AUTHORITY,
     METEORA_DBC_POOL_AUTHORITY,
+    METEORA_DBC_PARAMS,
+    METEORA_DBC_POOL_SEED,
+    METEORA_DBC_VAULT_SEED,
     METEORA_DBC_PROGRAM_ID,
     METEORA_DBC_STATE_HEADER,
     METEORA_LTA_ACCOUNT,
     METEORA_SWAP_DISCRIMINATOR,
     PriorityLevel,
     SOL_MINT,
+    TOKEN_METADATA_MAX_BYTES,
     PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import base58 from 'bs58';
@@ -52,7 +63,17 @@ import {
     u8,
     u64
 } from '../common/struct_decoder';
-import { quote_exact_in, TradeDirection } from './damm_math';
+import {
+    BASIS_POINT_MAX,
+    DYNAMIC_FEE_ROUNDING_OFFSET,
+    DYNAMIC_FEE_SCALING_FACTOR,
+    FEE_DENOMINATOR,
+    ONE_Q64,
+    ONE_Q128,
+    pow_q64,
+    quote_exact_in,
+    TradeDirection
+} from './damm_math';
 
 const METEORA_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Meteora];
 
@@ -231,14 +252,32 @@ const DAMMV2PositionStruct = define_decoder_struct({
     reward_infos: bytes(96),
     padding: skip(96)
 });
+const DBCCurvePointStruct = define_decoder_struct({ sqrt_price: u128(), liquidity: u128() });
+
 const DBCConfigStruct = define_decoder_struct({
     discriminator: discriminator(Buffer.from(METEORA_CONFIG_HEADER)),
     quote_mint: pubkey(),
     fee_claimer: skip(32),
     leftover_receiver: skip(32),
-    curve: skip(128),
-    collect_fee_mode: skip(1),
-    migration_option: skip(1),
+    cliff_fee_numerator: u64(),
+    period_frequency: skip(8),
+    reduction_factor: u64(),
+    number_of_periods: u16(),
+    base_fee_mode: u8(),
+    base_fee_padding: skip(5),
+    dynamic_fee_initialized: u8(),
+    dynamic_fee_padding: skip(7),
+    max_volatility_accumulator: u32(),
+    variable_fee_control: u32(),
+    bin_step: skip(2),
+    filter_period: u16(),
+    decay_period: u16(),
+    dynamic_reduction_factor: u16(),
+    dynamic_fee_padding_2: skip(8),
+    bin_step_u128: skip(16),
+    liquidity_vesting_padding: skip(48),
+    collect_fee_mode: u8(),
+    migration_option: u8(),
     activation_type: skip(1),
     token_decimal: u8(),
     version: skip(1),
@@ -249,18 +288,37 @@ const DBCConfigStruct = define_decoder_struct({
     creator_locked_lp_percentage: skip(1),
     creator_lp_percentage: skip(1),
     migration_fee_option: skip(1),
-    fixed_token_supply_flag: skip(1),
+    fixed_token_supply_flag: u8(),
     creator_trading_fee_percentage: skip(1),
     config_padding: skip(10),
-    swap_base_amount: skip(8),
-    migration_quote_threshold: skip(8),
-    migration_base_threshold: skip(8),
-    migration_sqrt_price: skip(16),
-    config_padding_2: skip(48),
+    swap_base_amount: u64(),
+    migration_quote_threshold: u64(),
+    migration_base_threshold: u64(),
+    migration_sqrt_price: u128(),
+    vesting_amount_per_period: u64(),
+    vesting_cliff_duration: skip(8),
+    vesting_frequency: skip(8),
+    vesting_number_of_periods: u64(),
+    vesting_cliff_unlock_amount: u64(),
+    vesting_padding: skip(8),
     pre_migration_token_supply: u64(),
     post_migration_token_supply: skip(8),
-    config_padding_3: skip(32),
-    sqrt_start_price: skip(16)
+    config_padding_3: skip(5),
+    enable_first_swap_with_min_fee: u8(),
+    config_padding_4: skip(26),
+    sqrt_start_price: u128(),
+    curve: {
+        size: METEORA_DBC_PARAMS.curve_points * DBCCurvePointStruct.get_size(),
+        decode: (data: Buffer, offset: number) => {
+            const curve: ReturnType<typeof DBCCurvePointStruct.decode>[] = [];
+            for (let i = 0; i < METEORA_DBC_PARAMS.curve_points; i++) {
+                const point = DBCCurvePointStruct.decode(data.subarray(offset + i * DBCCurvePointStruct.get_size()));
+                if (point.liquidity === 0n || point.sqrt_price === 0n) break;
+                curve.push(point);
+            }
+            return curve;
+        }
+    }
 });
 
 const DBCStateStruct = define_decoder_struct({
@@ -317,6 +375,13 @@ type DBCData = {
     config: string;
     base_vault: string;
     quote_vault: string;
+    creation?: {
+        config: ReturnType<typeof DBCConfigStruct.decode>;
+        first_swap: boolean;
+        volatility_accumulator: bigint;
+        sqrt_price_reference: bigint;
+        has_swap_timestamp: boolean;
+    };
 };
 
 type MeteoraClaimableAsset = trade.ClaimableAsset & {
@@ -907,26 +972,237 @@ export class Trader implements trade.IProgramTrader {
         return [signature, signature];
     }
 
-    public create_token(
-        _mint: Keypair,
-        _creator: Keypair,
-        _token_name: string,
-        _token_symbol: string,
-        _meta_cid: string,
-        _sol_amount?: number,
-        _traders?: [Keypair, number][],
-        _bundle_tip?: number,
-        _priority?: PriorityLevel
+    public async create_token(
+        mint: Keypair,
+        creator: Keypair,
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        sol_amount: number = 0,
+        traders?: [Keypair, number][],
+        bundle_tip?: number,
+        priority?: PriorityLevel,
+        config?: object
     ): Promise<String> {
-        throw new Error('Not implemented');
+        trade.validate_create_token_parameters(sol_amount, traders, bundle_tip);
+        const config_address = (config as { config?: string } | undefined)?.config;
+        if (typeof config_address !== 'string')
+            throw new Error('Meteora creation requires a DBC config address in config.config.');
+        const config_pubkey = new PublicKey(config_address);
+        const account = await global.CONNECTION.getAccountInfo(config_pubkey, COMMITMENT);
+        if (!account || !account.owner.equals(METEORA_DBC_PROGRAM_ID))
+            throw new Error('Invalid Meteora DBC config account.');
+        const config_data = DBCConfigStruct.decode(account.data);
+        if (!config_data.quote_mint.equals(SOL_MINT) || config_data.quote_token_flag !== 0)
+            throw new Error('Only SOL-quoted DBC configs are supported.');
+        if (config_data.token_type !== 0 && config_data.token_type !== 1)
+            throw new Error('Unsupported DBC token type.');
+        if (config_data.base_fee_mode !== 0 && config_data.base_fee_mode !== 1)
+            throw new Error('New DBC pools require a linear or exponential fee scheduler.');
+        if (config_data.migration_option !== 1) throw new Error('New DBC pools require DAMM v2 migration.');
+
+        let mint_meta = await this.default_mint_meta(mint.publicKey, 0, {
+            name: token_name,
+            symbol: token_symbol,
+            config: config_address,
+            config_data
+        });
+        const create_instructions = await this.get_create_token_instructions(
+            creator,
+            token_name,
+            token_symbol,
+            meta_cid,
+            mint,
+            mint_meta
+        );
+        if (sol_amount > 0)
+            create_instructions.push(...(await this.get_buy_dbc_instructions(sol_amount, creator, mint_meta, 0.05)));
+        const ltas = await trade.get_ltas(this.get_lta_addresses());
+        if (!traders)
+            return trade.retry_send_tx(
+                create_instructions,
+                [creator, mint],
+                priority,
+                undefined,
+                false,
+                ltas,
+                METEORA_COMPUTE_UNIT_LIMIT
+            );
+
+        if (sol_amount > 0) mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
+        // Only a swap in the pool-creation transaction qualifies for the first-swap discount.
+        mint_meta.dbc_data!.creation!.first_swap = false;
+        const buy_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Keypair[][] = [];
+        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
+        for (const group of common.chunks(traders, chunk_size)) {
+            const instructions: TransactionInstruction[] = [];
+            for (const [buyer, amount] of group) {
+                instructions.push(...(await this.get_buy_dbc_instructions(amount, buyer, mint_meta, 0.05)));
+                mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
+            }
+            buy_instructions.push(instructions);
+            bundle_signers.push(group.map(([buyer]) => buyer));
+        }
+        const generated_lta = await trade.generate_trade_lta(
+            creator,
+            traders.map(([buyer]) => buyer),
+            mint.publicKey
+        );
+        return trade.retry_send_bundle(
+            [create_instructions, ...buy_instructions],
+            [[creator, mint], ...bundle_signers],
+            bundle_tip!,
+            priority,
+            [generated_lta, ...ltas],
+            METEORA_COMPUTE_UNIT_LIMIT
+        );
     }
 
-    public create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
-        throw new Error('Not implemented');
+    private async get_create_token_instructions(
+        creator: Keypair,
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        mint: Keypair,
+        mint_meta: MeteoraMintMeta
+    ): Promise<TransactionInstruction[]> {
+        const info = mint_meta.dbc_data!;
+        const token_2022 = mint_meta.token_program.equals(TOKEN_2022_PROGRAM_ID);
+        const metadata = token_2022
+            ? undefined
+            : (
+                  await PublicKey.findProgramAddress(
+                      [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBytes(), mint.publicKey.toBytes()],
+                      METAPLEX_PROGRAM_ID
+                  )
+              )[0];
+        return [
+            new TransactionInstruction({
+                programId: METEORA_DBC_PROGRAM_ID,
+                data: this.create_data(token_name, token_symbol, `${IPFS}${meta_cid}`, token_2022),
+                keys: [
+                    { pubkey: new PublicKey(info.config), isSigner: false, isWritable: false },
+                    { pubkey: METEORA_DBC_POOL_AUTHORITY, isSigner: false, isWritable: false },
+                    { pubkey: creator.publicKey, isSigner: true, isWritable: false },
+                    { pubkey: mint.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SOL_MINT, isSigner: false, isWritable: false },
+                    { pubkey: new PublicKey(mint_meta.pool), isSigner: false, isWritable: true },
+                    { pubkey: new PublicKey(info.base_vault), isSigner: false, isWritable: true },
+                    { pubkey: new PublicKey(info.quote_vault), isSigner: false, isWritable: true },
+                    ...(metadata
+                        ? [
+                              { pubkey: metadata, isSigner: false, isWritable: true },
+                              { pubkey: METAPLEX_PROGRAM_ID, isSigner: false, isWritable: false }
+                          ]
+                        : []),
+                    { pubkey: creator.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: mint_meta.token_program, isSigner: false, isWritable: false },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: METEORA_DBC_EVENT_AUTHORITY, isSigner: false, isWritable: false },
+                    { pubkey: METEORA_DBC_PROGRAM_ID, isSigner: false, isWritable: false }
+                ]
+            })
+        ];
     }
 
-    public get_random_mints(_count: number): Promise<MeteoraMintMeta[]> {
-        throw new Error('Not implemented');
+    private create_data(name: string, symbol: string, uri: string, token_2022: boolean): Buffer {
+        const string = (value: string, max_length: number) => {
+            const length = Buffer.byteLength(value);
+            if (length > max_length) throw new Error(`Token metadata exceeds ${max_length} bytes.`);
+            const data = Buffer.alloc(4 + length);
+            data.writeUInt32LE(length);
+            data.write(value, 4);
+            return data;
+        };
+        return Buffer.concat([
+            Buffer.from(token_2022 ? METEORA_DBC_CREATE_TOKEN_2022_DISCRIMINATOR : METEORA_DBC_CREATE_DISCRIMINATOR),
+            string(name, TOKEN_METADATA_MAX_BYTES.name),
+            string(symbol, TOKEN_METADATA_MAX_BYTES.symbol),
+            string(uri, TOKEN_METADATA_MAX_BYTES.uri)
+        ]);
+    }
+
+    public create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+        return common.upload_metadata_ipfs(meta, image_path);
+    }
+
+    public async get_random_mints(count: number): Promise<MeteoraMintMeta[]> {
+        if (!Number.isSafeInteger(count) || count <= 0) return [];
+        const graduated_count = Math.floor((count + 1) * Math.random());
+        return (
+            await Promise.all([
+                this.get_random_graduated_mints(graduated_count),
+                this.get_random_ungraduated_mints(count - graduated_count)
+            ])
+        ).flat();
+    }
+
+    private async get_random_ungraduated_mints(count: number): Promise<MeteoraMintMeta[]> {
+        if (count <= 0) return [];
+        const limit = Math.min(100, Math.max(20, count * 3));
+        try {
+            const pools = await trade.get_program_accounts_v2(
+                METEORA_DBC_PROGRAM_ID,
+                [
+                    { memcmp: { offset: 0, bytes: base58.encode(METEORA_DBC_STATE_HEADER) } },
+                    {
+                        memcmp: {
+                            offset: DBCStateStruct.get_offset('is_migrated'),
+                            bytes: base58.encode(Buffer.from([0]))
+                        }
+                    }
+                ],
+                { offset: DBCStateStruct.get_offset('base_mint'), length: 32 },
+                limit
+            );
+            return trade.resolve_random_mints(
+                pools.map((pool) => new PublicKey(pool.account.data).toBase58()),
+                count,
+                async (mint) => {
+                    const meta = await this.get_mint_meta(mint);
+                    return meta && !meta.migrated && meta.sol_reserves > 0n && meta.token_reserves > 0n
+                        ? meta
+                        : undefined;
+                }
+            );
+        } catch (error) {
+            common.error(common.red(`Failed fetching DBC mints: ${error}`));
+            return [];
+        }
+    }
+
+    private async get_random_graduated_mints(count: number): Promise<MeteoraMintMeta[]> {
+        if (count <= 0) return [];
+        const limit = Math.min(100, Math.max(20, count * 3));
+        const sol = SOL_MINT.toBase58();
+        const sources = await Promise.allSettled(
+            ['token_x', 'token_y'].map(async (field) => {
+                const url = new URL(`${METEORA_DAMM_V2_API_URL}/pools`);
+                url.searchParams.set('page_size', String(limit));
+                url.searchParams.set('filter_by', `${field}=${sol}&&tvl>0`);
+                const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+                const data = await response.json();
+                if (!response.ok || !Array.isArray(data.data)) throw new Error('DAMM v2 mint discovery failed.');
+                return data.data.flatMap((pool: { token_x: { address: string }; token_y: { address: string } }) =>
+                    pool.token_x.address === sol
+                        ? [pool.token_y.address]
+                        : pool.token_y.address === sol
+                          ? [pool.token_x.address]
+                          : []
+                ) as string[];
+            })
+        );
+        const candidates: string[] = [];
+        for (const source of sources) {
+            if (source.status === 'fulfilled') candidates.push(...source.value);
+            else common.error(common.red(`Failed fetching Meteora mints: ${source.reason}`));
+        }
+        return trade.resolve_random_mints(candidates, count, async (mint) => {
+            const meta = await this.get_mint_meta(mint);
+            return meta && meta.migrated && meta.sol_reserves > 0n && meta.token_reserves > 0n ? meta : undefined;
+        });
     }
 
     public async get_mint_meta(mint: PublicKey, sol_price?: number): Promise<MeteoraMintMeta | undefined> {
@@ -1103,12 +1379,111 @@ export class Trader implements trade.IProgramTrader {
         }
     }
 
-    public update_mint_meta_reserves(mint_meta: MeteoraMintMeta, _amount: number | TokenAmount): MeteoraMintMeta {
+    public update_mint_meta_reserves(mint_meta: MeteoraMintMeta, amount: number | TokenAmount): MeteoraMintMeta {
+        const info = mint_meta.dbc_data;
+        if (!info?.creation || typeof amount !== 'number') return mint_meta;
+        const quote = this.calc_dbc_creation_buy_quote(common.sol_to_lamports(amount), info);
+        const creation = info.creation;
+        const config = creation.config;
+        if (config.dynamic_fee_initialized) {
+            const delta_bins = (a: bigint, b: bigint) => {
+                const upper = a > b ? a : b;
+                const lower = a > b ? b : a;
+                return (((upper * ONE_Q64) / lower - ONE_Q64) / METEORA_DBC_PARAMS.bin_step_u128) * 2n;
+            };
+            // Creation and its bundle execute in one slot, so only the initial reference reset applies.
+            if (!creation.has_swap_timestamp || config.filter_period === 0)
+                creation.sqrt_price_reference = info.sqrt_price;
+            const reference =
+                creation.has_swap_timestamp && config.filter_period === 0 && config.decay_period > 0
+                    ? (creation.volatility_accumulator * BigInt(config.dynamic_reduction_factor)) / BASIS_POINT_MAX
+                    : 0n;
+            const volatility =
+                reference + delta_bins(quote.sqrt_price, creation.sqrt_price_reference) * BASIS_POINT_MAX;
+            creation.volatility_accumulator =
+                volatility < BigInt(config.max_volatility_accumulator)
+                    ? volatility
+                    : BigInt(config.max_volatility_accumulator);
+            if (delta_bins(quote.sqrt_price, info.sqrt_price) > 0n) creation.has_swap_timestamp = true;
+        }
+        info.sqrt_price = quote.sqrt_price;
+        creation.first_swap = false;
+        mint_meta.sol_reserves += quote.quote_amount;
+        mint_meta.token_reserves -= quote.base_amount;
+        mint_meta.complete = mint_meta.sol_reserves >= config.migration_quote_threshold;
         return mint_meta;
     }
 
     public async default_mint_meta(mint: PublicKey, sol_price: number = 0, data?: object): Promise<MeteoraMintMeta> {
         const decoded = data as Record<string, unknown> | undefined;
+        const config_data = decoded?.config_data as ReturnType<typeof DBCConfigStruct.decode> | undefined;
+        if (config_data && typeof decoded?.config === 'string') {
+            const config = new PublicKey(decoded.config);
+            const mints = [Buffer.from(mint.toBytes()), Buffer.from(SOL_MINT.toBytes())].sort(Buffer.compare).reverse();
+            const [pool] = await PublicKey.findProgramAddress(
+                [METEORA_DBC_POOL_SEED, config.toBytes(), ...mints],
+                METEORA_DBC_PROGRAM_ID
+            );
+            const [[base_vault], [quote_vault]] = await Promise.all(
+                [mint, SOL_MINT].map((token) =>
+                    PublicKey.findProgramAddress(
+                        [METEORA_DBC_VAULT_SEED, token.toBytes(), pool.toBytes()],
+                        METEORA_DBC_PROGRAM_ID
+                    )
+                )
+            );
+            const curve = config_data.curve;
+            if (curve.length === 0 || config_data.sqrt_start_price === 0n)
+                throw new Error('Invalid DBC creation curve.');
+            let supply = config_data.pre_migration_token_supply;
+            if (config_data.fixed_token_supply_flag === 0) {
+                let curve_amount = 0n;
+                let sqrt_price = config_data.sqrt_start_price;
+                for (const point of curve) {
+                    const denominator = sqrt_price * point.sqrt_price;
+                    curve_amount +=
+                        (point.liquidity * (point.sqrt_price - sqrt_price) + denominator - 1n) / denominator;
+                    sqrt_price = point.sqrt_price;
+                }
+                const buffered_amount =
+                    config_data.swap_base_amount +
+                    (config_data.swap_base_amount * METEORA_DBC_PARAMS.swap_buffer_percentage) / 100n;
+                supply =
+                    (buffered_amount < curve_amount ? buffered_amount : curve_amount) +
+                    config_data.migration_base_threshold +
+                    config_data.vesting_amount_per_period * config_data.vesting_number_of_periods +
+                    config_data.vesting_cliff_unlock_amount;
+            }
+            const market_cap =
+                (this.calc_token_price(config_data.sqrt_start_price) * Number(supply)) / LAMPORTS_PER_SOL;
+            return new MeteoraMintMeta({
+                mint: mint.toBase58(),
+                pool: pool.toBase58(),
+                name: typeof decoded.name === 'string' ? decoded.name : 'Unknown',
+                symbol: typeof decoded.symbol === 'string' ? decoded.symbol : 'Unknown',
+                total_supply: supply,
+                token_reserves: supply,
+                sol_reserves: 0n,
+                token_decimal: config_data.token_decimal,
+                token_program_id: (config_data.token_type === 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID).toBase58(),
+                market_cap,
+                usd_market_cap: market_cap * sol_price,
+                fee: Number(config_data.cliff_fee_numerator) / Number(FEE_DENOMINATOR),
+                dbc_data: {
+                    config: config.toBase58(),
+                    base_vault: base_vault.toBase58(),
+                    quote_vault: quote_vault.toBase58(),
+                    sqrt_price: config_data.sqrt_start_price,
+                    creation: {
+                        config: config_data,
+                        first_swap: true,
+                        volatility_accumulator: 0n,
+                        sqrt_price_reference: config_data.sqrt_start_price,
+                        has_swap_timestamp: false
+                    }
+                }
+            });
+        }
         const meta = decoded
             ? {
                   token_name: typeof decoded.name === 'string' ? decoded.name : 'Unknown',
@@ -1150,12 +1525,10 @@ export class Trader implements trade.IProgramTrader {
     }
 
     private calc_token_price(sqrt_price: bigint): number {
-        const SCALE_FACTOR = 2n ** 64n;
         const PRECISION = 10n ** 18n;
 
         const numerator = sqrt_price * sqrt_price * PRECISION;
-        const denominator = SCALE_FACTOR * SCALE_FACTOR;
-        return Number(numerator / denominator) / 1e18;
+        return Number(numerator / ONE_Q128) / 1e18;
     }
 
     private async get_dbc_state(mint: PublicKey): Promise<DBCState> {
@@ -1165,6 +1538,7 @@ export class Trader implements trade.IProgramTrader {
         const config_info = await global.CONNECTION.getAccountInfo(pool_state.config, COMMITMENT);
         if (!config_info) throw new Error('Unexpected config state');
         const config_state = DBCConfigStruct.decode(config_info.data);
+        if (!config_state.quote_mint.equals(SOL_MINT)) throw new Error('Only SOL-quoted DBC pools are supported.');
 
         return {
             pool: pool.pubkey,
@@ -1197,28 +1571,77 @@ export class Trader implements trade.IProgramTrader {
 
     private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
         trade.validate_slippage(slippage);
-        return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
+        return sol_amount + (sol_amount * BigInt(Math.floor(slippage * Number(BASIS_POINT_MAX)))) / BASIS_POINT_MAX;
     }
 
     private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
         trade.validate_slippage(slippage);
-        return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
+        return sol_amount - (sol_amount * BigInt(Math.floor(slippage * Number(BASIS_POINT_MAX)))) / BASIS_POINT_MAX;
     }
 
     private calc_dbc_token_amount_raw(sol_amount_raw: bigint, info: DBCData): bigint {
         if (sol_amount_raw <= 0) return 0n;
+        if (info.creation) return this.calc_dbc_creation_buy_quote(sol_amount_raw, info).output_amount;
 
-        const SCALE_FACTOR = BigInt(2) ** BigInt(128);
         const price = info.sqrt_price * info.sqrt_price;
-        return (sol_amount_raw * SCALE_FACTOR) / price;
+        return (sol_amount_raw * ONE_Q128) / price;
+    }
+
+    private calc_dbc_creation_buy_quote(
+        sol_amount: bigint,
+        info: DBCData
+    ): {
+        output_amount: bigint;
+        base_amount: bigint;
+        quote_amount: bigint;
+        sqrt_price: bigint;
+    } {
+        const creation = info.creation!;
+        const config = creation.config;
+        let fee_numerator = config.cliff_fee_numerator;
+        if (creation.first_swap && config.enable_first_swap_with_min_fee) {
+            const periods = BigInt(config.number_of_periods);
+            fee_numerator =
+                config.base_fee_mode === 0
+                    ? fee_numerator - periods * config.reduction_factor
+                    : (fee_numerator *
+                          pow_q64(ONE_Q64 - (config.reduction_factor * ONE_Q64) / BASIS_POINT_MAX, periods)) /
+                      ONE_Q64;
+        } else if (config.dynamic_fee_initialized) {
+            const volatility = creation.volatility_accumulator * METEORA_DBC_PARAMS.bin_step;
+            fee_numerator +=
+                (volatility * volatility * BigInt(config.variable_fee_control) + DYNAMIC_FEE_ROUNDING_OFFSET) /
+                DYNAMIC_FEE_SCALING_FACTOR;
+        }
+        if (fee_numerator > METEORA_DBC_PARAMS.max_fee_numerator) fee_numerator = METEORA_DBC_PARAMS.max_fee_numerator;
+        const fee = (amount: bigint) => (amount * fee_numerator + FEE_DENOMINATOR - 1n) / FEE_DENOMINATOR;
+        const quote_amount = config.collect_fee_mode === 0 ? sol_amount - fee(sol_amount) : sol_amount;
+        let remaining = quote_amount;
+        let sqrt_price = info.sqrt_price;
+        let base_amount = 0n;
+        for (const point of config.curve) {
+            const target =
+                point.sqrt_price < config.migration_sqrt_price ? point.sqrt_price : config.migration_sqrt_price;
+            if (target <= sqrt_price) continue;
+            const max_input = (point.liquidity * (target - sqrt_price) + ONE_Q128 - 1n) / ONE_Q128;
+            const input = remaining < max_input ? remaining : max_input;
+            const next = remaining < max_input ? sqrt_price + (input * ONE_Q128) / point.liquidity : target;
+            base_amount += (point.liquidity * (next - sqrt_price)) / (sqrt_price * next);
+            sqrt_price = next;
+            remaining -= input;
+            if (remaining === 0n || sqrt_price === config.migration_sqrt_price) break;
+        }
+        if (remaining > 0n) throw new Error('Initial buy exceeds the remaining DBC curve liquidity.');
+        const output_amount = config.collect_fee_mode === 0 ? base_amount : base_amount - fee(base_amount);
+        if (output_amount <= 0n) throw new Error('Initial buy produces no tokens.');
+        return { output_amount, base_amount, quote_amount, sqrt_price };
     }
 
     private calc_dbc_sol_amount_raw(token_amount_raw: bigint, info: DBCData): bigint {
         if (token_amount_raw <= 0) return 0n;
 
-        const SCALE_FACTOR = BigInt(2) ** BigInt(128);
         const price = info.sqrt_price * info.sqrt_price;
-        return (token_amount_raw * price) / SCALE_FACTOR;
+        return (token_amount_raw * price) / ONE_Q128;
     }
 
     private async get_damm_from_mint(mint: PublicKey): Promise<trade.ProgramAccount | null> {
@@ -1373,13 +1796,21 @@ export class Trader implements trade.IProgramTrader {
         const quote_vault = new PublicKey(mint_meta.dbc_data.quote_vault);
 
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
+        if (
+            mint_meta.dbc_data.creation &&
+            (mint_meta.complete ||
+                (mint_meta.sol_reserves ?? 0n) >= mint_meta.dbc_data.creation.config.migration_quote_threshold)
+        )
+            throw new Error('Initial buys have completed the DBC curve.');
         const token_amount_raw = this.calc_slippage_down(
             this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_data),
             slippage
         );
 
         const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw);
-        const token_program = await this.get_token_program(mint);
+        const token_program = mint_meta.dbc_data.creation
+            ? new PublicKey(mint_meta.token_program_id!)
+            : await this.get_token_program(mint);
         const token_ata = await trade.calc_ata(buyer.publicKey, mint, token_program);
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 
@@ -1408,7 +1839,10 @@ export class Trader implements trade.IProgramTrader {
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: METEORA_DBC_PROGRAM_ID, isSigner: false, isWritable: true },
                     { pubkey: METEORA_DBC_EVENT_AUTHORITY, isSigner: false, isWritable: false },
-                    { pubkey: METEORA_DBC_PROGRAM_ID, isSigner: false, isWritable: false }
+                    { pubkey: METEORA_DBC_PROGRAM_ID, isSigner: false, isWritable: false },
+                    ...(mint_meta.dbc_data.creation
+                        ? [{ pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false }]
+                        : [])
                 ],
                 programId: METEORA_DBC_PROGRAM_ID,
                 data: instruction_data

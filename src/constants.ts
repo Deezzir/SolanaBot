@@ -46,6 +46,7 @@ export const TRADE_MAX_WALLETS_PER_CREATE_BUNDLE = 20;
 export const TRADE_MAX_WALLETS_PER_CREATE_TX = 5;
 export const METAPLEX_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 export const METAPLEX_META_SEED = new Uint8Array([109, 101, 116, 97, 100, 97, 116, 97]);
+export const TOKEN_METADATA_MAX_BYTES = { name: 32, symbol: 10, uri: 200 };
 export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
 export const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111');
 export const RENT_PROGRAM_ID = new PublicKey('SysvarRent111111111111111111111111111111111');
@@ -176,7 +177,17 @@ export const BONK_CONFIG_2 = new PublicKey('BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvq
 export const BONK_CONFIG_3 = new PublicKey('8pCtbn9iatQ8493mDQax4xfEUjhoVBpUWYVQoRU18333');
 
 // METEORA CONSTANTS
+export const METEORA_DAMM_V2_API_URL = 'https://damm-v2.datapi.meteora.ag';
 export const METEORA_DBC_PROGRAM_ID = new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN');
+export const METEORA_DBC_POOL_SEED = new Uint8Array([112, 111, 111, 108]);
+export const METEORA_DBC_VAULT_SEED = new Uint8Array([116, 111, 107, 101, 110, 95, 118, 97, 117, 108, 116]);
+export const METEORA_DBC_PARAMS = {
+    curve_points: 20,
+    max_fee_numerator: 990_000_000n,
+    swap_buffer_percentage: 25n,
+    bin_step: 1n,
+    bin_step_u128: 1_844_674_407_370_955n
+};
 export const METEORA_DAMM_V2_PROGRAM_ID = new PublicKey('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG');
 export const METEORA_DBC_POOL_AUTHORITY = new PublicKey('FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM');
 export const METEORA_DBC_EVENT_AUTHORITY = new PublicKey('8Ks12pbrD6PXxfty1hVQiE9sc289zgU1zHkvXhrSdriF');
@@ -187,6 +198,7 @@ export const METEORA_DBC_STATE_HEADER = new Uint8Array([213, 224, 5, 209, 98, 69
 export const METEORA_CONFIG_HEADER = new Uint8Array([26, 108, 14, 123, 116, 230, 129, 43]);
 export const METEORA_SWAP_DISCRIMINATOR = new Uint8Array([248, 198, 158, 145, 225, 117, 135, 200]);
 export const METEORA_DBC_CREATE_DISCRIMINATOR = new Uint8Array([140, 85, 215, 176, 102, 54, 104, 79]);
+export const METEORA_DBC_CREATE_TOKEN_2022_DISCRIMINATOR = new Uint8Array([169, 118, 51, 78, 145, 110, 220, 155]);
 export const METEORA_DBC_CLAIM_CREATOR_FEE_DISCRIMINATOR = new Uint8Array([82, 220, 250, 189, 3, 85, 107, 45]);
 export const METEORA_DAMM_V2_CLAIM_POSITION_FEE_DISCRIMINATOR = new Uint8Array([180, 38, 154, 17, 133, 33, 162, 211]);
 export const METEORA_DAMM_V2_CLAIM_REWARD_DISCRIMINATOR = new Uint8Array([149, 95, 181, 242, 94, 90, 158, 162]);

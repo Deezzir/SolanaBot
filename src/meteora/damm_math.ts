@@ -1,10 +1,10 @@
-const FEE_DENOMINATOR = 1_000_000_000n;
-const BASIS_POINT_MAX = 10_000n;
+export const FEE_DENOMINATOR = 1_000_000_000n;
+export const BASIS_POINT_MAX = 10_000n;
 const SCALE_OFFSET = 64n;
 const MAX_FEE_NUMERATOR_V0 = 500_000_000n; // 50%
 const MAX_FEE_NUMERATOR_V1 = 990_000_000n; // 99%
-const DYNAMIC_FEE_ROUNDING_OFFSET = 99_999_999_999n;
-const DYNAMIC_FEE_SCALING_FACTOR = 100_000_000_000n;
+export const DYNAMIC_FEE_SCALING_FACTOR = 100_000_000_000n;
+export const DYNAMIC_FEE_ROUNDING_OFFSET = DYNAMIC_FEE_SCALING_FACTOR - 1n;
 
 export enum TradeDirection {
     AtoB,
@@ -458,9 +458,10 @@ class FeeMarketCapScheduler implements BaseFeeHandler {
     }
 }
 
-const ONE_Q64 = 1n << SCALE_OFFSET;
+export const ONE_Q64 = 1n << SCALE_OFFSET;
+export const ONE_Q128 = ONE_Q64 * ONE_Q64;
 
-function pow_q64(base: bigint, exponent: bigint): bigint {
+export function pow_q64(base: bigint, exponent: bigint): bigint {
     let result = ONE_Q64;
     let factor = base;
     let remaining = exponent;

@@ -216,12 +216,19 @@ async function helius_rpc<T>(method: string, params: unknown[]): Promise<T> {
 export async function get_program_accounts_v2(
     program_id: PublicKey,
     filters: { memcmp: { offset: number; bytes: string } }[],
-    data_slice?: { offset: number; length: number }
+    data_slice?: { offset: number; length: number },
+    max_accounts: number = Infinity
 ): Promise<ProgramAccount[]> {
     const accounts: ProgramAccount[] = [];
     let pagination_key: string | null = null;
     do {
-        const options = { encoding: 'base64', commitment: COMMITMENT, limit: 1000, filters, dataSlice: data_slice };
+        const options = {
+            encoding: 'base64',
+            commitment: COMMITMENT,
+            limit: Math.min(1000, max_accounts - accounts.length),
+            filters,
+            dataSlice: data_slice
+        };
         if (pagination_key !== null) Object.assign(options, { paginationKey: pagination_key });
         const page: HeliusProgramAccountsPage = await helius_rpc<HeliusProgramAccountsPage>('getProgramAccountsV2', [
             program_id.toBase58(),
@@ -234,8 +241,8 @@ export async function get_program_accounts_v2(
             }))
         );
         pagination_key = page.paginationKey;
-    } while (pagination_key);
-    return accounts;
+    } while (pagination_key && accounts.length < max_accounts);
+    return accounts.slice(0, max_accounts);
 }
 
 export async function resolve_random_mints<T extends IMintMeta>(
