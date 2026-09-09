@@ -347,7 +347,7 @@ export async function token_balance(wallets: common.Wallet[], mint: PublicKey, f
     const wallet_count = token_balances.filter((balance) => (balance.uiAmount || 0) > 0).length;
 
     if (format === 'csv') {
-        common.log(common.yellow(`id,name,pubkey,mint,allocation,token_balance,entry_mcap`));
+        common.log(`id,name,pubkey,mint,allocation,token_balance,entry_mcap`);
     } else if (format === 'table') {
         common.log(common.yellow(`Getting the token balance of the wallets by the mint ${mint.toString()}...`));
         common.log(common.yellow(`Token: ${token_name} | Symbol: $${token_symbol}`));
@@ -505,7 +505,7 @@ export async function balance(wallets: common.Wallet[], format: OutputFormat): P
     );
     switch (format) {
         case 'csv': {
-            common.log(common.yellow('id,name,pubkey,sol_balance,usd_balance'));
+            common.log('id,name,pubkey,sol_balance,usd_balance');
             for (let i = 0; i < wallets.length; i++) {
                 const wallet = wallets[i];
                 const balance = balances[i] / LAMPORTS_PER_SOL;

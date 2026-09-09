@@ -60,7 +60,7 @@ async function get_all_signatures(public_key: PublicKey): Promise<ConfirmedSigna
 async function get_transactions(signatures: string[]): Promise<(ParsedTransactionWithMeta | null)[]> {
     return common.retry_with_backoff(() =>
         global.CONNECTION.getParsedTransactions(signatures, {
-            maxSupportedTransactionVersion: 0
+            maxSupportedTransactionVersion: 1
         })
     );
 }

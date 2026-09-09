@@ -43,6 +43,7 @@ interface TransactionSubscribeResult {
     transaction: {
         transaction: RawParsedTransaction['transaction'];
         meta: RawParsedTransaction['meta'];
+        version?: 'legacy' | 0 | 1;
     };
 }
 
@@ -79,6 +80,7 @@ export function deserialize_transaction_notification(
 
     return {
         slot: result.slot,
+        version: result.transaction.version,
         transaction: {
             signatures: transaction.signatures,
             message: {
@@ -230,7 +232,7 @@ export class TxSubscriber implements Subscriber {
                     encoding: encoding,
                     transactionDetails: details,
                     showRewards: show_rewards,
-                    maxSupportedTransactionVersion: 0
+                    maxSupportedTransactionVersion: 1
                 }
             ]
         };

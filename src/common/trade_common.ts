@@ -309,7 +309,7 @@ export async function retry_get_tx(
     while (retries > 0) {
         try {
             const transaction = await global.CONNECTION.getParsedTransaction(signature, {
-                maxSupportedTransactionVersion: 0,
+                maxSupportedTransactionVersion: 1,
                 commitment: COMMITMENT
             });
             if (transaction) return transaction;
@@ -456,23 +456,27 @@ export function calc_token_balance_changes(
         LAMPORTS_PER_SOL;
 
     let tx_fees = 0;
-    const compute_budget_data = tx.transaction.message.instructions
-        .filter((instr): instr is PartiallyDecodedInstruction => {
-            const program_id = instr.programId as PublicKey | string;
-            const is_compute_budget_program =
-                typeof program_id === 'string'
-                    ? program_id === COMPUTE_BUDGET_PROGRAM_ID.toBase58()
-                    : program_id.equals(COMPUTE_BUDGET_PROGRAM_ID);
-            return 'data' in instr && is_compute_budget_program;
-        })
-        .map((instr) => {
-            const buff = Buffer.from(bs58.decode(instr.data));
-            if (buff.length === 5) return common.read_biguint_le(buff, 1, 4);
-            if (buff.length === 9) return common.read_biguint_le(buff, 1, 8);
-            throw new Error(`Invalid compute budget instruction data length: ${buff.length}`);
-        });
-    if (compute_budget_data.length === 2) {
-        tx_fees = Number(compute_budget_data[0] * compute_budget_data[1]) / (LAMPORTS_PER_SOL * 10 ** 6);
+    if (tx.version === 1) {
+        tx_fees = (tx.transaction.message.transactionConfig?.priorityFee ?? 0) / LAMPORTS_PER_SOL;
+    } else {
+        const compute_budget_data = tx.transaction.message.instructions
+            .filter((instr): instr is PartiallyDecodedInstruction => {
+                const program_id = instr.programId as PublicKey | string;
+                const is_compute_budget_program =
+                    typeof program_id === 'string'
+                        ? program_id === COMPUTE_BUDGET_PROGRAM_ID.toBase58()
+                        : program_id.equals(COMPUTE_BUDGET_PROGRAM_ID);
+                return 'data' in instr && is_compute_budget_program;
+            })
+            .map((instr) => {
+                const buff = Buffer.from(bs58.decode(instr.data));
+                if (buff.length === 5) return common.read_biguint_le(buff, 1, 4);
+                if (buff.length === 9) return common.read_biguint_le(buff, 1, 8);
+                throw new Error(`Invalid compute budget instruction data length: ${buff.length}`);
+            });
+        if (compute_budget_data.length === 2) {
+            tx_fees = Number(compute_budget_data[0] * compute_budget_data[1]) / (LAMPORTS_PER_SOL * 10 ** 6);
+        }
     }
 
     return {
@@ -500,7 +504,7 @@ export async function get_cost_basis(
             {
                 transactionDetails: 'full',
                 encoding: 'jsonParsed',
-                maxSupportedTransactionVersion: 0,
+                maxSupportedTransactionVersion: 1,
                 sortOrder: 'asc',
                 commitment: 'finalized',
                 limit: COST_BASIS_TRANSACTION_PAGE_SIZE,
@@ -1004,7 +1008,7 @@ async function check_transaction_status(
                 (finality === 'confirmed' && status.confirmationStatus === 'finalized'))
         ) {
             const tx = await CONNECTION.getTransaction(signature, {
-                maxSupportedTransactionVersion: 0,
+                maxSupportedTransactionVersion: 1,
                 commitment: finality
             });
             if (tx) {
@@ -1186,7 +1190,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
     try {
         const tx_details = await global.CONNECTION.getTransaction(signature, {
             commitment: COMMITMENT,
-            maxSupportedTransactionVersion: 0
+            maxSupportedTransactionVersion: 1
         });
         if (!tx_details) throw new Error(`Transaction not found: ${signature} `);
         const balance_index = tx_details.transaction.message.staticAccountKeys.findIndex((i) => i.equals(address));
