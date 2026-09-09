@@ -140,6 +140,18 @@ export const RAYDIUM_LAUNCHPAD_VAULT_SEED = new Uint8Array([112, 111, 111, 108, 
 export const RAYDIUM_LAUNCHPAD_POOL_HEADER = new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]);
 export const RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY = new PublicKey('2DPAtwB8L12vrMRExbLuyGnC7n2J5LNoZQSejeQGpwkr');
 export const RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG = new PublicKey('6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX');
+export const RAYDIUM_LAUNCHPAD_CREATE_PARAMS = {
+    supply: 1_000_000_000_000_000n,
+    total_sell: 793_100_000_000_000n,
+    fundraising: 85_000_000_000n
+};
+export const RAYDIUM_DEFAULT_MINT_META = {
+    market_cap: 30,
+    sol_reserves: 30_000_852_951n,
+    token_reserves: 1_073_025_605_596_382n,
+    total_supply: RAYDIUM_LAUNCHPAD_CREATE_PARAMS.supply,
+    fee: 0.0105
+};
 export const RAYDIUM_LAUNCHPAD_SELL_DISCRIMINATOR = new Uint8Array([149, 39, 222, 155, 211, 124, 152, 26]);
 export const RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR = new Uint8Array([250, 234, 13, 123, 213, 156, 19, 236]);
 export const RAYDIUM_CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
@@ -151,6 +163,10 @@ export const RAYDIUM_LTA_ACCOUNT = new PublicKey('DiVZACwhLuhxtVDm7tXqcTBch9WrvU
 export const RAYDIUM_LTA_ACCOUNT_EXTRA = new PublicKey('39TSYuyedPtTakGJdUpx7Qp9EHTuA93Yx2vGiRqyuYKD');
 
 // BONK CONSTANTS
+export const BONK_DEFAULT_MINT_META = {
+    ...RAYDIUM_DEFAULT_MINT_META,
+    fee: 0.015
+};
 export const BONK_IPFS_META_API_URL = 'https://storage.letsbonk.fun/upload/meta';
 export const BONK_IPFS_IMAGE_API_URL = 'https://storage.letsbonk.fun/upload/img';
 export const BONK_CONFIG = new PublicKey('FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1');
@@ -177,6 +193,12 @@ export const METEORA_DAMM_V2_CLAIM_REWARD_DISCRIMINATOR = new Uint8Array([149, 9
 export const PUMP_API_URL = 'https://frontend-api-v3.pump.fun';
 export const PUMP_IPFS_API_URL = 'https://frontend-api-v3.pump.fun/ipfs/token-metadata';
 export const PUMP_TOKEN_DECIMALS = 6;
+export const PUMP_DEFAULT_MINT_META = {
+    market_cap: 27.95,
+    sol_reserves: 30_000_000_000n,
+    token_reserves: 1_073_000_000_000_000n,
+    total_supply: 1_000_000_000_000_000n
+};
 export const PUMP_FEE_PERCENTAGE = 0.0125; // 1.25%
 export const PUMP_SWAP_PERCENTAGE = 0.0125; // 1.25%
 export const PUMP_LTA_ACCOUNT_EXTRA = new PublicKey('FNbKyKh4LjC1kSmhMahZ2gJPwt1anynVUdaCNmmuxzac');

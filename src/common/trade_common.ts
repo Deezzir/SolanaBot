@@ -36,6 +36,9 @@ import {
     JITO_ENDPOINTS,
     PriorityLevel,
     TRADE_DEFAULT_TOKEN_DECIMALS,
+    TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+    TRADE_MAX_WALLETS_PER_CREATE_TX,
+    TRADE_MAX_SLIPPAGE,
     TRADE_TX_RETRIES,
     TRADE_RETRY_INTERVAL_MS,
     JITO_TIP_ACCOUNTS,
@@ -235,6 +238,31 @@ export async function get_program_accounts_v2(
     return accounts;
 }
 
+export async function resolve_random_mints<T extends IMintMeta>(
+    candidates: string[],
+    count: number,
+    get_meta: (mint: PublicKey) => Promise<T | undefined>
+): Promise<T[]> {
+    if (!Number.isSafeInteger(count) || count <= 0) return [];
+    const unique = [...new Set(candidates)].filter(
+        (mint) => mint !== SOL_MINT.toBase58() && common.is_valid_pubkey(mint)
+    );
+    const result: T[] = [];
+    while (unique.length && result.length < count) {
+        const batch: string[] = [];
+        const batch_size = Math.min(5, count - result.length, unique.length);
+        for (let i = 0; i < batch_size; i++) {
+            const index = Math.floor(Math.random() * unique.length);
+            batch.push(unique[index]);
+            unique[index] = unique[unique.length - 1];
+            unique.pop();
+        }
+        const metadata = await Promise.all(batch.map((mint) => get_meta(new PublicKey(mint)).catch(() => undefined)));
+        for (const meta of metadata) if (meta) result.push(meta);
+    }
+    return result.slice(0, count);
+}
+
 export interface IMintMeta {
     readonly token_name: string;
     readonly token_symbol: string;
@@ -338,6 +366,45 @@ export interface IProgramTrader {
     default_mint_meta(mint: PublicKey, sol_price?: number, data?: object): Promise<IMintMeta>;
     get_trader_fees(trader: Keypair): Promise<ClaimableAsset[]>;
     claim_trader_fees(trader: Keypair, assets: ClaimableAsset[], priority?: PriorityLevel): Promise<String>;
+}
+
+export function validate_create_token_parameters(
+    sol_amount: number,
+    traders?: [Keypair, number][],
+    bundle_tip?: number
+): void {
+    if ((traders !== undefined) !== (bundle_tip !== undefined))
+        throw new Error('Traders and bundle tip must be set together.');
+    const max_wallets = Math.min(
+        TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
+        (get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
+    );
+    if (traders && (traders.length < 1 || traders.length > max_wallets))
+        throw new Error(`Initial buyer count must be between 1 and ${max_wallets}.`);
+    common.sol_to_lamports(sol_amount);
+    if (bundle_tip !== undefined && common.sol_to_lamports(bundle_tip) === 0n)
+        throw new Error('Bundle tip must be positive.');
+    for (const [, amount] of traders ?? [])
+        if (common.sol_to_lamports(amount) === 0n) throw new Error('Initial buy amounts must be positive.');
+}
+
+export function validate_slippage(slippage: number): void {
+    if (!Number.isFinite(slippage) || slippage <= 0 || slippage >= TRADE_MAX_SLIPPAGE)
+        throw new RangeError(`Slippage must be greater than 0 and less than ${TRADE_MAX_SLIPPAGE}.`);
+}
+
+export function validate_trade_parameters(amount: number | TokenAmount, slippage: number): void {
+    validate_slippage(slippage);
+    if (typeof amount === 'number') {
+        if (common.sol_to_lamports(amount) === 0n) throw new RangeError('Buy amount must be positive.');
+    } else {
+        if (!/^\d+$/.test(amount.amount)) throw new RangeError('Token amount must be an unsigned integer.');
+        const raw_amount = BigInt(amount.amount);
+        if (raw_amount <= 0n || raw_amount > 18_446_744_073_709_551_615n)
+            throw new RangeError('Token amount must be a positive u64 integer.');
+        if (!Number.isInteger(amount.decimals) || amount.decimals < 0 || amount.decimals > 255)
+            throw new RangeError('Token decimals must be an integer between 0 and 255.');
+    }
 }
 
 type PriorityOptions = {
@@ -504,12 +571,26 @@ export async function retry_send_tx(
     throw new Error('Send transaction failed after multiple attempts');
 }
 
+const ata_cache = new Map<string, Promise<PublicKey>>();
+
 export function calc_ata(
     owner: PublicKey,
     mint: PublicKey,
     token_program: PublicKey = TOKEN_PROGRAM_ID
 ): Promise<PublicKey> {
-    return getAssociatedTokenAddress(mint, owner, token_program);
+    const key = `${owner.toBase58()}:${mint.toBase58()}:${token_program.toBase58()}`;
+    const cached = ata_cache.get(key);
+    if (cached) return cached;
+    if (ata_cache.size >= CACHE_SIZE_MAX) {
+        const oldest = ata_cache.keys().next().value;
+        if (oldest !== undefined) ata_cache.delete(oldest);
+    }
+    const request = getAssociatedTokenAddress(mint, owner, token_program).catch((error) => {
+        if (ata_cache.get(key) === request) ata_cache.delete(key);
+        throw error;
+    });
+    ata_cache.set(key, request);
+    return request;
 }
 
 export function calc_token_balance_changes(
@@ -976,7 +1057,7 @@ export function create_tip_instruction(
         toPubkey:
             tip_account ??
             (provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account()),
-        lamports: tip * LAMPORTS_PER_SOL
+        lamports: common.sol_to_lamports(tip)
     });
 }
 
@@ -1817,7 +1898,7 @@ export async function close_accounts(
 export function get_sol_token_amount(amount: number): TokenAmount {
     return {
         uiAmount: amount,
-        amount: Math.floor(amount * LAMPORTS_PER_SOL).toString(),
+        amount: common.sol_to_lamports(amount).toString(),
         decimals: Math.log10(LAMPORTS_PER_SOL)
     } as TokenAmount;
 }

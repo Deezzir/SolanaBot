@@ -27,7 +27,6 @@ import {
     METEORA_SWAP_DISCRIMINATOR,
     PriorityLevel,
     SOL_MINT,
-    TRADE_MAX_SLIPPAGE,
     PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import base58 from 'bs58';
@@ -775,6 +774,7 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        trade.validate_trade_parameters(sol_amount, slippage);
         const lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         if (mint_meta.migrated) {
             if (!mint_meta.damm_v2_data) throw new Error('Missing DAMM v2 pool data.');
@@ -789,6 +789,7 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        trade.validate_trade_parameters(token_amount, slippage);
         const lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         if (mint_meta.migrated) {
             if (!mint_meta.damm_v2_data) throw new Error('Missing DAMM v2 pool data.');
@@ -803,7 +804,8 @@ export class Trader implements trade.IProgramTrader {
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        trade.validate_trade_parameters(sol_amount, slippage);
+        const sol_amount_raw = common.sol_to_lamports(sol_amount);
         let buy_instructions: TransactionInstruction[];
         let lta: AddressLookupTableAccount[] | undefined;
         let token_amount_raw: bigint;
@@ -1194,12 +1196,12 @@ export class Trader implements trade.IProgramTrader {
     }
 
     private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
+        trade.validate_slippage(slippage);
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
     private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
+        trade.validate_slippage(slippage);
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
@@ -1370,7 +1372,7 @@ export class Trader implements trade.IProgramTrader {
         const base_vault = new PublicKey(mint_meta.dbc_data.base_vault);
         const quote_vault = new PublicKey(mint_meta.dbc_data.quote_vault);
 
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_slippage_down(
             this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_data),
             slippage
@@ -1476,7 +1478,7 @@ export class Trader implements trade.IProgramTrader {
         slippage: number
     ): Promise<TransactionInstruction[]> {
         const result = await this.get_damm_v2_swap_instructions(
-            BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL)),
+            common.sol_to_lamports(sol_amount),
             buyer,
             mint_meta,
             true,

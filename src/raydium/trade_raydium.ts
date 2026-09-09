@@ -23,6 +23,7 @@ import {
     RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY,
     RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG,
+    RAYDIUM_DEFAULT_MINT_META,
     RAYDIUM_LAUNCHPAD_POOL_HEADER,
     RAYDIUM_LAUNCHPAD_POOL_SEED,
     RAYDIUM_LAUNCHPAD_PROGRAM_ID,
@@ -32,7 +33,6 @@ import {
     SOL_MINT,
     SYSTEM_PROGRAM_ID,
     TRADE_DEFAULT_TOKEN_DECIMALS,
-    TRADE_MAX_SLIPPAGE,
     PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import {
@@ -232,6 +232,9 @@ export class RaydiumMintMeta implements trade.IMintMeta {
 }
 
 export class RaydiumTrader implements trade.IProgramTrader {
+    protected readonly compute_unit_limit = RAYDIUM_COMPUTE_UNIT_LIMIT;
+    protected readonly mint_meta_defaults = RAYDIUM_DEFAULT_MINT_META;
+
     public get_name(): string {
         return common.Program.Raydium;
     }
@@ -341,7 +344,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             undefined,
             false,
             undefined,
-            RAYDIUM_COMPUTE_UNIT_LIMIT
+            this.compute_unit_limit
         );
     }
 
@@ -362,7 +365,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             protection_tip,
             mev_protect,
             ltas,
-            RAYDIUM_COMPUTE_UNIT_LIMIT
+            this.compute_unit_limit
         );
     }
 
@@ -372,6 +375,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         mint_meta: RaydiumMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        trade.validate_trade_parameters(sol_amount, slippage);
         const lta = await trade.get_ltas([RAYDIUM_LTA_ACCOUNT]);
         if (mint_meta.complete) {
             const instructions = await this.get_buy_cpmm_instructions(sol_amount, buyer, mint_meta, slippage);
@@ -398,7 +402,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             protection_tip,
             mev_protect,
             ltas,
-            RAYDIUM_COMPUTE_UNIT_LIMIT
+            this.compute_unit_limit
         );
     }
 
@@ -408,6 +412,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         mint_meta: RaydiumMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
+        trade.validate_trade_parameters(token_amount, slippage);
         const lta = await trade.get_ltas([RAYDIUM_LTA_ACCOUNT]);
         if (mint_meta.complete) {
             const instructions = await this.get_sell_cpmm_instructions(token_amount, seller, mint_meta, slippage);
@@ -423,7 +428,8 @@ export class RaydiumTrader implements trade.IProgramTrader {
         mint_meta: RaydiumMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        trade.validate_trade_parameters(sol_amount, slippage);
+        const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
         let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
         let [sell_instructions] = await this.sell_token_instructions(
@@ -464,7 +470,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
                 protection_tip,
                 mev_protect,
                 ltas,
-                RAYDIUM_COMPUTE_UNIT_LIMIT
+                this.compute_unit_limit
             );
             await common.sleep(interval_ms);
             const sell_signature = await trade.retry_send_tx(
@@ -474,7 +480,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
                 protection_tip,
                 mev_protect,
                 ltas,
-                RAYDIUM_COMPUTE_UNIT_LIMIT
+                this.compute_unit_limit
             );
             return [buy_signature, sell_signature];
         }
@@ -486,7 +492,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             protection_tip,
             mev_protect,
             ltas,
-            RAYDIUM_COMPUTE_UNIT_LIMIT
+            this.compute_unit_limit
         );
         return [signature, signature];
     }
@@ -511,7 +517,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             tip,
             priority,
             ltas,
-            RAYDIUM_COMPUTE_UNIT_LIMIT
+            this.compute_unit_limit
         );
     }
 
@@ -549,8 +555,8 @@ export class RaydiumTrader implements trade.IProgramTrader {
 
     public update_mint_meta_reserves(mint_meta: RaydiumMintMeta, amount: number | TokenAmount): RaydiumMintMeta {
         if (typeof amount === 'number') {
-            const sol_amount_raw = BigInt(Math.floor(amount * LAMPORTS_PER_SOL));
-            const fee = (sol_amount_raw * BigInt(mint_meta.fee * 10000)) / 10000n;
+            const sol_amount_raw = common.sol_to_lamports(amount);
+            const fee = this.calc_fee(sol_amount_raw, mint_meta.fee);
             const n = mint_meta.sol_reserves * mint_meta.token_reserves;
             mint_meta.sol_reserves = mint_meta.sol_reserves + (sol_amount_raw - fee);
             mint_meta.token_reserves = n / mint_meta.sol_reserves + 1n;
@@ -559,7 +565,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             const token_amount_raw = BigInt(amount.amount);
             mint_meta.token_reserves = mint_meta.token_reserves + token_amount_raw;
             const n = (token_amount_raw * mint_meta.sol_reserves) / mint_meta.token_reserves;
-            const fee = (n * BigInt(mint_meta.fee * 10000)) / 10000n;
+            const fee = this.calc_fee(n, mint_meta.fee);
             mint_meta.sol_reserves = mint_meta.sol_reserves - (n - fee);
             return mint_meta;
         }
@@ -832,20 +838,17 @@ export class RaydiumTrader implements trade.IProgramTrader {
             creator: typeof decoded?.creator === 'string' ? decoded.creator : undefined,
             base_vault: base_vault.toString(),
             quote_vault: quote_vault.toString(),
-            market_cap: 30,
-            usd_market_cap: 30 * sol_price,
-            sol_reserves: BigInt(30000852951),
-            token_reserves: BigInt(1073025605596382),
-            total_supply: BigInt(1000000000000000),
+            ...this.mint_meta_defaults,
+            usd_market_cap: this.mint_meta_defaults.market_cap * sol_price,
             token_program_id: meta.token_program.toString()
         });
     }
 
     protected calc_token_amount_raw(sol_amount_raw: bigint, token: Partial<RaydiumMintMeta>): bigint {
-        if (!token.sol_reserves || !token.token_reserves || !token.fee) return 0n;
+        if (!token.sol_reserves || !token.token_reserves || token.fee === undefined) return 0n;
         if (sol_amount_raw <= 0) return 0n;
 
-        const fee = (sol_amount_raw * BigInt(token.fee * 10000)) / 10000n;
+        const fee = this.calc_fee(sol_amount_raw, token.fee);
         const n = token.sol_reserves * token.token_reserves;
         const new_sol_reserves = token.sol_reserves + (sol_amount_raw - fee);
         const new_token_reserves = n / new_sol_reserves + 1n;
@@ -859,13 +862,18 @@ export class RaydiumTrader implements trade.IProgramTrader {
         return (token_amount_raw * token.sol_reserves) / (token.token_reserves + token_amount_raw);
     }
 
+    private calc_fee(amount: bigint, rate: number): bigint {
+        const fee_rate = BigInt(Math.round(rate * 1_000_000));
+        return (amount * fee_rate + 999_999n) / 1_000_000n;
+    }
+
     protected calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
+        trade.validate_slippage(slippage);
         return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
     protected calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
-        if (slippage <= 0.0 || slippage >= TRADE_MAX_SLIPPAGE) throw new RangeError('Slippage must be between 0 and 1');
+        trade.validate_slippage(slippage);
         return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
     }
 
@@ -927,7 +935,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const token_ata = await trade.calc_ata(buyer.publicKey, mint);
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_slippage_down(
             this.calc_token_amount_raw(sol_amount_raw, mint_meta),
             slippage
@@ -1058,18 +1066,24 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const base_vault = new PublicKey(mint_meta.base_vault);
         const config = new PublicKey(mint_meta.config);
 
-        const sol_amount_raw = BigInt(Math.floor(sol_amount * LAMPORTS_PER_SOL));
+        const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_slippage_down(
             this.calc_token_amount_raw(sol_amount_raw, mint_meta),
             slippage
         );
 
         const instruction_data = this.swap_cpmm_data(sol_amount_raw, token_amount_raw);
-        const token_ata = await trade.calc_ata(buyer.publicKey, mint);
+        const token_ata = await trade.calc_ata(buyer.publicKey, mint, mint_meta.token_program);
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 
         return [
-            createAssociatedTokenAccountIdempotentInstruction(buyer, token_ata, buyer.publicKey, mint),
+            createAssociatedTokenAccountIdempotentInstruction(
+                buyer,
+                token_ata,
+                buyer.publicKey,
+                mint,
+                mint_meta.token_program
+            ),
             createAssociatedTokenAccountIdempotentInstruction(buyer, wsol_ata, buyer.publicKey, SOL_MINT),
             SystemProgram.transfer({
                 fromPubkey: buyer.publicKey,
@@ -1129,7 +1143,11 @@ export class RaydiumTrader implements trade.IProgramTrader {
             token_amount_raw,
             this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage)
         );
-        const token_ata = await trade.calc_ata(seller.publicKey, new PublicKey(mint_meta.mint));
+        const token_ata = await trade.calc_ata(
+            seller.publicKey,
+            new PublicKey(mint_meta.mint),
+            mint_meta.token_program
+        );
         const wsol_ata = await trade.calc_ata(seller.publicKey, SOL_MINT);
 
         return [

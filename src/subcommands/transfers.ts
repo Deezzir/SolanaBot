@@ -324,7 +324,7 @@ export async function execute_depth_sol_fund(
             const tx_instructions: TransactionInstruction[] = [];
             const tx_signers: Keypair[] = [];
             const tx_lamports = Math.floor(
-                Math.floor(fund_amount * LAMPORTS_PER_SOL) -
+                common.safe_number(common.sol_to_lamports(fund_amount)) -
                     (5000 * tx.length - 2) -
                     (tx_idx === txs.length - 1 ? bundle_tip * LAMPORTS_PER_SOL : 0)
             );
@@ -380,7 +380,12 @@ export async function execute_fund_sol(entries: [common.Wallet, number][], funde
         );
         transactions.push(
             trade
-                .send_lamports(fund_amount * LAMPORTS_PER_SOL, funder, receiver.publicKey, PriorityLevel.HIGH)
+                .send_lamports(
+                    common.safe_number(common.sol_to_lamports(fund_amount)),
+                    funder,
+                    receiver.publicKey,
+                    PriorityLevel.HIGH
+                )
                 .then((signature) =>
                     common.log(common.green(`Transaction completed for ${wallet.name}, signature: ${signature}`))
                 )

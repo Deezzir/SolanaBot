@@ -166,7 +166,7 @@ export class Trader implements trade.IProgramTrader {
         _assets: trade.ClaimableAsset[],
         _priority?: PriorityLevel
     ): Promise<String> {
-        throw new Error('Not implemented');
+        throw new Error('Not supported');
     }
 
     public async buy_token(
@@ -342,7 +342,7 @@ export class Trader implements trade.IProgramTrader {
     }
 
     public async get_random_mints(_count: number): Promise<JupiterMintMeta[]> {
-        throw new Error('Not implemented');
+        throw new Error('Not supported');
     }
 
     public async create_token(
@@ -356,7 +356,7 @@ export class Trader implements trade.IProgramTrader {
         _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<String> {
-        throw new Error('Not implemented');
+        throw new Error('Not supported');
     }
 
     public update_mint_meta_reserves(mint_meta: JupiterMintMeta, _amount: number | TokenAmount): JupiterMintMeta {
@@ -399,7 +399,7 @@ export class Trader implements trade.IProgramTrader {
         _sol_price: number = 0,
         _commitment: Commitment = COMMITMENT
     ): Promise<() => void> {
-        throw new Error('Not implemented');
+        throw new Error('Not supported');
     }
 
     public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
@@ -441,6 +441,7 @@ export class Trader implements trade.IProgramTrader {
         to: PublicKey,
         slippage: number = 0.05
     ): Promise<JupiterQuote> {
+        trade.validate_trade_parameters(amount, slippage);
         const params = new URLSearchParams({
             inputMint: from.toBase58(),
             outputMint: to.toBase58(),

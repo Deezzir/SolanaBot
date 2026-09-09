@@ -458,8 +458,9 @@ export async function transfer_sol(amount: number, receiver: PublicKey, sender: 
         common.yellow(`Transferring ${amount} SOL from ${sender.publicKey.toString()} to ${receiver.toString()}...`)
     );
     const balance = await trade.get_balance(sender.publicKey, COMMITMENT);
-    if (balance < amount * LAMPORTS_PER_SOL) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
-    const signature = await trade.send_lamports(amount * LAMPORTS_PER_SOL, sender, receiver, PriorityLevel.HIGH);
+    const lamports = common.safe_number(common.sol_to_lamports(amount));
+    if (balance < lamports) throw new Error(`Sender balance is not enough to transfer ${amount} SOL`);
+    const signature = await trade.send_lamports(lamports, sender, receiver, PriorityLevel.HIGH);
     common.log(common.green(`Transaction completed, signature: ${signature}`));
 }
 

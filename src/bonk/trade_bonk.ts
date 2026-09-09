@@ -5,6 +5,8 @@ import {
     BONK_CONFIG,
     BONK_CONFIG_2,
     BONK_CONFIG_3,
+    BONK_DEFAULT_MINT_META,
+    RAYDIUM_LAUNCHPAD_CREATE_PARAMS,
     BONK_IPFS_IMAGE_API_URL,
     BONK_IPFS_META_API_URL,
     IPFS,
@@ -21,8 +23,6 @@ import {
     SOL_MINT,
     SYSTEM_PROGRAM_ID,
     TRADE_DEFAULT_TOKEN_DECIMALS,
-    TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
-    TRADE_MAX_WALLETS_PER_CREATE_TX,
     PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import { RaydiumMintMeta, RaydiumTrader } from '../raydium/trade_raydium';
@@ -33,13 +33,23 @@ import { TOKEN_PROGRAM_ID } from '../common/token';
 const BONK_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Bonk];
 
 export class BonkTrader extends RaydiumTrader {
+    protected override readonly compute_unit_limit = BONK_COMPUTE_UNIT_LIMIT;
+    protected override readonly mint_meta_defaults = BONK_DEFAULT_MINT_META;
+
     public override get_name(): string {
         return common.Program.Bonk;
     }
 
     public override async get_random_mints(count: number): Promise<RaydiumMintMeta[]> {
         if (count <= 0) return [];
-        const url = `${RAYDIUM_LAUNCHPAD_API_URL}/get/list?sort=new&size=${Math.min(count, 100)}&mintType=default&platformId=${BONK_CONFIG_2.toBase58()},${BONK_CONFIG_3.toBase58()},${BONK_CONFIG.toBase58()}`;
+        const url = new URL(`${RAYDIUM_LAUNCHPAD_API_URL}/get/list`);
+        url.searchParams.set('sort', 'new');
+        url.searchParams.set('size', String(Math.min(count, 100)));
+        url.searchParams.set('mintType', 'default');
+        url.searchParams.set(
+            'platformId',
+            [BONK_CONFIG_2, BONK_CONFIG_3, BONK_CONFIG].map((config) => config.toBase58()).join(',')
+        );
         try {
             const response = await fetch(url);
             const data = await response.json();
@@ -67,13 +77,7 @@ export class BonkTrader extends RaydiumTrader {
         bundle_tip?: number,
         priority?: PriorityLevel
     ): Promise<String> {
-        if ((traders && !bundle_tip) || (!traders && bundle_tip)) throw new Error('Invalid create bundle parameters');
-        const max_bundle_wallets = Math.min(
-            TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
-            (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
-        );
-        if (traders && (traders.length > max_bundle_wallets || traders.length < 1))
-            throw new Error(`Invalid traders count: ${traders.length}`);
+        trade.validate_create_token_parameters(sol_amount, traders, bundle_tip);
         let mint_meta = await this.default_mint_meta(mint.publicKey);
         const create_instructions = await this.get_create_token_instructions(
             creator,
@@ -187,11 +191,12 @@ export class BonkTrader extends RaydiumTrader {
             data.write(value, 4);
             return data;
         };
+        const { supply, total_sell, fundraising } = RAYDIUM_LAUNCHPAD_CREATE_PARAMS;
         const curve = Buffer.alloc(26);
         curve.writeUInt8(0);
-        curve.writeBigUInt64LE(1_000_000_000_000_000n, 1);
-        curve.writeBigUInt64LE(793_100_000_000_000n, 9);
-        curve.writeBigUInt64LE(85_000_000_000n, 17);
+        curve.writeBigUInt64LE(supply, 1);
+        curve.writeBigUInt64LE(total_sell, 9);
+        curve.writeBigUInt64LE(fundraising, 17);
         curve.writeUInt8(1, 25);
         return Buffer.concat([
             Buffer.from(RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR),
