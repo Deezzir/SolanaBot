@@ -1,34 +1,18 @@
-import { Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import * as common from '../common/common';
-import * as trade from '../common/trade_common';
 import {
     BONK_CONFIG,
     BONK_CONFIG_2,
     BONK_CONFIG_3,
     BONK_DEFAULT_MINT_META,
-    RAYDIUM_LAUNCHPAD_CREATE_PARAMS,
     BONK_IPFS_IMAGE_API_URL,
     BONK_IPFS_META_API_URL,
-    IPFS,
-    METAPLEX_META_SEED,
-    METAPLEX_PROGRAM_ID,
-    RENT_PROGRAM_ID,
     RAYDIUM_LAUNCHPAD_API_URL,
-    PriorityLevel,
-    RAYDIUM_LAUNCHPAD_AUTHORITY,
-    RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR,
-    RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY,
-    RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG,
-    RAYDIUM_LAUNCHPAD_PROGRAM_ID,
-    SOL_MINT,
-    SYSTEM_PROGRAM_ID,
-    TRADE_DEFAULT_TOKEN_DECIMALS,
     PROGRAM_COMPUTE_UNIT_LIMITS
 } from '../constants';
 import { RaydiumMintMeta, RaydiumTrader } from '../raydium/trade_raydium';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
-import { TOKEN_PROGRAM_ID } from '../common/token';
 
 const BONK_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Bonk];
 
@@ -38,6 +22,10 @@ export class BonkTrader extends RaydiumTrader {
 
     public override get_name(): string {
         return common.Program.Bonk;
+    }
+
+    protected override get_create_platform(): PublicKey {
+        return BONK_CONFIG;
     }
 
     public override async get_random_mints(count: number): Promise<RaydiumMintMeta[]> {
@@ -66,67 +54,6 @@ export class BonkTrader extends RaydiumTrader {
         }
     }
 
-    public override async create_token(
-        mint: Keypair,
-        creator: Keypair,
-        token_name: string,
-        token_symbol: string,
-        meta_cid: string,
-        sol_amount: number = 0,
-        traders?: [Keypair, number][],
-        bundle_tip?: number,
-        priority?: PriorityLevel
-    ): Promise<String> {
-        trade.validate_create_token_parameters(sol_amount, traders, bundle_tip);
-        let mint_meta = await this.default_mint_meta(mint.publicKey);
-        const create_instructions = await this.get_create_token_instructions(
-            creator,
-            token_name,
-            token_symbol,
-            meta_cid,
-            mint
-        );
-        if (sol_amount > 0)
-            create_instructions.push(...(await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.005)));
-        const ltas = await trade.get_ltas(this.get_lta_addresses());
-        if (!traders)
-            return await trade.send_tx(
-                create_instructions,
-                [creator, mint],
-                PriorityLevel.HIGH,
-                undefined,
-                false,
-                ltas,
-                BONK_COMPUTE_UNIT_LIMIT
-            );
-        const generated_lta = await trade.generate_trade_lta(
-            creator,
-            traders.map(([trader]) => trader),
-            mint.publicKey
-        );
-        mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        const buy_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Keypair[][] = [];
-        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
-        for (const group of common.chunks(traders, chunk_size)) {
-            const instructions: TransactionInstruction[] = [];
-            for (const [buyer, amount] of group) {
-                instructions.push(...(await this.get_buy_instructions(amount, buyer, mint_meta, 0.05)));
-                mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
-            }
-            buy_instructions.push(instructions);
-            bundle_signers.push(group.map(([buyer]) => buyer));
-        }
-        return await trade.retry_send_bundle(
-            [create_instructions, ...buy_instructions],
-            [[creator, mint], ...bundle_signers],
-            bundle_tip!,
-            priority,
-            [generated_lta, ...ltas],
-            BONK_COMPUTE_UNIT_LIMIT
-        );
-    }
-
     public override async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
         const image = new File([readFileSync(image_path)], basename(image_path), { type: 'image/png' });
         const form = new FormData();
@@ -141,71 +68,5 @@ export class BonkTrader extends RaydiumTrader {
         });
         if (!meta_response.ok) throw new Error(`HTTP error! status: ${meta_response.status}`);
         return (await meta_response.text()).split('/').slice(-1)[0];
-    }
-
-    private async get_create_token_instructions(
-        creator: Keypair,
-        token_name: string,
-        token_symbol: string,
-        meta_cid: string,
-        mint: Keypair
-    ): Promise<TransactionInstruction[]> {
-        const pool = await this.calc_pool(mint.publicKey);
-        const [base_vault, quote_vault] = await this.calc_vault(mint.publicKey, pool);
-        const [metadata] = await PublicKey.findProgramAddress(
-            [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBytes(), mint.publicKey.toBytes()],
-            METAPLEX_PROGRAM_ID
-        );
-        return [
-            new TransactionInstruction({
-                programId: RAYDIUM_LAUNCHPAD_PROGRAM_ID,
-                data: this.create_data(token_name, token_symbol, `${IPFS}${meta_cid}`),
-                keys: [
-                    { pubkey: creator.publicKey, isSigner: true, isWritable: true },
-                    { pubkey: creator.publicKey, isSigner: true, isWritable: true },
-                    { pubkey: RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: BONK_CONFIG, isSigner: false, isWritable: false },
-                    { pubkey: RAYDIUM_LAUNCHPAD_AUTHORITY, isSigner: false, isWritable: false },
-                    { pubkey: pool, isSigner: false, isWritable: true },
-                    { pubkey: mint.publicKey, isSigner: true, isWritable: true },
-                    { pubkey: SOL_MINT, isSigner: false, isWritable: false },
-                    { pubkey: base_vault, isSigner: false, isWritable: true },
-                    { pubkey: quote_vault, isSigner: false, isWritable: true },
-                    { pubkey: metadata, isSigner: false, isWritable: true },
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: METAPLEX_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY, isSigner: false, isWritable: false },
-                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false }
-                ]
-            })
-        ];
-    }
-
-    private create_data(name: string, symbol: string, uri: string): Buffer {
-        const string = (value: string) => {
-            const data = Buffer.alloc(4 + Buffer.byteLength(value));
-            data.writeUInt32LE(Buffer.byteLength(value));
-            data.write(value, 4);
-            return data;
-        };
-        const { supply, total_sell, fundraising } = RAYDIUM_LAUNCHPAD_CREATE_PARAMS;
-        const curve = Buffer.alloc(26);
-        curve.writeUInt8(0);
-        curve.writeBigUInt64LE(supply, 1);
-        curve.writeBigUInt64LE(total_sell, 9);
-        curve.writeBigUInt64LE(fundraising, 17);
-        curve.writeUInt8(1, 25);
-        return Buffer.concat([
-            Buffer.from(RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR),
-            Buffer.from([TRADE_DEFAULT_TOKEN_DECIMALS]),
-            string(name),
-            string(symbol),
-            string(uri),
-            curve,
-            Buffer.alloc(24)
-        ]);
     }
 }

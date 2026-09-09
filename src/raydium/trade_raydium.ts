@@ -13,6 +13,11 @@ import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import {
     COMMITMENT,
+    IPFS,
+    METAPLEX_META_SEED,
+    METAPLEX_PROGRAM_ID,
+    RENT_PROGRAM_ID,
+    RAYDIUM_API_URL,
     PriorityLevel,
     RAYDIUM_CPMM_AUTHORITY,
     RAYDIUM_CPMM_CREATOR_FEE_CLAIM_DISCRIMINATOR,
@@ -20,10 +25,14 @@ import {
     RAYDIUM_CPMM_PROGRAM_ID,
     RAYDIUM_CPMM_SWAP_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_AUTHORITY,
+    RAYDIUM_LAUNCHPAD_API_URL,
     RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY,
     RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG,
+    RAYDIUM_LAUNCHPAD_PLATFORM_CONFIG,
+    RAYDIUM_LAUNCHPAD_CREATE_PARAMS,
     RAYDIUM_DEFAULT_MINT_META,
+    RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_POOL_HEADER,
     RAYDIUM_LAUNCHPAD_POOL_SEED,
     RAYDIUM_LAUNCHPAD_PROGRAM_ID,
@@ -531,26 +540,221 @@ export class RaydiumTrader implements trade.IProgramTrader {
         }
     }
 
-    public async get_random_mints(_count: number): Promise<RaydiumMintMeta[]> {
-        throw new Error('Not implemented');
+    public async get_random_mints(count: number): Promise<RaydiumMintMeta[]> {
+        if (!Number.isSafeInteger(count) || count <= 0) return [];
+        const graduated_count = Math.floor((count + 1) * Math.random());
+        return (
+            await Promise.all([
+                this.get_random_graduated_mints(graduated_count),
+                this.get_random_ungraduated_mints(count - graduated_count)
+            ])
+        ).flat();
+    }
+
+    private async get_random_ungraduated_mints(count: number): Promise<RaydiumMintMeta[]> {
+        if (count <= 0) return [];
+        const limit = Math.min(100, Math.max(20, count * 3));
+        try {
+            const url = new URL(`${RAYDIUM_LAUNCHPAD_API_URL}/get/list`);
+            url.searchParams.set('sort', 'lastTrade');
+            url.searchParams.set('size', String(limit));
+            url.searchParams.set('mintType', 'default');
+            const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+            const data = await response.json();
+            if (!response.ok || !data.success || !Array.isArray(data.data?.rows))
+                throw new Error('LaunchLab mint discovery failed.');
+            const candidates = data.data.rows
+                .filter((row: { mintB?: { address: string } }) => row.mintB?.address === SOL_MINT.toBase58())
+                .map((row: { mint: string }) => row.mint) as string[];
+            return trade.resolve_random_mints(candidates, count, async (mint) => {
+                const meta = await this.get_mint_meta(mint);
+                return meta && !meta.migrated && meta.sol_reserves > 0n && meta.token_reserves > 0n ? meta : undefined;
+            });
+        } catch (error) {
+            common.error(common.red(`Failed fetching LaunchLab mints: ${error}`));
+            return [];
+        }
+    }
+
+    private async get_random_graduated_mints(count: number): Promise<RaydiumMintMeta[]> {
+        if (count <= 0) return [];
+        const limit = Math.min(100, Math.max(20, count * 3));
+        const sol = SOL_MINT.toBase58();
+        try {
+            const url = new URL(`${RAYDIUM_API_URL}/pools/info/mint`);
+            url.searchParams.set('mint1', sol);
+            url.searchParams.set('poolType', 'standard');
+            url.searchParams.set('poolSortField', 'volume24h');
+            url.searchParams.set('sortType', 'desc');
+            url.searchParams.set('pageSize', String(limit));
+            url.searchParams.set('page', '1');
+            const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+            const data = await response.json();
+            if (!response.ok || !data.success || !Array.isArray(data.data?.data))
+                throw new Error('CPMM mint discovery failed.');
+            const candidates = data.data.data
+                .filter(
+                    (pool: { programId: string; tvl: number }) =>
+                        pool.programId === RAYDIUM_CPMM_PROGRAM_ID.toBase58() && pool.tvl > 0
+                )
+                .flatMap((pool: { mintA: { address: string }; mintB: { address: string } }) =>
+                    pool.mintA.address === sol
+                        ? [pool.mintB.address]
+                        : pool.mintB.address === sol
+                          ? [pool.mintA.address]
+                          : []
+                ) as string[];
+            return trade.resolve_random_mints(candidates, count, async (mint) => {
+                const meta = await this.get_mint_meta(mint);
+                return meta && meta.migrated && meta.sol_reserves > 0n && meta.token_reserves > 0n ? meta : undefined;
+            });
+        } catch (error) {
+            common.error(common.red(`Failed fetching CPMM mints: ${error}`));
+            return [];
+        }
     }
 
     public async create_token(
-        _mint: Keypair,
-        _creator: Keypair,
-        _token_name: string,
-        _token_symbol: string,
-        _meta_cid: string,
-        _sol_amount?: number,
-        _traders?: [Keypair, number][],
-        _bundle_tip?: number,
-        _priority?: PriorityLevel
+        mint: Keypair,
+        creator: Keypair,
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        sol_amount: number = 0,
+        traders?: [Keypair, number][],
+        bundle_tip?: number,
+        priority?: PriorityLevel,
+        config?: object
     ): Promise<String> {
-        throw new Error('Not implemented');
+        if (config) throw new Error(`${this.get_name()} token creation does not support config options yet`);
+        trade.validate_create_token_parameters(sol_amount, traders, bundle_tip);
+        let mint_meta = await this.default_mint_meta(mint.publicKey, 0, {
+            name: token_name,
+            symbol: token_symbol,
+            creator: creator.publicKey.toBase58(),
+            config: this.get_create_platform().toBase58(),
+            token_program: TOKEN_PROGRAM_ID.toBase58()
+        });
+        const create_instructions = await this.get_create_token_instructions(
+            creator,
+            token_name,
+            token_symbol,
+            meta_cid,
+            mint
+        );
+        if (sol_amount > 0)
+            create_instructions.push(...(await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.05)));
+        const ltas = await trade.get_ltas(this.get_lta_addresses());
+        if (!traders)
+            return trade.retry_send_tx(
+                create_instructions,
+                [creator, mint],
+                priority,
+                undefined,
+                false,
+                ltas,
+                this.compute_unit_limit
+            );
+        const generated_lta = await trade.generate_trade_lta(
+            creator,
+            traders.map(([buyer]) => buyer),
+            mint.publicKey
+        );
+        if (sol_amount > 0) mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
+        const buy_instructions: TransactionInstruction[][] = [];
+        const bundle_signers: Keypair[][] = [];
+        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
+        for (const group of common.chunks(traders, chunk_size)) {
+            const instructions: TransactionInstruction[] = [];
+            for (const [buyer, amount] of group) {
+                instructions.push(...(await this.get_buy_instructions(amount, buyer, mint_meta, 0.05)));
+                mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
+            }
+            buy_instructions.push(instructions);
+            bundle_signers.push(group.map(([buyer]) => buyer));
+        }
+        return trade.retry_send_bundle(
+            [create_instructions, ...buy_instructions],
+            [[creator, mint], ...bundle_signers],
+            bundle_tip!,
+            priority,
+            [generated_lta, ...ltas],
+            this.compute_unit_limit
+        );
     }
 
-    public async create_token_metadata(_meta: common.IPFSMetadata, _image_path: string): Promise<string> {
-        throw new Error('Not implemented');
+    protected get_create_platform(): PublicKey {
+        return RAYDIUM_LAUNCHPAD_PLATFORM_CONFIG;
+    }
+
+    protected async get_create_token_instructions(
+        creator: Keypair,
+        token_name: string,
+        token_symbol: string,
+        meta_cid: string,
+        mint: Keypair
+    ): Promise<TransactionInstruction[]> {
+        const pool = await this.calc_pool(mint.publicKey);
+        const [base_vault, quote_vault] = await this.calc_vault(mint.publicKey, pool);
+        const [metadata] = await PublicKey.findProgramAddress(
+            [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBytes(), mint.publicKey.toBytes()],
+            METAPLEX_PROGRAM_ID
+        );
+        return [
+            new TransactionInstruction({
+                programId: RAYDIUM_LAUNCHPAD_PROGRAM_ID,
+                data: this.create_data(token_name, token_symbol, `${IPFS}${meta_cid}`),
+                keys: [
+                    { pubkey: creator.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: creator.publicKey, isSigner: false, isWritable: false },
+                    { pubkey: RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG, isSigner: false, isWritable: false },
+                    { pubkey: this.get_create_platform(), isSigner: false, isWritable: false },
+                    { pubkey: RAYDIUM_LAUNCHPAD_AUTHORITY, isSigner: false, isWritable: false },
+                    { pubkey: pool, isSigner: false, isWritable: true },
+                    { pubkey: mint.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SOL_MINT, isSigner: false, isWritable: false },
+                    { pubkey: base_vault, isSigner: false, isWritable: true },
+                    { pubkey: quote_vault, isSigner: false, isWritable: true },
+                    { pubkey: metadata, isSigner: false, isWritable: true },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: METAPLEX_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: RENT_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY, isSigner: false, isWritable: false },
+                    { pubkey: RAYDIUM_LAUNCHPAD_PROGRAM_ID, isSigner: false, isWritable: false }
+                ]
+            })
+        ];
+    }
+
+    public async create_token_metadata(meta: common.IPFSMetadata, image_path: string): Promise<string> {
+        return await common.upload_metadata_ipfs(meta, image_path);
+    }
+
+    private create_data(name: string, symbol: string, uri: string): Buffer {
+        const string = (value: string) => {
+            const data = Buffer.alloc(4 + Buffer.byteLength(value));
+            data.writeUInt32LE(Buffer.byteLength(value));
+            data.write(value, 4);
+            return data;
+        };
+        const { supply, total_sell, fundraising } = RAYDIUM_LAUNCHPAD_CREATE_PARAMS;
+        const curve = Buffer.alloc(26);
+        curve.writeUInt8(0);
+        curve.writeBigUInt64LE(supply, 1);
+        curve.writeBigUInt64LE(total_sell, 9);
+        curve.writeBigUInt64LE(fundraising, 17);
+        curve.writeUInt8(1, 25);
+        return Buffer.concat([
+            Buffer.from(RAYDIUM_LAUNCHPAD_CREATE_DISCRIMINATOR),
+            Buffer.from([TRADE_DEFAULT_TOKEN_DECIMALS]),
+            string(name),
+            string(symbol),
+            string(uri),
+            curve,
+            Buffer.alloc(25) // Zero vesting amounts followed by cpmmCreatorFeeOn = OnlyTokenB (0).
+        ]);
     }
 
     public update_mint_meta_reserves(mint_meta: RaydiumMintMeta, amount: number | TokenAmount): RaydiumMintMeta {

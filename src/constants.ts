@@ -131,6 +131,7 @@ export const ACCOUNT_READ_CACHE_TTL_MS = 50;
 export const CACHE_SIZE_MAX = 100;
 
 // TRADE RAYDIUM CONSTANTS
+export const RAYDIUM_API_URL = 'https://api-v3.raydium.io';
 export const RAYDIUM_LAUNCHPAD_API_URL = 'https://launch-mint-v1.raydium.io';
 export const RAYDIUM_LAUNCHPAD_PROGRAM_ID = new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj');
 export const RAYDIUM_LAUNCHPAD_AUTHORITY = new PublicKey('WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh');
@@ -140,6 +141,7 @@ export const RAYDIUM_LAUNCHPAD_VAULT_SEED = new Uint8Array([112, 111, 111, 108, 
 export const RAYDIUM_LAUNCHPAD_POOL_HEADER = new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]);
 export const RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY = new PublicKey('2DPAtwB8L12vrMRExbLuyGnC7n2J5LNoZQSejeQGpwkr');
 export const RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG = new PublicKey('6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX');
+export const RAYDIUM_LAUNCHPAD_PLATFORM_CONFIG = new PublicKey('4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4');
 export const RAYDIUM_LAUNCHPAD_CREATE_PARAMS = {
     supply: 1_000_000_000_000_000n,
     total_sell: 793_100_000_000_000n,

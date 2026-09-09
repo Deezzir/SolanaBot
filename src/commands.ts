@@ -196,7 +196,7 @@ export async function claim_fees(
 }
 
 export async function create_token_metadata(json: common.IPFSMetadata, image_path: string) {
-    require_program([common.Program.Pump, common.Program.Bonk], 'Metadata creation');
+    require_program([common.Program.Pump, common.Program.Bonk, common.Program.Raydium], 'Metadata creation');
     const trader = get_trader();
     common.log(common.yellow('Uploading metadata...'));
     common.log(JSON.stringify(json, null, 2));
@@ -215,7 +215,7 @@ export async function create_token(
     bundle_tip?: number,
     config?: object
 ): Promise<void> {
-    require_program([common.Program.Pump, common.Program.Bonk], 'Token creation');
+    require_program([common.Program.Pump, common.Program.Bonk, common.Program.Raydium], 'Token creation');
     const max_bundle_wallets = Math.min(
         TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
         (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
