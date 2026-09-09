@@ -103,6 +103,8 @@ export const SENDER_MAX_MIN_TIP: number = 1000000 / LAMPORTS_PER_SOL;
 export const SENDER_MAX_BUNDLE_SIZE = 4;
 export const SENDER_MAX_MIN_PRIORITY_FEE = 5000;
 export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
+export const MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES = 64 * 1024 * 1024;
+export const LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES = 32 * 1024;
 export const COMPUTE_UNIT_BUFFER = 1.1;
 export const PROGRAM_COMPUTE_UNIT_LIMITS: Partial<Record<Program, number>> = {
     pump: 250_000,

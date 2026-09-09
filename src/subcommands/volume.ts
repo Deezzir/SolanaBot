@@ -5,7 +5,6 @@ import {
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
-    Signer,
     SystemProgram,
     TransactionInstruction
 } from '@solana/web3.js';
@@ -18,7 +17,7 @@ import {
     VOLUME_MAX_WALLETS_PER_TRADE_TX,
     COMMITMENT
 } from '../constants';
-import { createCloseAccountInstruction } from '@solana/spl-token';
+import { createCloseAccountInstruction } from '../common/token';
 import { get_program_compute_unit_limit } from '../common/get_trader';
 
 type VolumeConfig = {
@@ -39,7 +38,7 @@ export enum VolumeType {
 }
 
 export async function execute_fast(
-    funder: Signer,
+    funder: Keypair,
     volume_config: VolumeConfig,
     trader: trade.IProgramTrader
 ): Promise<common.Wallet[]> {
@@ -50,11 +49,12 @@ export async function execute_fast(
     if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
 
     for (let exec = 0; exec < volume_config.executions; exec++) {
-        const keypairs = Array.from({ length: volume_config.wallet_cnt }, (_v, i) => {
-            const pair = new Keypair();
+        const keypairs: Keypair[] = [];
+        for (let i = 0; i < volume_config.wallet_cnt; i++) {
+            const pair = await Keypair.generate();
             common.save_rescue_key(pair, target_file, exec, i);
-            return pair;
-        });
+            keypairs.push(pair);
+        }
         const keypairs_with_amounts = common.zip(
             keypairs,
             Array.from({ length: volume_config.wallet_cnt }, () =>
@@ -148,7 +148,7 @@ export async function simulate(sol_price: number, volume_config: VolumeConfig, t
     }
 }
 
-async function validate_funder(funder: Signer, volume_config: VolumeConfig): Promise<void> {
+async function validate_funder(funder: Keypair, volume_config: VolumeConfig): Promise<void> {
     const balance = await trade.get_balance(funder.publicKey, COMMITMENT);
     const required_balance = volume_config.max_sol_amount * LAMPORTS_PER_SOL * volume_config.wallet_cnt;
     if (balance < required_balance)
@@ -169,7 +169,7 @@ function calc_buy_amount(amount_sol: number, slippage: number, platform_fee: num
 
 async function fund_bundles(
     wallets: [Keypair, number][],
-    funder: Signer,
+    funder: Keypair,
     bundle_tip: number,
     lta: AddressLookupTableAccount
 ): Promise<void> {
@@ -210,7 +210,7 @@ async function fund_bundles(
 
 async function collect_bundles(
     wallets: Keypair[],
-    receiver: Signer,
+    receiver: Keypair,
     bundle_tip: number,
     lta: AddressLookupTableAccount
 ): Promise<void> {
@@ -232,10 +232,10 @@ async function collect_bundles(
     const promises: Promise<void>[] = [];
     for (const bundle of bundles) {
         const bundle_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Signer[][] = [];
+        const bundle_signers: Keypair[][] = [];
         for (const [tx_idx, tx] of bundle.entries()) {
             const tx_instructions: TransactionInstruction[] = [];
-            const tx_signers: Signer[] = [];
+            const tx_signers: Keypair[] = [];
             for (const [wallet_idx, wallet] of tx.entries()) {
                 const amount =
                     Math.floor(wallet.balance) -
@@ -280,10 +280,10 @@ async function buy_sell_bundles(
     const ltas: AddressLookupTableAccount[] = [];
     for (const bundle of bundles) {
         const bundle_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Signer[][] = [];
+        const bundle_signers: Keypair[][] = [];
         for (const [tx_idx, tx] of bundle.entries()) {
             const tx_instructions: TransactionInstruction[] = [];
-            const tx_signers: Signer[] = [];
+            const tx_signers: Keypair[] = [];
             for (const [wallet_idx, wallet] of tx.entries()) {
                 const [keypair, amount] = wallet;
                 const adjusted_amount = calc_buy_amount(
@@ -299,7 +299,7 @@ async function buy_sell_bundles(
                     VOLUME_TRADE_SLIPPAGE
                 );
                 const close_account_instruction = createCloseAccountInstruction(
-                    trade.calc_ata(keypair.publicKey, mint_meta.mint_pubkey),
+                    await trade.calc_ata(keypair.publicKey, mint_meta.mint_pubkey),
                     keypair.publicKey,
                     keypair.publicKey
                 );

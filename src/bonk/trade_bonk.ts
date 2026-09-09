@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, Signer, TransactionInstruction } from '@solana/web3.js';
+import { Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import {
@@ -28,7 +28,7 @@ import {
 import { RaydiumMintMeta, RaydiumTrader } from '../raydium/trade_raydium';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID } from '../common/token';
 
 const BONK_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Bonk];
 
@@ -58,12 +58,12 @@ export class BonkTrader extends RaydiumTrader {
 
     public override async create_token(
         mint: Keypair,
-        creator: Signer,
+        creator: Keypair,
         token_name: string,
         token_symbol: string,
         meta_cid: string,
         sol_amount: number = 0,
-        traders?: [Signer, number][],
+        traders?: [Keypair, number][],
         bundle_tip?: number,
         priority?: PriorityLevel
     ): Promise<String> {
@@ -75,7 +75,7 @@ export class BonkTrader extends RaydiumTrader {
         if (traders && (traders.length > max_bundle_wallets || traders.length < 1))
             throw new Error(`Invalid traders count: ${traders.length}`);
         let mint_meta = await this.default_mint_meta(mint.publicKey);
-        const create_instructions = this.get_create_token_instructions(
+        const create_instructions = await this.get_create_token_instructions(
             creator,
             token_name,
             token_symbol,
@@ -97,12 +97,12 @@ export class BonkTrader extends RaydiumTrader {
             );
         const generated_lta = await trade.generate_trade_lta(
             creator,
-            traders.map(([trader]) => Keypair.fromSecretKey(trader.secretKey)),
+            traders.map(([trader]) => trader),
             mint.publicKey
         );
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
         const buy_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Signer[][] = [];
+        const bundle_signers: Keypair[][] = [];
         const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
         for (const group of common.chunks(traders, chunk_size)) {
             const instructions: TransactionInstruction[] = [];
@@ -139,17 +139,17 @@ export class BonkTrader extends RaydiumTrader {
         return (await meta_response.text()).split('/').slice(-1)[0];
     }
 
-    private get_create_token_instructions(
-        creator: Signer,
+    private async get_create_token_instructions(
+        creator: Keypair,
         token_name: string,
         token_symbol: string,
         meta_cid: string,
         mint: Keypair
-    ): TransactionInstruction[] {
-        const pool = this.calc_pool(mint.publicKey);
-        const [base_vault, quote_vault] = this.calc_vault(mint.publicKey, pool);
-        const [metadata] = PublicKey.findProgramAddressSync(
-            [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBuffer(), mint.publicKey.toBuffer()],
+    ): Promise<TransactionInstruction[]> {
+        const pool = await this.calc_pool(mint.publicKey);
+        const [base_vault, quote_vault] = await this.calc_vault(mint.publicKey, pool);
+        const [metadata] = await PublicKey.findProgramAddress(
+            [METAPLEX_META_SEED, METAPLEX_PROGRAM_ID.toBytes(), mint.publicKey.toBytes()],
             METAPLEX_PROGRAM_ID
         );
         return [

@@ -1,12 +1,7 @@
-import {
-    Commitment,
-    ParsedInstruction,
-    ParsedTransactionWithMeta,
-    PartiallyDecodedInstruction,
-    PublicKey
-} from '@solana/web3.js';
+import { Commitment, ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js';
 import * as common from './common';
 import { WS_URL } from '../constants';
+import { deserialize_parsed_transaction, type RawParsedTransaction } from './trade_common';
 
 export enum SubscriberType {
     Logs = 'logs',
@@ -24,17 +19,6 @@ interface JsonRpcResponse {
     id: number;
     result: number | boolean;
 }
-
-type StringPublicKeys<T> = T extends PublicKey
-    ? string
-    : T extends Array<infer U>
-      ? Array<StringPublicKeys<U>>
-      : T extends object
-        ? { [K in keyof T]: StringPublicKeys<T[K]> }
-        : T;
-
-type RawParsedTransaction = StringPublicKeys<ParsedTransactionWithMeta>;
-type RawInstruction = RawParsedTransaction['transaction']['message']['instructions'][number];
 
 interface TransactionSubscribeResult {
     signature: string;
@@ -58,60 +42,13 @@ interface TransactionSubscribeNotification {
 
 export type TransactionSubscribeMessage = JsonRpcResponse | TransactionSubscribeNotification;
 
-function deserialize_instruction(instruction: RawInstruction): ParsedInstruction | PartiallyDecodedInstruction {
-    if ('accounts' in instruction) {
-        return {
-            ...instruction,
-            programId: new PublicKey(instruction.programId),
-            accounts: instruction.accounts.map((account) => new PublicKey(account))
-        };
-    }
-    return { ...instruction, programId: new PublicKey(instruction.programId) };
-}
-
 export function deserialize_transaction_notification(
     message: TransactionSubscribeMessage
 ): ParsedTransactionWithMeta | null {
     if (!('method' in message) || message.method !== 'transactionNotification') return null;
 
     const result = message.params.result;
-    const transaction = result.transaction.transaction;
-    const meta = result.transaction.meta;
-
-    return {
-        slot: result.slot,
-        version: result.transaction.version,
-        transaction: {
-            signatures: transaction.signatures,
-            message: {
-                ...transaction.message,
-                accountKeys: transaction.message.accountKeys.map((account) => ({
-                    ...account,
-                    pubkey: new PublicKey(account.pubkey)
-                })),
-                instructions: transaction.message.instructions.map(deserialize_instruction),
-                addressTableLookups: transaction.message.addressTableLookups?.map((lookup) => ({
-                    ...lookup,
-                    accountKey: new PublicKey(lookup.accountKey)
-                }))
-            }
-        },
-        meta: meta
-            ? {
-                  ...meta,
-                  innerInstructions: meta.innerInstructions?.map((group) => ({
-                      ...group,
-                      instructions: group.instructions.map(deserialize_instruction)
-                  })),
-                  loadedAddresses: meta.loadedAddresses
-                      ? {
-                            writable: meta.loadedAddresses.writable.map((address) => new PublicKey(address)),
-                            readonly: meta.loadedAddresses.readonly.map((address) => new PublicKey(address))
-                        }
-                      : undefined
-              }
-            : null
-    };
+    return deserialize_parsed_transaction({ ...result.transaction, slot: result.slot });
 }
 
 export class LogsSubscriber implements Subscriber {

@@ -25,19 +25,20 @@
 4. Run the project
 
     ```shell
-    > alias bot="bun run src/bot.js"
+    > alias bot="bun run src/bot.ts"
     > bot -h
-     Solana Bot
+    Solana Bot
 
     Usage: bot [options] [command]
 
     Solana Bot CLI
 
     Options:
-      -V, --version                                                  output the version number
+      -v, --version                                                  output the version number
       -k, --keys <path>                                              Path to the CSV file with the wallets (default: keys.csv)
       -g, --program <type>                                           specify program (choices: "pump", "meteora", "raydium", "bonk", "jupiter", default: pump)
       --no-colors                                                    Disable colored output
+      --v1                                                           Use v1 transactions; require verified cluster activation
       -h, --help                                                     display help for command
 
     Commands:
@@ -75,6 +76,15 @@
     ```
 
 > ⚠️ Help is available for each command. Use `bot <command> -h` to see the options for that command.
+
+## Transaction versions
+
+Outbound transactions default to **v0**. Add the global `--v1` option to select v1 for the command, including its workers, retries, bundles, transfers, and account cleanup:
+
+```shell
+bot --v1 clean
+bot --v1 --program pump snipe --help
+```
 
 ## Snipe config (JSON)
 

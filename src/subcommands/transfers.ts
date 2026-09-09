@@ -1,4 +1,4 @@
-import { Keypair, LAMPORTS_PER_SOL, Signer, SystemProgram, TokenAmount, TransactionInstruction } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, SystemProgram, TokenAmount, TransactionInstruction } from '@solana/web3.js';
 import {
     COMMANDS_INTERVAL_MS,
     COMMITMENT,
@@ -13,7 +13,7 @@ import {
     createAssociatedTokenAccountIdempotentInstruction,
     createCloseAccountInstruction,
     createTransferInstruction
-} from '@solana/spl-token';
+} from '../common/token';
 
 type SpiderTreeNode = {
     amount: number;
@@ -27,7 +27,12 @@ type SpiderTree = {
     depth: number;
 };
 
-function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, payer: Keypair): SpiderTree {
+async function build_spider_tree(
+    tree: SpiderTree,
+    amount: number,
+    keys_cnt: number,
+    payer: Keypair
+): Promise<SpiderTree> {
     if (tree.head) return tree;
 
     let wallet_cnt_tmp = keys_cnt;
@@ -39,7 +44,7 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
         keypair: payer
     } as SpiderTreeNode;
 
-    const _build_tree = (node: SpiderTreeNode | null, layer_cnt: number): SpiderTreeNode | null => {
+    const _build_tree = async (node: SpiderTreeNode | null, layer_cnt: number): Promise<SpiderTreeNode | null> => {
         if (layer_cnt === 0 || wallet_cnt_tmp === 0) return null;
         if (layer_cnt === 1) wallet_cnt_tmp--;
 
@@ -48,18 +53,18 @@ function build_spider_tree(tree: SpiderTree, amount: number, keys_cnt: number, p
                 amount: amount,
                 left: null,
                 right: null,
-                keypair: new Keypair()
+                keypair: await Keypair.generate()
             } as SpiderTreeNode;
         }
 
-        node.right = _build_tree(node.right, layer_cnt - 1);
-        node.left = _build_tree(node.left, layer_cnt - 1);
+        node.right = await _build_tree(node.right, layer_cnt - 1);
+        node.left = await _build_tree(node.left, layer_cnt - 1);
 
         if (node.right || node.left) node.amount = (node.left?.amount || 0) + (node.right?.amount || 0);
         return node;
     };
 
-    tree.head = _build_tree(tree.head, layer_cnt);
+    tree.head = await _build_tree(tree.head, layer_cnt);
     return tree;
 }
 
@@ -240,30 +245,25 @@ async function process_final_transfers(entries: [common.Wallet, Keypair][]): Pro
     await Promise.all(transactions);
 }
 
-function generate_depth_transfer_map(
+async function generate_depth_transfer_map(
     entries: [common.Wallet, number | TokenAmount][],
     sender: Keypair,
     depth: number,
     target_file: string
-): { amount: number | TokenAmount; wallet: common.Wallet; path: Keypair[] }[] {
-    return entries.map((entry, index) => {
+): Promise<{ amount: number | TokenAmount; wallet: common.Wallet; path: Keypair[] }[]> {
+    const result: { amount: number | TokenAmount; wallet: common.Wallet; path: Keypair[] }[] = [];
+    for (const [index, entry] of entries.entries()) {
         const [wallet, amount] = entry;
-        const path = [
-            sender,
-            ...Array.from({ length: depth }, (_v, i) => {
-                const pair = new Keypair();
-                common.save_rescue_key(pair, target_file, index, i);
-                return pair;
-            }),
-            wallet.keypair
-        ];
-
-        return {
-            amount,
-            wallet,
-            path
-        };
-    });
+        const path = [sender];
+        for (let i = 0; i < depth; i++) {
+            const pair = await Keypair.generate();
+            common.save_rescue_key(pair, target_file, index, i);
+            path.push(pair);
+        }
+        path.push(wallet.keypair);
+        result.push({ amount, wallet, path });
+    }
+    return result;
 }
 
 export async function execute_spider_fund_sol(
@@ -278,7 +278,7 @@ export async function execute_spider_fund_sol(
         depth: Math.ceil(Math.log2(wallet_cnt)) + 1
     } as SpiderTree;
 
-    tree = build_spider_tree(tree, amount, wallet_cnt, funder);
+    tree = await build_spider_tree(tree, amount, wallet_cnt, funder);
     display_spider_tree(tree);
     const target_file = backup_spider_tree(tree);
 
@@ -304,7 +304,7 @@ export async function execute_depth_sol_fund(
     if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
     if (!target_file) throw new Error('Failed to create a target file for the funding transfers');
 
-    const transfer_map = generate_depth_transfer_map(entries, funder, depth, target_file);
+    const transfer_map = await generate_depth_transfer_map(entries, funder, depth, target_file);
 
     const promises: Promise<void>[] = [];
     const failed: { name: string; id: number }[] = [];
@@ -315,14 +315,14 @@ export async function execute_depth_sol_fund(
         for (let start = 0; start < bundle.path.length - 1; start += TRANSFER_MAX_WALLETS_PER_TX - 1)
             txs.push(bundle.path.slice(start, start + TRANSFER_MAX_WALLETS_PER_TX));
         const bundle_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Signer[][] = [];
+        const bundle_signers: Keypair[][] = [];
         common.log(
             `Sending ${fund_amount} SOL to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
 
         for (const [tx_idx, tx] of txs.entries()) {
             const tx_instructions: TransactionInstruction[] = [];
-            const tx_signers: Signer[] = [];
+            const tx_signers: Keypair[] = [];
             const tx_lamports = Math.floor(
                 Math.floor(fund_amount * LAMPORTS_PER_SOL) -
                     (5000 * tx.length - 2) -
@@ -412,7 +412,7 @@ export async function execute_depth_dist_token(
     if (depth > TRANSFER_MAX_DEPTH) throw new Error(`Max depth is ${TRANSFER_MAX_DEPTH}, but ${depth} was provided`);
     if (!target_file) throw new Error('Failed to create a target file for the distribution transfers');
 
-    const transfer_map = generate_depth_transfer_map(entries, distributer, depth, target_file);
+    const transfer_map = await generate_depth_transfer_map(entries, distributer, depth, target_file);
 
     const promises: Promise<void>[] = [];
     const failed: { name: string; id: number }[] = [];
@@ -423,23 +423,23 @@ export async function execute_depth_dist_token(
         for (let start = 0; start < bundle.path.length - 1; start += TRANSFER_MAX_WALLETS_PER_TX - 1)
             txs.push(bundle.path.slice(start, start + TRANSFER_MAX_WALLETS_PER_TX));
         const bundle_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Signer[][] = [];
+        const bundle_signers: Keypair[][] = [];
         common.log(
             `Sending ${token_amount.uiAmount} $${mint_meta.token_symbol} to ${wallet.keypair.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id})...`
         );
 
         for (const tx of txs) {
             const tx_instructions: TransactionInstruction[] = [];
-            const tx_signers: Signer[] = [];
+            const tx_signers: Keypair[] = [];
             for (let wallet_idx = 1; wallet_idx < tx.length; wallet_idx++) {
                 const sender = tx[wallet_idx - 1];
                 const receiver = tx[wallet_idx];
-                const receiver_ata = trade.calc_ata(receiver.publicKey, mint_meta.mint, mint_meta.token_program);
-                const sender_ata = trade.calc_ata(sender.publicKey, mint_meta.mint, mint_meta.token_program);
+                const receiver_ata = await trade.calc_ata(receiver.publicKey, mint_meta.mint, mint_meta.token_program);
+                const sender_ata = await trade.calc_ata(sender.publicKey, mint_meta.mint, mint_meta.token_program);
                 const token_amount_raw = BigInt(token_amount.amount);
                 tx_instructions.push(
                     createAssociatedTokenAccountIdempotentInstruction(
-                        sender.publicKey,
+                        sender,
                         receiver_ata,
                         receiver.publicKey,
                         mint_meta.mint,
@@ -450,7 +450,6 @@ export async function execute_depth_dist_token(
                         receiver_ata,
                         sender.publicKey,
                         token_amount_raw,
-                        [],
                         mint_meta.token_program
                     )
                 );
@@ -460,7 +459,6 @@ export async function execute_depth_dist_token(
                             sender_ata,
                             sender.publicKey,
                             sender.publicKey,
-                            [],
                             mint_meta.token_program
                         )
                     );

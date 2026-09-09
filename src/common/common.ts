@@ -78,6 +78,20 @@ export function format_currency(value: number): string {
     return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+export function safe_number(value: number | bigint): number {
+    const result = Number(value);
+    if (!Number.isSafeInteger(result)) throw new RangeError(`Integer exceeds the safe number range: ${value}`);
+    return result;
+}
+
+export function rpc_bigint(value: number | bigint): bigint {
+    return typeof value === 'bigint' ? value : BigInt(safe_number(value));
+}
+
+export function json_bigint(_key: string, value: unknown): unknown {
+    return typeof value === 'bigint' ? value.toString() : value;
+}
+
 export function log(message: string): void {
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
@@ -160,13 +174,13 @@ export function save_rescue_key(keypair: Keypair, target_file_path: string, pref
     return false;
 }
 
-export function get_wallets(keys_csv_path: string): Wallet[] {
+export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
     const rows: Wallet[] = [];
     let index = 1;
     let reserve_found = false;
     try {
         const content = readFileSync(keys_csv_path);
-        const records = parse(content, {
+        const records = parse<Record<string, string>>(content, {
             delimiter: ',',
             trim: true,
             comment: '#',
@@ -175,18 +189,18 @@ export function get_wallets(keys_csv_path: string): Wallet[] {
             from_line: 2
         });
 
-        records.forEach((record: any) => {
+        for (const record of records) {
             const is_reserve = record.is_reserve === 'true';
             const entry = {
                 name: record.name,
                 id: is_reserve && !reserve_found ? 0 : index++,
-                keypair: Keypair.fromSecretKey(base58.decode(record.private_key)),
+                keypair: await Keypair.fromSecretKey(base58.decode(record.private_key)),
                 is_reserve: is_reserve
             };
             if (is_reserve) reserve_found = true;
             if (is_reserve) rows.unshift(entry);
             else rows.push(entry);
-        });
+        }
         return rows;
     } catch (error) {
         throw new Error(`Failed to process wallets in ${keys_csv_path}: ${error}`);

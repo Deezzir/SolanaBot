@@ -23,9 +23,10 @@ type State =
     | { mode: 'stop'; spendings?: number; buys: number; sells: number };
 
 const CONFIG: snipe.WorkerConfig = workerData as snipe.WorkerConfig;
-const KEYPAIR: Keypair = Keypair.fromSecretKey(new Uint8Array(CONFIG.secret));
+const KEYPAIR: Keypair = await Keypair.fromSecretKey(new Uint8Array(CONFIG.secret));
 global.PROGRAM = CONFIG.program;
 global.TRANSACTION_RELAY = CONFIG.transaction_relay;
+global.TRANSACTION_VERSION = CONFIG.transaction_version;
 global.PRIORITY_FEE = undefined;
 const TRADER: trade.IProgramTrader = get_trader(CONFIG.program);
 configure_rpc_rate_limiter(CONFIG.rpc_rate_limit_state);
@@ -89,6 +90,13 @@ async function process_buy(promise: Promise<String>, amount: number) {
         MESSAGE_BUFFER.push(`[Worker ${CONFIG.id}] Bought ${amount} SOL of the token, signature: ${sig}`);
         return true;
     } catch (error) {
+        if (error instanceof trade.TransactionSubmissionError && error.outcome === 'unknown') {
+            STATE.mode = 'stop';
+            MESSAGE_BUFFER.push(
+                `[Worker ${CONFIG.id}] Buy outcome unknown; stopping to avoid a duplicate buy. ${error.message}`
+            );
+            return false;
+        }
         if (error instanceof Error) {
             if (error.message.includes('Simulation failed')) {
                 await common.sleep(SNIPE_RETRY_INTERVAL_MS);
@@ -128,7 +136,7 @@ const buy = async () => {
     while (STATE.mode === 'buy' && !bought) {
         let transactions = [];
         let count = SNIPE_TRADE_BATCH;
-        while (count > 0) {
+        while (count > 0 && STATE.mode === 'buy') {
             const buy_promise = TRADER.buy_token(
                 amount,
                 KEYPAIR,
@@ -158,6 +166,13 @@ async function process_sell(promise: Promise<String>, balance: TokenAmount) {
         MESSAGE_BUFFER.push(`[Worker ${CONFIG.id}] Sold ${ui_amount} tokens, signature: ${sig}`);
         return true;
     } catch (error) {
+        if (error instanceof trade.TransactionSubmissionError && error.outcome === 'unknown') {
+            STATE.mode = 'stop';
+            MESSAGE_BUFFER.push(
+                `[Worker ${CONFIG.id}] Sell outcome unknown; stopping to avoid resubmission. ${error.message}`
+            );
+            return false;
+        }
         if (error instanceof Error) {
             if (error.message.includes('Simulation failed')) {
                 await common.sleep(SNIPE_RETRY_INTERVAL_MS);
@@ -176,7 +191,7 @@ const sell = async () => {
     let sold = false;
     let balance: TokenAmount | undefined = undefined;
 
-    while (!sold) {
+    while (!sold && STATE.mode === 'sell') {
         let get_balance_retry = SNIPE_RETRIES;
         while (get_balance_retry > 0) {
             try {
@@ -208,7 +223,7 @@ const sell = async () => {
 
         let transactions = [];
         let sell_retry = SNIPE_TRADE_BATCH;
-        while (sell_retry > 0) {
+        while (sell_retry > 0 && STATE.mode === 'sell') {
             const sell_promise = TRADER.sell_token(
                 balance,
                 KEYPAIR,
@@ -244,12 +259,14 @@ const control_loop = async () =>
 
             if (should_sell()) {
                 await sell();
+                if (STATE.mode === 'stop') return;
                 STATE = { mode: 'idle', spendings: STATE.spendings, buys: STATE.buys, sells: STATE.sells };
                 return;
             }
 
             if (should_buy()) {
                 await buy();
+                if (STATE.mode === 'stop') return;
                 if (STATE.mode === 'buy')
                     STATE.buy_amount = calc_buy_amount(
                         CONFIG.min_buy,

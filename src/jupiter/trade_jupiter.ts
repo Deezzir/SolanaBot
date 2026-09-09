@@ -3,7 +3,6 @@ import {
     Commitment,
     Keypair,
     PublicKey,
-    Signer,
     TokenAmount,
     TransactionInstruction
 } from '@solana/web3.js';
@@ -17,7 +16,7 @@ import {
     TRADE_DEFAULT_TOKEN_DECIMALS,
     TRADE_RAYDIUM_SWAP_TAX
 } from '../constants';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID } from '../common/token';
 
 type JupiterQuote = {
     inputMint: string;
@@ -158,12 +157,12 @@ export class Trader implements trade.IProgramTrader {
         return new JupiterMintMeta().deserialize(data);
     }
 
-    public async get_trader_fees(_trader: Signer): Promise<trade.ClaimableAsset[]> {
+    public async get_trader_fees(_trader: Keypair): Promise<trade.ClaimableAsset[]> {
         return [];
     }
 
     public async claim_trader_fees(
-        _trader: Signer,
+        _trader: Keypair,
         _assets: trade.ClaimableAsset[],
         _priority?: PriorityLevel
     ): Promise<String> {
@@ -172,7 +171,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_token(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05,
         priority?: PriorityLevel,
@@ -195,7 +194,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_token_instructions(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -207,7 +206,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async sell_token(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05,
         priority: PriorityLevel,
@@ -229,7 +228,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async sell_token_instructions(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -240,7 +239,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell_instructions(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -264,7 +263,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: JupiterMintMeta,
         slippage: number = 0.05,
         interval_ms?: number,
@@ -313,7 +312,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell_bundle(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: JupiterMintMeta,
         tip: number,
         slippage: number = 0.05,
@@ -348,12 +347,12 @@ export class Trader implements trade.IProgramTrader {
 
     public async create_token(
         _mint: Keypair,
-        _creator: Signer,
+        _creator: Keypair,
         _token_name: string,
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount: number = 0,
-        _traders?: [Signer, number][],
+        _traders?: [Keypair, number][],
         _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<String> {
@@ -423,7 +422,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async swap_jupiter(
         amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         from: PublicKey,
         to: PublicKey,
         slippage: number = 0.05,
@@ -452,7 +451,7 @@ export class Trader implements trade.IProgramTrader {
     }
 
     private async swap_jupiter_instructions(
-        seller: Signer,
+        seller: Keypair,
         quote: JupiterQuote
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]]> {
         const deserialize_instruction = (instruction: JupiterInstruction) => {

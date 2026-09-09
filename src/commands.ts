@@ -1,4 +1,4 @@
-import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount, Signer } from '@solana/web3.js';
+import { Keypair, PublicKey, LAMPORTS_PER_SOL, Connection, TokenAmount } from '@solana/web3.js';
 import { createWriteStream, existsSync, readFileSync } from 'fs';
 import bs58 from 'bs58';
 import {
@@ -30,7 +30,7 @@ function require_program(supported: common.Program[], command: string): void {
     if (!supported.includes(global.PROGRAM)) throw new Error(`${command} is not supported for ${global.PROGRAM}.`);
 }
 
-export async function burn_token(mint: PublicKey, burner: Signer, amount?: number, percent?: number): Promise<void> {
+export async function burn_token(mint: PublicKey, burner: Keypair, amount?: number, percent?: number): Promise<void> {
     if (!amount && !percent) throw new Error('Either amount or percent should be provided.');
     if (amount && percent) throw new Error('Only one of amount or percent should be provided.');
     if (amount && amount <= 0) throw new Error('Amount should be greater than 0.');
@@ -240,17 +240,17 @@ export async function create_token(
     common.log(common.yellow(`Dev: ${dev.keypair.publicKey.toString()} | Balance: ${balance.toFixed(2)} SOL`));
     common.log(common.bold(`Dev Buy: ${dev_buy.toFixed(2)} SOL\n`));
 
-    let entries: [Signer, number][] | undefined;
+    let entries: [Keypair, number][] | undefined;
     if (wallets) {
         common.log(common.yellow('Bundle buy'));
         common.log(common.bold(`Wallets count: ${wallets.length} | Amounts between ${min} and ${max} SOL...`));
         entries = wallets.map((w) => [w.keypair, common.uniform_random(min ?? 0, max ?? 0)]);
     }
 
-    mint = mint || Keypair.generate();
+    mint = mint || (await Keypair.generate());
     common.log(common.yellow(`\nMint address: ${mint.publicKey.toString()}`));
     common.log(common.yellow(`Token Name: ${meta.name} | Symbol: $${meta.symbol}`));
-    common.log(common.bold(`Token Meta: ${JSON.stringify(meta, null, 2)}`));
+    common.log(common.bold(`Token Meta: ${JSON.stringify(meta, common.json_bigint, 2)}`));
 
     try {
         const sig = await trader.create_token(
@@ -287,7 +287,7 @@ export async function promote(times: number, meta_cid: string, dev: Keypair): Pr
     let failed = 0;
 
     while (times > 0) {
-        const mint = Keypair.generate();
+        const mint = await Keypair.generate();
         transactions.push(
             trader
                 .create_token(mint, dev, meta.name, meta.symbol, meta_cid)
@@ -995,41 +995,45 @@ export async function snipe(
     await sniper.snipe(wallets, sol_price);
 }
 
-export function generate(
+export async function generate(
     file_path: string,
     create_reserve: boolean,
     count: number = 0,
     secrets_path?: string,
     index?: number
-): void {
+): Promise<void> {
     common.log(common.yellow(`Generating ${count + (create_reserve ? 1 : 0)} keypairs...\n`));
 
     const wallets: Partial<common.Wallet>[] = [];
     const starting_index = index || 1;
 
-    if (create_reserve) wallets.push({ keypair: Keypair.generate(), name: 'reserve', is_reserve: true });
+    if (create_reserve) wallets.push({ keypair: await Keypair.generate(), name: 'reserve', is_reserve: true });
 
     if (secrets_path && existsSync(secrets_path)) {
         const private_keys = readFileSync(secrets_path, 'utf8')
             .split('\n')
             .filter((i) => i);
-        private_keys.forEach((wallet, i) => {
-            if (wallet.length < 10) return;
+        for (let [i, wallet] of private_keys.entries()) {
+            if (wallet.length < 10) continue;
             wallet = wallet.trim();
             try {
                 const decoded_key = Array.from(bs58.decode(wallet));
                 wallets.push({
-                    keypair: Keypair.fromSecretKey(new Uint8Array(decoded_key)),
+                    keypair: await Keypair.fromSecretKey(new Uint8Array(decoded_key)),
                     name: `wallet[${i + starting_index}]`,
                     is_reserve: false
                 });
             } catch {
                 throw new Error(`Invalid key at line ${i + 1}`);
             }
-        });
+        }
     } else if (count) {
         for (let i = 0; i < count; i++)
-            wallets.push({ keypair: Keypair.generate(), name: `wallet[${i + starting_index}]`, is_reserve: false });
+            wallets.push({
+                keypair: await Keypair.generate(),
+                name: `wallet[${i + starting_index}]`,
+                is_reserve: false
+            });
     }
 
     const file_exists = existsSync(file_path);
@@ -1204,7 +1208,7 @@ export async function benchmark(
     let max_time = 0;
     let errors = 0;
     let calls = 0;
-    const connection = new Connection(HELIUS_RPC, { disableRetryOnRateLimit: true });
+    const connection = new Connection(HELIUS_RPC, { commitment: 'finalized', disableRetryOnRateLimit: true });
     const start_time = process.hrtime();
 
     const task_queue = Array.from({ length: NUM_REQUESTS }, (_, i) => i);

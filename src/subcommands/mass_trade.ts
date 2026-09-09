@@ -1,4 +1,4 @@
-import { AddressLookupTableAccount, LAMPORTS_PER_SOL, Signer, TransactionInstruction } from '@solana/web3.js';
+import { AddressLookupTableAccount, LAMPORTS_PER_SOL, Keypair, TransactionInstruction } from '@solana/web3.js';
 import * as common from '../common/common';
 import * as trade from '../common/trade_common';
 import { COMMITMENT, PriorityLevel } from '../constants';
@@ -19,7 +19,7 @@ export async function bundle_buy(
 
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
-        const signers: Signer[][] = [];
+        const signers: Keypair[][] = [];
         for (const entry of wallet_bundle) {
             const [wallet, amount] = entry;
             const buyer = wallet.keypair;
@@ -101,7 +101,7 @@ export async function bundle_sell(
 
     for (const wallet_bundle of wallet_bundles) {
         const instructions: TransactionInstruction[][] = [];
-        const signers: Signer[][] = [];
+        const signers: Keypair[][] = [];
         for (const wallet of wallet_bundle) {
             const seller = wallet.keypair;
             const token_amount = trade.get_token_amount_by_percent(wallet.token_amount, percent);

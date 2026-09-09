@@ -130,7 +130,7 @@ async function calculate_profit_loss(
             signature: tx.transaction_data.signature,
             change_sol: change_sol,
             change_tokens: change_tokens,
-            timestamp: tx.blockTime || undefined
+            timestamp: tx.blockTime ? common.safe_number(tx.blockTime) : undefined
         });
     }
 

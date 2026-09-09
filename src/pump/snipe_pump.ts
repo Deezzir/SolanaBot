@@ -6,7 +6,7 @@ import {
 } from '../constants';
 import * as snipe from '../common/snipe_common';
 import { PublicKey } from '@solana/web3.js';
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '../common/token';
 import { read_borsh_string } from '../common/struct_decoder';
 
 export class Runner extends snipe.SniperBase {

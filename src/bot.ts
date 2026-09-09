@@ -20,6 +20,7 @@ import {
 import base58 from 'bs58';
 import { rpc_connection_config } from './common/rate_limit';
 import { SubscriberType } from './common/subscriber';
+import { get_max_transaction_version } from './common/trade_common';
 
 const MULTI_CHARACTER_OPTION_ALIASES: Record<string, string> = {
     '-pr': '--pr',
@@ -43,9 +44,9 @@ function reserve_wallet_check(wallets: common.Wallet[]) {
     }
 }
 
-function get_wallets_from_file(file: string): common.Wallet[] {
+async function get_wallets_from_file(file: string): Promise<common.Wallet[]> {
     try {
-        const wallets = common.get_wallets(file);
+        const wallets = await common.get_wallets(file);
         if (wallets.length === 0) common.error(common.yellow('The file does not contain any wallets.'));
         return wallets;
     } catch (error) {
@@ -163,12 +164,15 @@ function single_dash_aliases(flags: string): string {
 // -----------------------------------------------------------
 
 async function main() {
-    let wallets = get_wallets_from_file(WALLETS_FILE);
-    let wallet_cnt = wallets.length;
+    const key_options = new Command().allowUnknownOption().allowExcessArguments().option('-k, --keys <path>');
+    key_options.parseOptions(process.argv.slice(2).map((arg) => MULTI_CHARACTER_OPTION_ALIASES[arg] ?? arg));
+    const wallets = await get_wallets_from_file(key_options.opts().keys ?? WALLETS_FILE);
+    const wallet_cnt = wallets.length;
 
     global.CONNECTION = new Connection(HELIUS_RPC, rpc_connection_config({ commitment: COMMITMENT }));
     global.PROGRAM = common.Program.Pump;
     global.TRANSACTION_RELAY = TransactionRelay.Sender;
+    global.TRANSACTION_VERSION = 0;
     global.NO_COLORS = false;
 
     const program = new Command();
@@ -195,8 +199,6 @@ async function main() {
         new Option('-k, --keys <path>', 'Path to the CSV file with the wallets')
             .argParser((value) => {
                 if (!existsSync(value)) throw new InvalidOptionArgumentError('Keys file does not exist.');
-                wallets = get_wallets_from_file(value);
-                wallet_cnt = wallets.length;
                 return value;
             })
             .default(WALLETS_FILE, WALLETS_FILE)
@@ -212,11 +214,17 @@ async function main() {
             .default(TransactionRelay.Sender, TransactionRelay.Sender)
     );
     program.addOption(new Option('--nc, --no-colors', 'Disable colored output'));
+    program.addOption(new Option('--v1', 'Use v1 transactions; fail if upstream support cannot be verified'));
 
-    program.hook('preAction', () => {
+    program.hook('preAction', async () => {
         global.PROGRAM = program.opts().program;
         global.TRANSACTION_RELAY = program.opts().relay;
         global.NO_COLORS = program.opts().colors === false;
+        if (program.opts().v1 && (await get_max_transaction_version()) !== 1)
+            throw new Error(
+                'V1 transactions are unsupported or support could not be verified through the configured RPC.'
+            );
+        global.TRANSACTION_VERSION = program.opts().v1 ? 1 : 0;
     });
 
     program
@@ -277,7 +285,7 @@ async function main() {
         .option('-r, --reserve', 'Generate the reserve wallet', false)
         .action(async (name, options) => {
             let { secrets, index, reserve, count } = options;
-            commands.generate(name, reserve, count, secrets, index);
+            await commands.generate(name, reserve, count, secrets, index);
         });
 
     program
@@ -780,7 +788,9 @@ async function main() {
         })
         .option('-m, --mint <mint_private_key>', 'Private key of the mint to create', (value) => {
             try {
-                return Keypair.fromSecretKey(base58.decode(value));
+                const secret = base58.decode(value);
+                if (secret.length !== 64) throw new Error('Invalid secret key length');
+                return secret;
             } catch {
                 throw new InvalidOptionArgumentError(`Invalid private key provided`);
             }
@@ -814,7 +824,17 @@ async function main() {
             let buyers: common.Wallet[] | undefined = undefined;
             if (from !== undefined || to !== undefined || list !== undefined)
                 buyers = common.filter_wallets(wallets, from, to, list);
-            await commands.create_token(cid, creator, amount, mint, buyers, min, max, bundle, config);
+            await commands.create_token(
+                cid,
+                creator,
+                amount,
+                mint ? await Keypair.fromSecretKey(mint) : undefined,
+                buyers,
+                min,
+                max,
+                bundle,
+                config
+            );
         });
 
     program
@@ -973,7 +993,7 @@ async function main() {
                 throw new InvalidOptionArgumentError('Invalid private key format. Must be an array of 64 numbers.');
             return Uint8Array.from(json);
         })
-        .action((json) => console.log(base58.encode(Keypair.fromSecretKey(json).secretKey)));
+        .action(async (json) => console.log(base58.encode((await Keypair.fromSecretKey(json)).secretKey)));
 
     try {
         await program.parseAsync(process.argv.map((arg) => MULTI_CHARACTER_OPTION_ALIASES[arg] ?? arg));

@@ -114,7 +114,8 @@ export function pubkey(name?: string): DecoderField<PublicKey> {
 abstract class StructDecoder<T> {
     protected abstract layout(): DecoderField<any>[];
 
-    decode(data: Buffer): T {
+    decode(input: Uint8Array): T {
+        const data = Buffer.from(input);
         const fields = this.layout();
         const result: any = {};
         let offset = 0;
@@ -156,7 +157,7 @@ export function define_decoder_struct<T extends Record<string, DecoderField<any>
     };
 
     return {
-        decode: (data: Buffer): Result => decoder.decode(data) as Result,
+        decode: (data: Uint8Array): Result => decoder.decode(data) as Result,
         get_offset: (field: keyof T | string): number => offsets[field as string] ?? -1,
         get_size: (): number => total_size
     };

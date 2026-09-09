@@ -1,14 +1,16 @@
 import {
     Keypair,
+    Connection,
+    SendTransactionError,
     LAMPORTS_PER_SOL,
     PublicKey,
-    Signer,
+    Blockhash,
+    V1TransactionConfig,
     SystemProgram,
     TokenAmount,
     TransactionInstruction,
     VersionedTransaction,
     TransactionMessage,
-    RpcResponseAndContext,
     ComputeBudgetProgram,
     Commitment,
     Finality,
@@ -19,16 +21,16 @@ import {
     PartiallyDecodedInstruction
 } from '@solana/web3.js';
 import {
-    AccountLayout,
+    decode_token_account,
     TOKEN_2022_PROGRAM_ID,
     TOKEN_PROGRAM_ID,
     createAssociatedTokenAccountIdempotentInstruction,
     createBurnInstruction,
     createCloseAccountInstruction,
     createTransferInstruction,
-    getAssociatedTokenAddressSync,
+    getAssociatedTokenAddress,
     getMint
-} from '@solana/spl-token';
+} from './token';
 import {
     COMMITMENT,
     JITO_ENDPOINTS,
@@ -57,12 +59,31 @@ import {
     SENDER_MAX_MIN_TIP,
     TransactionRelay,
     MAX_COMPUTE_UNIT_LIMIT,
+    MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+    LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES,
     COMPUTE_UNIT_BUFFER,
     COST_BASIS_TRANSACTION_PAGE_SIZE
 } from '../constants';
 import * as common from './common';
 import bs58 from 'bs58';
 import { rate_limit_request } from './rate_limit';
+
+type TransactionContext = Awaited<ReturnType<Connection['getLatestBlockhashAndContext']>>;
+export type TransactionOptions = {
+    loaded_accounts_data_size_limit?: number;
+    tip_account?: PublicKey;
+};
+
+type StringPublicKeys<T> = T extends PublicKey
+    ? string
+    : T extends bigint
+      ? number | bigint
+      : T extends object
+        ? { [K in keyof T]: StringPublicKeys<T[K]> }
+        : T;
+
+export type RawParsedTransaction = StringPublicKeys<ParsedTransactionWithMeta>;
+type RawInstruction = RawParsedTransaction['transaction']['message']['instructions'][number];
 
 export type SerializedMintMeta = {
     token_usd_mc: number;
@@ -92,16 +113,88 @@ type HeliusAsset = {
     creators?: { address: string }[];
 };
 
-export type ProgramAccount = { pubkey: PublicKey; account: { data: Buffer } };
+export type ProgramAccount = { pubkey: PublicKey; account: { data: Uint8Array } };
 type HeliusProgramAccountsPage = {
     accounts: { pubkey: string; account: { data: [string, string] } }[];
     paginationKey: string | null;
 };
 
 type HeliusTransactionsForAddressPage = {
-    data: ParsedTransactionWithMeta[];
+    data: RawParsedTransaction[];
     paginationToken: string | null;
 };
+
+function deserialize_instruction(instruction: RawInstruction): ParsedInstruction | PartiallyDecodedInstruction {
+    if ('accounts' in instruction) {
+        return {
+            ...instruction,
+            programId: new PublicKey(instruction.programId),
+            accounts: instruction.accounts.map((account) => new PublicKey(account))
+        };
+    }
+    return { ...instruction, programId: new PublicKey(instruction.programId) };
+}
+
+export function deserialize_parsed_transaction(raw: RawParsedTransaction): ParsedTransactionWithMeta {
+    const transaction = raw.transaction;
+    const meta = raw.meta;
+    const config = transaction.message.transactionConfig;
+    const priority_fee = config && 'priorityFee' in config ? config.priorityFee : config?.priorityFeeLamports;
+    if (priority_fee != null && typeof priority_fee !== 'number' && typeof priority_fee !== 'bigint')
+        throw new Error('Invalid transaction priority fee.');
+
+    return {
+        slot: common.rpc_bigint(raw.slot),
+        blockTime: raw.blockTime == null ? raw.blockTime : common.rpc_bigint(raw.blockTime),
+        version: raw.version,
+        transaction: {
+            signatures: transaction.signatures,
+            message: {
+                ...transaction.message,
+                transactionConfig: config
+                    ? {
+                          computeUnitLimit: config.computeUnitLimit ?? undefined,
+                          loadedAccountsDataSizeLimit: config.loadedAccountsDataSizeLimit ?? undefined,
+                          heapSize: config.heapSize ?? undefined,
+                          priorityFeeLamports: priority_fee == null ? undefined : common.rpc_bigint(priority_fee)
+                      }
+                    : undefined,
+                accountKeys: transaction.message.accountKeys.map((account) => ({
+                    ...account,
+                    pubkey: new PublicKey(account.pubkey)
+                })),
+                instructions: transaction.message.instructions.map(deserialize_instruction),
+                addressTableLookups: transaction.message.addressTableLookups?.map((lookup) => ({
+                    ...lookup,
+                    accountKey: new PublicKey(lookup.accountKey)
+                }))
+            }
+        },
+        meta: meta
+            ? {
+                  ...meta,
+                  fee: common.rpc_bigint(meta.fee),
+                  preBalances: meta.preBalances.map(common.rpc_bigint),
+                  postBalances: meta.postBalances.map(common.rpc_bigint),
+                  computeUnitsConsumed:
+                      meta.computeUnitsConsumed === undefined
+                          ? undefined
+                          : common.rpc_bigint(meta.computeUnitsConsumed),
+                  costUnits: meta.costUnits === undefined ? undefined : common.rpc_bigint(meta.costUnits),
+                  innerInstructions: meta.innerInstructions?.map((group) => ({
+                      ...group,
+                      instructions: group.instructions.map(deserialize_instruction)
+                  })),
+                  loadedAddresses: meta.loadedAddresses
+                      ? {
+                            writable: meta.loadedAddresses.writable.map((address) => new PublicKey(address)),
+                            readonly: meta.loadedAddresses.readonly.map((address) => new PublicKey(address))
+                        }
+                      : undefined
+              }
+            : null
+    };
+}
 
 async function helius_rpc<T>(method: string, params: unknown[]): Promise<T> {
     const response = await rate_limit_request(() =>
@@ -167,7 +260,7 @@ export interface IProgramTrader {
     deserialize_mint_meta(data: SerializedMintMeta): IMintMeta;
     buy_token(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: IMintMeta,
         slippage: number,
         priority?: PriorityLevel,
@@ -176,7 +269,7 @@ export interface IProgramTrader {
     ): Promise<String>;
     sell_token(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: Partial<IMintMeta>,
         slippage: number,
         priority?: PriorityLevel,
@@ -185,25 +278,25 @@ export interface IProgramTrader {
     ): Promise<String>;
     buy_token_instructions(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: IMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]>;
     sell_token_instructions(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: IMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]>;
     buy_sell_instructions(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: IMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]>;
     buy_sell_bundle(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: IMintMeta,
         tip: number,
         slippage: number,
@@ -211,7 +304,7 @@ export interface IProgramTrader {
     ): Promise<String>;
     buy_sell(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: IMintMeta,
         slippage: number,
         interval_ms?: number,
@@ -221,12 +314,12 @@ export interface IProgramTrader {
     ): Promise<[String, String]>;
     create_token(
         mint: Keypair,
-        creator: Signer,
+        creator: Keypair,
         token_name: string,
         token_symbol: string,
         meta_cid: string,
         sol_amount?: number,
-        traders?: [Signer, number][],
+        traders?: [Keypair, number][],
         bundle_tip?: number,
         priority?: PriorityLevel,
         config?: object
@@ -243,15 +336,15 @@ export interface IProgramTrader {
     ): Promise<() => void>;
     update_mint_meta_reserves(mint_meta: IMintMeta, amount: number | TokenAmount): IMintMeta;
     default_mint_meta(mint: PublicKey, sol_price?: number, data?: object): Promise<IMintMeta>;
-    get_trader_fees(trader: Signer): Promise<ClaimableAsset[]>;
-    claim_trader_fees(trader: Signer, assets: ClaimableAsset[], priority?: PriorityLevel): Promise<String>;
+    get_trader_fees(trader: Keypair): Promise<ClaimableAsset[]>;
+    claim_trader_fees(trader: Keypair, assets: ClaimableAsset[], priority?: PriorityLevel): Promise<String>;
 }
 
 type PriorityOptions = {
     accounts?: string[];
     transaction?: {
         instructions: TransactionInstruction[];
-        signers: Signer[];
+        signers: Keypair[];
         alts?: AddressLookupTableAccount[];
     };
     priority_level?: PriorityLevel;
@@ -331,6 +424,8 @@ export async function retry_send_lamports(
         try {
             return await send_lamports(amount, sender, receiver, priority);
         } catch (error) {
+            if (retries === 1 || (error instanceof TransactionSubmissionError && error.outcome === 'unknown'))
+                throw error;
             const balance = await get_balance(sender.publicKey, COMMITMENT);
             if (balance === 0) throw new Error(`Sender has no balance.`);
             if (balance < amount) amount = balance;
@@ -343,13 +438,15 @@ export async function retry_send_lamports(
 
 export async function retry_send_bundle(
     bundle_instructions: TransactionInstruction[][],
-    bundle_signers: Signer[][],
+    bundle_signers: Keypair[][],
     bundle_tip: number,
     priority?: PriorityLevel,
     ltas?: AddressLookupTableAccount[],
     compute_unit_limit?: number,
-    retries: number = TRADE_RETRIES
+    retries: number = TRADE_RETRIES,
+    options: TransactionOptions = {}
 ): Promise<String> {
+    const version = global.TRANSACTION_VERSION ?? 0;
     while (retries > 0) {
         try {
             return await send_bundle(
@@ -358,10 +455,13 @@ export async function retry_send_bundle(
                 bundle_tip,
                 priority,
                 ltas,
-                compute_unit_limit
+                compute_unit_limit,
+                version,
+                options
             );
         } catch (error) {
-            // common.log(common.red(`Failed to send bundle: ${error}`));
+            if (retries === 1 || (error instanceof TransactionSubmissionError && error.outcome === 'unknown'))
+                throw error;
             retries--;
         }
         await common.sleep(get_bundle_interval_ms() * (retries + 1));
@@ -371,14 +471,16 @@ export async function retry_send_bundle(
 
 export async function retry_send_tx(
     instructions: TransactionInstruction[],
-    signers: Signer[],
+    signers: Keypair[],
     priority?: PriorityLevel,
     protection_tip?: number,
     mev_protect: boolean = false,
     alts?: AddressLookupTableAccount[],
     compute_unit_limit?: number,
-    retries: number = TRADE_RETRIES
+    retries: number = TRADE_RETRIES,
+    options: TransactionOptions = {}
 ): Promise<String> {
+    const version = global.TRANSACTION_VERSION ?? 0;
     while (retries > 0) {
         try {
             return await send_tx(
@@ -388,10 +490,13 @@ export async function retry_send_tx(
                 protection_tip,
                 mev_protect,
                 alts,
-                compute_unit_limit
+                compute_unit_limit,
+                version,
+                options
             );
         } catch (error) {
-            // common.log(common.red(`Failed to send transaction: ${error}`));
+            if (retries === 1 || (error instanceof TransactionSubmissionError && error.outcome === 'unknown'))
+                throw error;
             retries--;
         }
         await common.sleep(TRADE_RETRY_INTERVAL_MS * (retries + 1));
@@ -399,8 +504,12 @@ export async function retry_send_tx(
     throw new Error('Send transaction failed after multiple attempts');
 }
 
-export function calc_ata(owner: PublicKey, mint: PublicKey, token_program: PublicKey = TOKEN_PROGRAM_ID): PublicKey {
-    return getAssociatedTokenAddressSync(mint, owner, true, token_program);
+export function calc_ata(
+    owner: PublicKey,
+    mint: PublicKey,
+    token_program: PublicKey = TOKEN_PROGRAM_ID
+): Promise<PublicKey> {
+    return getAssociatedTokenAddress(mint, owner, token_program);
 }
 
 export function calc_token_balance_changes(
@@ -423,8 +532,8 @@ export function calc_token_balance_changes(
         (change) => change.owner === account.toString() && (!mint || change.mint === mint)
     );
 
-    const pre_sol_balance = tx.meta.preBalances[change_sol_index] / LAMPORTS_PER_SOL;
-    const post_sol_balance = tx.meta.postBalances[change_sol_index] / LAMPORTS_PER_SOL;
+    const pre_sol_balance = common.safe_number(tx.meta.preBalances[change_sol_index]) / LAMPORTS_PER_SOL;
+    const post_sol_balance = common.safe_number(tx.meta.postBalances[change_sol_index]) / LAMPORTS_PER_SOL;
 
     let pre_token_balance = 0.0;
     let post_token_balance = 0.0;
@@ -452,12 +561,15 @@ export function calc_token_balance_changes(
         break;
     }
     const tips =
-        tips_instructions.reduce((sum: number, cur: ParsedInstruction) => sum + cur.parsed.info.lamports, 0) /
-        LAMPORTS_PER_SOL;
+        tips_instructions.reduce(
+            (sum: number, cur: ParsedInstruction) => sum + common.safe_number(cur.parsed.info.lamports),
+            0
+        ) / LAMPORTS_PER_SOL;
 
     let tx_fees = 0;
     if (tx.version === 1) {
-        tx_fees = (tx.transaction.message.transactionConfig?.priorityFee ?? 0) / LAMPORTS_PER_SOL;
+        tx_fees =
+            common.safe_number(tx.transaction.message.transactionConfig?.priorityFeeLamports ?? 0) / LAMPORTS_PER_SOL;
     } else {
         const compute_budget_data = tx.transaction.message.instructions
             .filter((instr): instr is PartiallyDecodedInstruction => {
@@ -516,7 +628,7 @@ export async function get_cost_basis(
                 ...(pagination_token ? { paginationToken: pagination_token } : {})
             }
         ]);
-        txs.push(...page.data);
+        txs.push(...page.data.map(deserialize_parsed_transaction));
         pagination_token = page.paginationToken || undefined;
     } while (pagination_token);
     if (txs.length === 0) return null;
@@ -606,7 +718,7 @@ export async function get_vault_balance(vault: PublicKey): Promise<{ balance: bi
 }
 
 export async function get_balance(pubkey: PublicKey, commitment: Commitment = 'finalized'): Promise<number> {
-    return await global.CONNECTION.getBalance(pubkey, { commitment });
+    return common.safe_number(await global.CONNECTION.getBalance(pubkey, { commitment }));
 }
 
 export async function get_token_balance(
@@ -616,7 +728,7 @@ export async function get_token_balance(
     program_id: PublicKey = TOKEN_PROGRAM_ID
 ): Promise<TokenAmount> {
     try {
-        const assoc_address = calc_ata(owner, mint, program_id);
+        const assoc_address = await calc_ata(owner, mint, program_id);
         const account_info = await global.CONNECTION.getTokenAccountBalance(assoc_address, commitment);
         return account_info.value;
     } catch (err) {
@@ -672,23 +784,19 @@ function get_random_sender_tip_account(): PublicKey {
     return new PublicKey(random_tip_account);
 }
 
-function create_versioned_tx(
-    signers: Signer[],
+async function create_signed_tx(
+    signers: Keypair[],
     instructions: TransactionInstruction[],
-    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
-    alts?: AddressLookupTableAccount[]
-): VersionedTransaction {
+    ctx: TransactionContext,
+    alts?: AddressLookupTableAccount[],
+    version: 0 | 1 = 0,
+    config?: V1TransactionConfig
+): Promise<VersionedTransaction> {
     if (instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
 
-    const versioned_tx = new VersionedTransaction(
-        new TransactionMessage({
-            payerKey: signers[0].publicKey,
-            recentBlockhash: ctx.value.blockhash,
-            instructions: instructions
-        }).compileToV0Message(alts)
-    );
-    versioned_tx.sign(signers);
+    const versioned_tx = compile_tx(instructions, signers[0].publicKey, ctx.value.blockhash, version, alts, config);
+    await versioned_tx.sign(signers);
     return versioned_tx;
 }
 
@@ -853,58 +961,34 @@ async function send_sender_bundle(serialized_txs: string[]): Promise<boolean> {
     return Boolean(await send_sender('sendBundle', [serialized_txs, { encoding: 'base64' }]));
 }
 
-async function send_protected_tx(
-    instructions: TransactionInstruction[],
-    signers: Signer[],
+export function create_tip_instruction(
+    payer: PublicKey,
     tip: number,
-    mev_protect: boolean = false,
-    alts?: AddressLookupTableAccount[],
-    ctx?: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>
-): Promise<String> {
-    const provider = get_transaction_relay();
+    provider: TransactionRelay,
+    tip_account?: PublicKey
+): TransactionInstruction {
     const minimum_tip = provider === TransactionRelay.Sender ? SENDER_MAX_MIN_TIP : JITO_MIN_TIP;
-    if (tip < minimum_tip) throw new Error(`Tip is too low, minimum is ${minimum_tip} `);
-    instructions = instructions.filter(Boolean);
-    if (instructions.length === 0) throw new Error(`No instructions provided.`);
-    if (signers.length === 0) throw new Error(`No signers provided.`);
-
-    const tip_account =
-        provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account();
-
-    instructions.push(
-        SystemProgram.transfer({
-            fromPubkey: signers[0].publicKey,
-            toPubkey: tip_account,
-            lamports: tip * LAMPORTS_PER_SOL
-        })
-    );
-
-    ctx ??= await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const versioned_tx = create_versioned_tx(signers, instructions, ctx, alts);
-    const jito_tx_signature = bs58.encode(versioned_tx.signatures[0]);
-    const serialized_tx = Buffer.from(versioned_tx.serialize()).toString('base64');
-
-    const responses =
-        provider === TransactionRelay.Sender
-            ? await send_sender_tx(serialized_tx, mev_protect)
-            : await send_jito_tx(serialized_tx);
-    if (responses.length > 0) {
-        await check_transaction_status(jito_tx_signature, ctx);
-        return responses[0];
-    } else {
-        throw new Error(
-            `Failed to send the protected transaction, no successful response from the ${provider} endpoints`
-        );
-    }
+    if (!Number.isFinite(tip) || tip < minimum_tip) throw new Error(`Tip is too low, minimum is ${minimum_tip}`);
+    const tip_accounts = provider === TransactionRelay.Sender ? SENDER_TIP_ACCOUNTS : JITO_TIP_ACCOUNTS;
+    if (tip_account && !tip_accounts.includes(tip_account.toBase58())) throw new Error('Invalid relay tip account.');
+    return SystemProgram.transfer({
+        fromPubkey: payer,
+        toPubkey:
+            tip_account ??
+            (provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account()),
+        lamports: tip * LAMPORTS_PER_SOL
+    });
 }
 
 export async function send_bundle(
     instructions: TransactionInstruction[][],
-    signers: Signer[][],
+    signers: Keypair[][],
     tip: number,
     priority?: PriorityLevel,
     alts?: AddressLookupTableAccount[],
-    compute_unit_limit?: number
+    compute_unit_limit?: number,
+    version: 0 | 1 = global.TRANSACTION_VERSION ?? 0,
+    options: TransactionOptions = {}
 ): Promise<String> {
     const provider = get_transaction_relay();
     const minimum_tip = provider === TransactionRelay.Sender ? SENDER_MAX_MIN_TIP : JITO_MIN_TIP;
@@ -919,81 +1003,49 @@ export async function send_bundle(
     }
 
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const compute_unit_limits = instructions.map(() => compute_unit_limit ?? MAX_COMPUTE_UNIT_LIMIT);
-    let priority_fee: number | undefined;
-    if (priority || provider === TransactionRelay.Sender) {
-        priority_fee = await get_priority_fee(
-            {
-                priority_level: priority,
-                transaction: {
-                    instructions: instructions[0],
-                    signers: signers[0],
-                    alts
-                }
-            },
-            ctx
-        );
-    }
-
-    const tip_account =
-        provider === TransactionRelay.Sender ? get_random_sender_tip_account() : get_random_jito_tip_account();
-    let signature: string;
-
-    const serialized_txs = [];
+    const transactions: VersionedTransaction[] = [];
     for (let i = 0; i < instructions.length; i++) {
-        const units = compute_unit_limits[i];
-        let tx_priority_fee = priority_fee;
-        if (provider === TransactionRelay.Sender)
-            tx_priority_fee = Math.max(
-                tx_priority_fee ?? 0,
-                Math.ceil((SENDER_MAX_MIN_PRIORITY_FEE * 1_000_000) / units)
-            );
-        instructions[i].unshift(
-            ComputeBudgetProgram.setComputeUnitLimit({ units }),
-            ...(tx_priority_fee ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: tx_priority_fee })] : [])
+        if (i === instructions.length - 1)
+            instructions[i].push(create_tip_instruction(signers[i][0].publicKey, tip, provider, options.tip_account));
+        transactions.push(
+            await prepare_tx(instructions[i], signers[i], ctx, {
+                version,
+                priority,
+                alts,
+                compute_unit_limit,
+                loaded_accounts_data_size_limit: options.loaded_accounts_data_size_limit,
+                provider,
+                bundle: true
+            })
         );
-        if (i === instructions.length - 1) {
-            instructions[i].push(
-                SystemProgram.transfer({
-                    fromPubkey: signers[i][0].publicKey,
-                    toPubkey: tip_account,
-                    lamports: tip * LAMPORTS_PER_SOL
-                })
-            );
+    }
+    const signatures = transactions.map((transaction) => bs58.encode(transaction.signatures[0]));
+    const signature = signatures[signatures.length - 1];
+    const serialized_txs = transactions.map((transaction) => Buffer.from(transaction.serialize()).toString('base64'));
+    try {
+        if (provider === TransactionRelay.Sender) {
+            if (!(await send_sender_bundle(serialized_txs))) throw new Error('Sender did not accept the bundle.');
+            await check_transaction_status(signature, ctx);
+            return signature;
         }
-        const versioned_tx = create_versioned_tx(signers[i], instructions[i], ctx, alts);
-
-        if (i === instructions.length - 1) signature = bs58.encode(versioned_tx.signatures[0]);
-        serialized_txs.push(Buffer.from(versioned_tx.serialize()).toString('base64'));
-    }
-
-    if (provider === TransactionRelay.Sender) {
-        if (!(await send_sender_bundle(serialized_txs)))
-            throw new Error(`Failed to send the bundle, no successful response from the Sender endpoints`);
-        // common.log(`Sender bundle accepted | Transaction: ${signature!}`);
-        await check_transaction_status(signature!, ctx);
-        return signature!;
-    }
-
-    const responses = await send_jito_bundle(serialized_txs);
-    if (responses.length > 0) {
+        const responses = await send_jito_bundle(serialized_txs);
+        if (responses.length === 0) throw new Error('Jito did not accept the bundle.');
         const submission = responses[Math.floor(Math.random() * responses.length)];
-        // common.log(`Jito bundle accepted: ${submission.bundle_id} | Transaction: ${signature!}`);
-        await check_transaction_status(signature!, ctx, 'confirmed', submission);
+        await check_transaction_status(signature, ctx, 'confirmed', submission);
         return submission.bundle_id;
-    } else {
-        throw new Error(`Failed to send the bundle, no successful response from the JITO endpoints`);
+    } catch (error) {
+        throw new TransactionSubmissionError(signatures, error);
     }
 }
 
-async function is_blockhash_expired(last_valid_block_height: number): Promise<boolean> {
+async function is_blockhash_expired(last_valid_block_height: bigint): Promise<boolean> {
     let current_block_height = await global.CONNECTION.getBlockHeight(COMMITMENT);
     return last_valid_block_height - current_block_height < 0;
 }
 
 async function check_transaction_status(
     signature: string,
-    context: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
+    context: TransactionContext,
     finality: Finality = 'confirmed',
     bundle_submission?: JitoBundleSubmission
 ): Promise<void> {
@@ -1017,8 +1069,9 @@ async function check_transaction_status(
                     const error_log =
                         tx.meta?.logMessages?.find((line) => line.includes('AnchorError')) ??
                         tx.meta?.logMessages?.find((line) => line.includes('failed:'));
-                    const error_detail = error_log?.replace('Program log: ', '') ?? JSON.stringify(tx.meta?.err);
-                    throw new Error(`Transaction failed: ${error_detail} | Signature: ${signature}`);
+                    const error_detail =
+                        error_log?.replace('Program log: ', '') ?? JSON.stringify(tx.meta?.err, common.json_bigint);
+                    throw new TransactionSubmissionError(signature, new Error(error_detail), 'failed');
                 }
             }
         }
@@ -1045,6 +1098,26 @@ async function check_transaction_status(
 const priority_cache = new Map<string, { value: number; expires_at: number }>();
 const priority_cache_inflight = new Map<string, Promise<number>>();
 
+async function cached_priority_fee(key: string, fetch_fee: () => Promise<number>): Promise<number> {
+    const now = Date.now();
+    cleanup_ttl_cache(priority_cache, now);
+    const cached = priority_cache.get(key);
+    if (cached && cached.expires_at > now) return cached.value;
+    if (cached) priority_cache.delete(key);
+    const in_flight = priority_cache_inflight.get(key);
+    if (in_flight) return in_flight;
+
+    const request = fetch_fee()
+        .then((fee) => {
+            if (!Number.isSafeInteger(fee) || fee < 0) throw new Error('Invalid priority price in micro-lamports/CU.');
+            priority_cache.set(key, { value: fee, expires_at: Date.now() + PRIORITY_FEE_TTL_MS });
+            return fee;
+        })
+        .finally(() => priority_cache_inflight.delete(key));
+    priority_cache_inflight.set(key, request);
+    return request;
+}
+
 export async function get_priority_fee_estimate(
     priority_level: PriorityLevel,
     account_keys: PublicKey[]
@@ -1058,10 +1131,7 @@ export async function get_priority_fee_estimate(
     return Math.floor(response.priorityFeeEstimate || 0);
 }
 
-async function get_priority_fee(
-    priority_opts: PriorityOptions,
-    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>
-): Promise<number> {
+async function get_priority_fee(priority_opts: PriorityOptions, ctx: TransactionContext): Promise<number> {
     const get_priority_cache_key = (priority_opts: PriorityOptions): string => {
         const priority = (priority_opts.priority_level || 'recommended').toLowerCase();
         const tx_shape = priority_opts.transaction
@@ -1073,22 +1143,12 @@ async function get_priority_fee(
     if (!priority_opts.transaction)
         throw new Error(`Transaction instructions and signers are required to get priority fee estimate.`);
 
-    const now = Date.now();
-    cleanup_ttl_cache(priority_cache, now);
-
     const cache_key = get_priority_cache_key(priority_opts);
-    const cached = priority_cache.get(cache_key);
-    if (cached && cached.expires_at > now) return cached.value;
-    if (cached) priority_cache.delete(cache_key);
-
-    const in_flight = priority_cache_inflight.get(cache_key);
-    if (in_flight) return in_flight;
-
-    const fetch_priority_fee = (async () => {
+    return cached_priority_fee(cache_key, async () => {
         let encoded_tx: string | undefined;
         if (priority_opts.transaction) {
             const { instructions, signers, alts } = priority_opts.transaction;
-            encoded_tx = bs58.encode(create_versioned_tx(signers, instructions, ctx, alts).serialize());
+            encoded_tx = bs58.encode((await create_signed_tx(signers, instructions, ctx, alts)).serialize());
         }
 
         const response = await helius_rpc<{ priorityFeeEstimate?: number }>('getPriorityFeeEstimate', [
@@ -1102,87 +1162,353 @@ async function get_priority_fee(
             }
         ]);
 
-        const fee = Math.floor(response.priorityFeeEstimate || 0);
-        priority_cache.set(cache_key, { value: fee, expires_at: Date.now() + PRIORITY_FEE_TTL_MS });
-        return fee;
-    })().finally(() => {
-        priority_cache_inflight.delete(cache_key);
+        return Math.floor(response.priorityFeeEstimate || 0);
     });
+}
 
-    priority_cache_inflight.set(cache_key, fetch_priority_fee);
-    return fetch_priority_fee;
+async function get_priority_fee_v1(
+    instructions: TransactionInstruction[],
+    payer: PublicKey,
+    units: number,
+    priority?: PriorityLevel,
+    provider?: TransactionRelay
+): Promise<bigint> {
+    const accounts = [
+        ...new Set([
+            payer.toBase58(),
+            ...instructions.flatMap((instruction) =>
+                instruction.keys.filter((key) => key.isWritable).map((key) => key.pubkey.toBase58())
+            )
+        ])
+    ].map((key) => new PublicKey(key));
+    const level = priority ?? PriorityLevel.DEFAULT;
+    const cache_key = `v1:${level}:${accounts
+        .map((account) => account.toBase58())
+        .sort()
+        .join(',')}`;
+    const price =
+        global.PRIORITY_FEE ?? (await cached_priority_fee(cache_key, () => get_priority_fee_estimate(level, accounts)));
+    if (!Number.isSafeInteger(price) || price < 0) throw new Error('Invalid priority price in micro-lamports/CU.');
+    const fee = (BigInt(price) * BigInt(units) + 999999n) / 1000000n;
+    const minimum_fee = provider === TransactionRelay.Sender ? BigInt(SENDER_MAX_MIN_PRIORITY_FEE) : 0n;
+    return fee < minimum_fee ? minimum_fee : fee;
+}
+
+async function estimate_resource_limits_v1(
+    instructions: TransactionInstruction[],
+    payer: PublicKey,
+    ctx: TransactionContext,
+    compute_unit_limit?: number,
+    loaded_accounts_data_size_limit?: number
+): Promise<{ computeUnitLimit: number; loadedAccountsDataSizeLimit: number }> {
+    const provisional = compile_tx(instructions, payer, ctx.value.blockhash, 1);
+    const { value: simulation } = await global.CONNECTION.simulateTransaction(provisional, {
+        sigVerify: false,
+        commitment: COMMITMENT,
+        minContextSlot: ctx.context.slot
+    });
+    if (simulation.err !== null) throw new TransactionSimulationError(simulation.err);
+    if (simulation.unitsConsumed === undefined || simulation.loadedAccountsDataSize === undefined)
+        throw new Error('RPC did not return v1 resource estimates.');
+    const units_consumed = common.safe_number(simulation.unitsConsumed);
+    const loaded_bytes = common.safe_number(simulation.loadedAccountsDataSize);
+    if (
+        units_consumed <= 0 ||
+        units_consumed > MAX_COMPUTE_UNIT_LIMIT ||
+        loaded_bytes < 0 ||
+        loaded_bytes > MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES
+    )
+        throw new Error('RPC returned invalid v1 resource estimates.');
+    const units =
+        compute_unit_limit ?? Math.min(MAX_COMPUTE_UNIT_LIMIT, Math.ceil(units_consumed * COMPUTE_UNIT_BUFFER));
+    if (!Number.isSafeInteger(units) || units < units_consumed || units > MAX_COMPUTE_UNIT_LIMIT)
+        throw new Error('Invalid compute unit limit for the simulated transaction.');
+    if (loaded_accounts_data_size_limit !== undefined && loaded_accounts_data_size_limit < loaded_bytes)
+        throw new Error('Loaded account data size limit is below the simulated requirement.');
+    return {
+        computeUnitLimit: units,
+        loadedAccountsDataSizeLimit:
+            loaded_accounts_data_size_limit ??
+            Math.min(
+                MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+                (Math.floor(loaded_bytes / LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES) + 1) *
+                    LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES
+            )
+    };
+}
+
+async function prepare_tx(
+    instructions: TransactionInstruction[],
+    signers: Keypair[],
+    ctx: TransactionContext,
+    options: {
+        version: 0 | 1;
+        priority?: PriorityLevel;
+        alts?: AddressLookupTableAccount[];
+        compute_unit_limit?: number;
+        loaded_accounts_data_size_limit?: number;
+        provider?: TransactionRelay;
+        bundle?: boolean;
+    }
+): Promise<VersionedTransaction> {
+    if (signers.length === 0 || instructions.length === 0) throw new Error('Instructions and signers are required.');
+    if (instructions.some((instruction) => instruction.programId.equals(ComputeBudgetProgram.programId)))
+        throw new Error('Transactions cannot include compute budget instructions.');
+    const { version, priority, alts, compute_unit_limit, loaded_accounts_data_size_limit, provider, bundle } = options;
+    if (
+        loaded_accounts_data_size_limit !== undefined &&
+        (!Number.isSafeInteger(loaded_accounts_data_size_limit) ||
+            loaded_accounts_data_size_limit <= 0 ||
+            loaded_accounts_data_size_limit > MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES)
+    )
+        throw new Error('Invalid loaded account data size limit.');
+    const use_priority_fee = !bundle || priority !== undefined || provider === TransactionRelay.Sender;
+    let final_instructions = instructions;
+    let config: V1TransactionConfig | undefined;
+    if (version === 1) {
+        const limits =
+            bundle || (compute_unit_limit !== undefined && loaded_accounts_data_size_limit !== undefined)
+                ? {
+                      computeUnitLimit: compute_unit_limit ?? MAX_COMPUTE_UNIT_LIMIT,
+                      loadedAccountsDataSizeLimit:
+                          loaded_accounts_data_size_limit ?? MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES
+                  }
+                : await estimate_resource_limits_v1(
+                      instructions,
+                      signers[0].publicKey,
+                      ctx,
+                      compute_unit_limit,
+                      loaded_accounts_data_size_limit
+                  );
+        if (
+            !Number.isSafeInteger(limits.computeUnitLimit) ||
+            limits.computeUnitLimit <= 0 ||
+            limits.computeUnitLimit > MAX_COMPUTE_UNIT_LIMIT
+        )
+            throw new Error('Invalid compute unit limit.');
+        const fee = use_priority_fee
+            ? await get_priority_fee_v1(instructions, signers[0].publicKey, limits.computeUnitLimit, priority, provider)
+            : 0n;
+        config = { ...limits, priorityFeeLamports: fee };
+    } else {
+        const units =
+            compute_unit_limit ??
+            (bundle
+                ? MAX_COMPUTE_UNIT_LIMIT
+                : await estimate_compute_unit_limit(instructions, signers, ctx, alts, loaded_accounts_data_size_limit));
+        if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_COMPUTE_UNIT_LIMIT)
+            throw new Error('Invalid compute unit limit.');
+        let price = use_priority_fee
+            ? (global.PRIORITY_FEE ??
+              (await get_priority_fee({ priority_level: priority, transaction: { instructions, signers, alts } }, ctx)))
+            : undefined;
+        if (provider === TransactionRelay.Sender)
+            price = Math.max(price ?? 0, Math.ceil((SENDER_MAX_MIN_PRIORITY_FEE * 1_000_000) / units));
+        final_instructions = [
+            ComputeBudgetProgram.setComputeUnitLimit({ units }),
+            ...(loaded_accounts_data_size_limit === undefined
+                ? []
+                : [
+                      ComputeBudgetProgram.setLoadedAccountsDataSizeLimit({
+                          accountDataSizeLimit: loaded_accounts_data_size_limit
+                      })
+                  ]),
+            ...(price === undefined ? [] : [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: price })]),
+            ...instructions
+        ];
+    }
+    return create_signed_tx(signers, final_instructions, ctx, alts, version, config);
 }
 
 async function estimate_compute_unit_limit(
     instructions: TransactionInstruction[],
-    signers: Signer[],
-    ctx: RpcResponseAndContext<Readonly<{ blockhash: string; lastValidBlockHeight: number }>>,
-    alts?: AddressLookupTableAccount[]
+    signers: Keypair[],
+    ctx: TransactionContext,
+    alts?: AddressLookupTableAccount[],
+    loaded_accounts_data_size_limit?: number
 ): Promise<number> {
     const simulation_instructions = [
         ComputeBudgetProgram.setComputeUnitLimit({ units: MAX_COMPUTE_UNIT_LIMIT }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0 }),
+        ...(loaded_accounts_data_size_limit === undefined
+            ? []
+            : [
+                  ComputeBudgetProgram.setLoadedAccountsDataSizeLimit({
+                      accountDataSizeLimit: loaded_accounts_data_size_limit
+                  })
+              ]),
         ...instructions
     ];
-    const simulation_tx = create_versioned_tx(signers, simulation_instructions, ctx, alts);
+    const simulation_tx = await create_signed_tx(signers, simulation_instructions, ctx, alts);
     const simulation = await global.CONNECTION.simulateTransaction(simulation_tx, {
         sigVerify: true,
         commitment: COMMITMENT
     });
-    if (simulation.value.err || !simulation.value.unitsConsumed)
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    if (simulation.value.err) throw new TransactionSimulationError(simulation.value.err);
+    if (!simulation.value.unitsConsumed) throw new Error('RPC did not return a compute unit estimate.');
     return Math.min(
         MAX_COMPUTE_UNIT_LIMIT,
-        Math.max(1_000, Math.ceil(simulation.value.unitsConsumed * COMPUTE_UNIT_BUFFER))
+        Math.max(1_000, Math.ceil(common.safe_number(simulation.value.unitsConsumed) * COMPUTE_UNIT_BUFFER))
     );
+}
+
+export async function get_max_transaction_version(): Promise<0 | 1> {
+    try {
+        const { context, value } = await global.CONNECTION.getAccountInfoAndContext(
+            new PublicKey('txv1aq4pp281K9um3tnPgkfX8UqtFT6wcVW3hNezGLL'),
+            'finalized'
+        );
+        return value &&
+            value.owner.equals(new PublicKey('Feature111111111111111111111111111111111111')) &&
+            value.data.length >= 9 &&
+            value.data[0] === 1 &&
+            new DataView(value.data.buffer, value.data.byteOffset, value.data.byteLength).getBigUint64(1, true) <=
+                context.slot
+            ? 1
+            : 0;
+    } catch {
+        return 0;
+    }
+}
+
+export function compile_tx(
+    instructions: TransactionInstruction[],
+    payer: PublicKey,
+    recent_blockhash: Blockhash,
+    version: 0 | 1 = 0,
+    alts?: AddressLookupTableAccount[],
+    config: V1TransactionConfig = {
+        priorityFeeLamports: 0n,
+        computeUnitLimit: MAX_COMPUTE_UNIT_LIMIT,
+        loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES
+    }
+): VersionedTransaction {
+    if (instructions.length === 0 || instructions.length > 64)
+        throw new Error('Transaction instruction limit exceeded.');
+    if (
+        version === 1 &&
+        instructions.some((instruction) => instruction.programId.equals(ComputeBudgetProgram.programId))
+    )
+        throw new Error('V1 transactions must configure resources through the message config.');
+    const transaction_message = new TransactionMessage({
+        payerKey: payer,
+        recentBlockhash: recent_blockhash,
+        instructions
+    });
+    const message =
+        version === 1 ? transaction_message.compileToV1Message(config) : transaction_message.compileToV0Message(alts);
+    const account_count =
+        message.staticAccountKeys.length +
+        (message.version === 0
+            ? message.addressTableLookups.reduce(
+                  (count, lookup) => count + lookup.writableIndexes.length + lookup.readonlyIndexes.length,
+                  0
+              )
+            : 0);
+    if (account_count > 64 || message.header.numRequiredSignatures > 12)
+        throw new Error('Transaction account or signer limit exceeded.');
+
+    const transaction = new VersionedTransaction(message);
+    const max_bytes = version === 1 ? 4096 : 1232;
+    if (transaction.serialize().length > max_bytes) throw new Error(`Transaction exceeds ${max_bytes} bytes.`);
+    return transaction;
 }
 
 export async function send_tx(
     instructions: TransactionInstruction[],
-    signers: Signer[],
+    signers: Keypair[],
     priority?: PriorityLevel,
     protection_tip?: number,
     mev_protect: boolean = false,
     alts?: AddressLookupTableAccount[],
-    compute_unit_limit?: number
+    compute_unit_limit?: number,
+    version: 0 | 1 = global.TRANSACTION_VERSION ?? 0,
+    options: TransactionOptions = {}
 ): Promise<String> {
     const tx_instructions = instructions.filter(Boolean);
     if (tx_instructions.length === 0) throw new Error(`No instructions provided.`);
     if (signers.length === 0) throw new Error(`No signers provided.`);
     if (mev_protect && (!protection_tip || protection_tip <= 0))
         throw new Error(`MEV protection requires a protection tip to be specified.`);
-    if (tx_instructions.some((instruction) => instruction.programId.equals(ComputeBudgetProgram.programId)))
-        throw new Error('Transactions cannot include compute budget instructions.');
 
+    const provider = protection_tip ? get_transaction_relay() : undefined;
+    if (protection_tip && provider)
+        tx_instructions.push(
+            create_tip_instruction(signers[0].publicKey, protection_tip, provider, options.tip_account)
+        );
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
-    const units = compute_unit_limit ?? (await estimate_compute_unit_limit(tx_instructions, signers, ctx, alts));
-    let fee =
-        global.PRIORITY_FEE ??
-        (await get_priority_fee(
-            {
-                priority_level: priority,
-                transaction: { instructions: tx_instructions, signers, alts }
-            },
-            ctx
-        ));
-    if (protection_tip && get_transaction_relay() === TransactionRelay.Sender)
-        fee = Math.max(fee, Math.ceil((SENDER_MAX_MIN_PRIORITY_FEE * 1_000_000) / units));
-    const final_instructions = [
-        ComputeBudgetProgram.setComputeUnitLimit({ units }),
-        ComputeBudgetProgram.setComputeUnitPrice({
-            microLamports: fee
-        }),
-        ...tx_instructions
-    ];
-
-    if (protection_tip) return send_protected_tx(final_instructions, signers, protection_tip, mev_protect, alts, ctx);
-
-    const versioned_tx = create_versioned_tx(signers, final_instructions, ctx, alts);
-    const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
-        skipPreflight: false,
-        preflightCommitment: COMMITMENT,
-        maxRetries: TRADE_TX_RETRIES
+    const transaction = await prepare_tx(tx_instructions, signers, ctx, {
+        version,
+        priority,
+        alts,
+        compute_unit_limit,
+        loaded_accounts_data_size_limit: options.loaded_accounts_data_size_limit,
+        provider
     });
-    await check_transaction_status(signature, ctx);
+    return submit_tx(transaction, ctx, provider, mev_protect);
+}
+
+export class TransactionSubmissionError extends Error {
+    readonly signatures: readonly string[];
+    constructor(
+        signatures: string | readonly string[],
+        cause: unknown,
+        readonly outcome: 'unknown' | 'rejected' | 'failed' = 'unknown'
+    ) {
+        const values = typeof signatures === 'string' ? [signatures] : [...signatures];
+        super(`Transaction outcome ${outcome}; signatures ${values.join(', ')}: ${cause}`, { cause });
+        this.signatures = values;
+        this.name = 'TransactionSubmissionError';
+    }
+}
+
+class TransactionSimulationError extends Error {
+    constructor(readonly transaction_error: unknown) {
+        super(`Transaction simulation failed: ${JSON.stringify(transaction_error, common.json_bigint)}`);
+        this.name = 'TransactionSimulationError';
+    }
+}
+
+async function submit_tx(
+    transaction: VersionedTransaction,
+    context: TransactionContext,
+    provider?: TransactionRelay,
+    mev_protect = false
+): Promise<String> {
+    const bytes = transaction.serialize();
+    const signature = bs58.encode(transaction.signatures[0]);
+    try {
+        if (provider) {
+            const encoded = Buffer.from(bytes).toString('base64');
+            const responses =
+                provider === TransactionRelay.Sender
+                    ? await send_sender_tx(encoded, mev_protect)
+                    : await send_jito_tx(encoded);
+            if (!responses.includes(signature)) throw new Error(`No matching signature returned by ${provider}.`);
+        } else {
+            let returned_signature: string;
+            try {
+                returned_signature = await global.CONNECTION.sendRawTransaction(bytes, {
+                    skipPreflight: false,
+                    preflightCommitment: COMMITMENT,
+                    minContextSlot: context.context.slot,
+                    maxRetries: BigInt(TRADE_TX_RETRIES)
+                });
+            } catch (error) {
+                // With RPC preflight enabled, this SDK error reports rejection before broadcast.
+                // AlreadyProcessed may refer to an earlier successful submission of these same bytes.
+                const rejected =
+                    error instanceof SendTransactionError &&
+                    !/already.*processed/i.test(error.transactionError.message);
+                throw new TransactionSubmissionError(signature, error, rejected ? 'rejected' : 'unknown');
+            }
+            if (returned_signature !== signature) throw new Error('RPC returned a different transaction signature.');
+        }
+        await check_transaction_status(signature, context);
+    } catch (error) {
+        if (error instanceof TransactionSubmissionError) throw error;
+        throw new TransactionSubmissionError(signature, error);
+    }
     return signature;
 }
 
@@ -1195,9 +1521,9 @@ export async function get_balance_change(signature: string, address: PublicKey):
         if (!tx_details) throw new Error(`Transaction not found: ${signature} `);
         const balance_index = tx_details.transaction.message.staticAccountKeys.findIndex((i) => i.equals(address));
         if (balance_index !== undefined && balance_index !== -1) {
-            const pre_balance = tx_details?.meta?.preBalances[balance_index] || 0;
-            const post_balance = tx_details?.meta?.postBalances[balance_index] || 0;
-            return (pre_balance - post_balance) / LAMPORTS_PER_SOL;
+            const pre_balance = tx_details?.meta?.preBalances[balance_index] ?? 0n;
+            const post_balance = tx_details?.meta?.postBalances[balance_index] ?? 0n;
+            return common.safe_number(pre_balance - post_balance) / LAMPORTS_PER_SOL;
         }
         return 0;
     } catch (err) {
@@ -1207,7 +1533,7 @@ export async function get_balance_change(signature: string, address: PublicKey):
 
 export async function send_lamports(
     lamports: number,
-    sender: Signer,
+    sender: Keypair,
     receiver: PublicKey,
     priority?: PriorityLevel
 ): Promise<String> {
@@ -1221,7 +1547,28 @@ export async function send_lamports(
     ];
     const ctx = await global.CONNECTION.getLatestBlockhashAndContext(COMMITMENT);
 
-    if (priority) {
+    const version = global.TRANSACTION_VERSION ?? 0;
+    let config: V1TransactionConfig | undefined;
+    if (priority && version === 1) {
+        if (lamports <= 5000) throw new Error(`Spend cap of ${lamports} lamports is insufficient to cover fees.`);
+        const simulation_instructions = [
+            SystemProgram.transfer({ fromPubkey: sender.publicKey, toPubkey: receiver, lamports: lamports - 5000 })
+        ];
+        const limits = await estimate_resource_limits_v1(simulation_instructions, sender.publicKey, ctx);
+        const fee = await get_priority_fee_v1(
+            simulation_instructions,
+            sender.publicKey,
+            limits.computeUnitLimit,
+            priority
+        );
+        const transfer_lamports = BigInt(lamports) - 5000n - fee;
+        if (transfer_lamports <= 0n)
+            throw new Error(`Spend cap of ${lamports} lamports is insufficient to cover transaction fees.`);
+        instructions = [
+            SystemProgram.transfer({ fromPubkey: sender.publicKey, toPubkey: receiver, lamports: transfer_lamports })
+        ];
+        config = { ...limits, priorityFeeLamports: fee };
+    } else if (priority) {
         if (lamports <= 5000) throw new Error(`Spend cap of ${lamports} lamports is insufficient to cover fees.`);
         const simulation_instructions = [
             SystemProgram.transfer({
@@ -1259,20 +1606,14 @@ export async function send_lamports(
         ];
     }
 
-    const versioned_tx = create_versioned_tx([sender], instructions, ctx);
-    const signature = await global.CONNECTION.sendTransaction(versioned_tx, {
-        skipPreflight: false,
-        preflightCommitment: COMMITMENT,
-        maxRetries: TRADE_TX_RETRIES
-    });
-    await check_transaction_status(signature, ctx);
-    return signature;
+    const versioned_tx = await create_signed_tx([sender], instructions, ctx, undefined, version, config);
+    return submit_tx(versioned_tx, ctx);
 }
 
 export async function send_tokens(
     token_amount: TokenAmount,
     mint: PublicKey,
-    sender: Signer,
+    sender: Keypair,
     receiver: PublicKey,
     priority?: PriorityLevel,
     token_program: PublicKey = TOKEN_PROGRAM_ID
@@ -1280,21 +1621,70 @@ export async function send_tokens(
     if (token_amount.uiAmount === null) throw new Error(`Invalid token amount.`);
     const token_amount_raw = BigInt(token_amount.amount);
 
-    const receiver_ata = calc_ata(receiver, mint, token_program);
-    const sender_ata = calc_ata(sender.publicKey, mint, token_program);
+    const receiver_ata = await calc_ata(receiver, mint, token_program);
+    const sender_ata = await calc_ata(sender.publicKey, mint, token_program);
 
     const instructions = [
-        createAssociatedTokenAccountIdempotentInstruction(
-            sender.publicKey,
-            receiver_ata,
-            receiver,
-            mint,
-            token_program
-        ),
-        createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw, [], token_program)
+        createAssociatedTokenAccountIdempotentInstruction(sender, receiver_ata, receiver, mint, token_program),
+        createTransferInstruction(sender_ata, receiver_ata, sender.publicKey, token_amount_raw, token_program)
     ];
 
     return await send_tx(instructions, [sender], priority);
+}
+
+export function pack_tx_groups<T>(
+    items: T[],
+    instructions_for: (item: T) => TransactionInstruction[],
+    payer: PublicKey,
+    version: 0 | 1 = global.TRANSACTION_VERSION ?? 0,
+    alts?: AddressLookupTableAccount[],
+    trailing_instructions: TransactionInstruction[] = [],
+    options: TransactionOptions = {}
+): T[][] {
+    const batches: T[][] = [];
+    let batch: T[] = [];
+    let batch_instructions: TransactionInstruction[] = [];
+    const overhead =
+        version === 0
+            ? [
+                  ComputeBudgetProgram.setComputeUnitLimit({ units: MAX_COMPUTE_UNIT_LIMIT }),
+                  ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0 })
+              ]
+            : [];
+    if (version === 0 && options.loaded_accounts_data_size_limit !== undefined)
+        overhead.push(
+            ComputeBudgetProgram.setLoadedAccountsDataSizeLimit({
+                accountDataSizeLimit: options.loaded_accounts_data_size_limit
+            })
+        );
+    const validate_capacity = (instructions: TransactionInstruction[]) => {
+        // Checks the complete wire size (v0: 1232, v1: 4096), accounts and signatures.
+        // V0 includes CU instructions and ALTs; v1 includes inline config and account keys.
+        compile_tx(
+            [...overhead, ...instructions, ...trailing_instructions],
+            payer,
+            '11111111111111111111111111111111' as Blockhash,
+            version,
+            alts
+        );
+    };
+    for (const item of items) {
+        const item_instructions = instructions_for(item);
+        const candidate = [...batch_instructions, ...item_instructions];
+        try {
+            validate_capacity(candidate);
+        } catch (error) {
+            if (batch.length === 0) throw error;
+            validate_capacity(item_instructions);
+            batches.push(batch);
+            batch = [];
+            batch_instructions = [];
+        }
+        batch.push(item);
+        batch_instructions.push(...item_instructions);
+    }
+    if (batch.length) batches.push(batch);
+    return batches;
 }
 
 export async function close_accounts(
@@ -1322,7 +1712,7 @@ export async function close_accounts(
             return {
                 pubkey: acc.pubkey,
                 programId: acc.programId,
-                data: AccountLayout.decode(acc.account.data)
+                data: decode_token_account(acc.account)
             };
         });
     const unsold_mints = await Promise.all(
@@ -1360,28 +1750,29 @@ export async function close_accounts(
     let failed_cnt = 0;
     const closed: { count: number; attempts: number; signature: String }[] = [];
     const failures: { count: number; attempts: number; error: string }[] = [];
-    for (const chunk of common.chunks(accounts_to_close, burn ? 7 : 15)) {
-        const instructions = chunk.flatMap((account) => {
-            const close = createCloseAccountInstruction(
+    const instructions_for = (account: (typeof accounts_to_close)[number]) => {
+        const close = createCloseAccountInstruction(
+            account.pubkey,
+            owner.publicKey,
+            owner.publicKey,
+            account.programId
+        );
+        if (!burn || account.data.amount === 0n || account.data.mint.equals(SOL_MINT)) return [close];
+        return [
+            createBurnInstruction(
                 account.pubkey,
+                account.data.mint,
                 owner.publicKey,
-                owner.publicKey,
-                undefined,
+                account.data.amount,
                 account.programId
-            );
-            if (!burn || account.data.amount === 0n || account.data.mint.equals(SOL_MINT)) return [close];
-            return [
-                createBurnInstruction(
-                    account.pubkey,
-                    account.data.mint,
-                    owner.publicKey,
-                    account.data.amount,
-                    [],
-                    account.programId
-                ),
-                close
-            ];
-        });
+            ),
+            close
+        ];
+    };
+    const batches = pack_tx_groups(accounts_to_close, instructions_for, owner.publicKey);
+    for (let batch_index = 0; batch_index < batches.length; batch_index++) {
+        const chunk = batches[batch_index];
+        const instructions = chunk.flatMap(instructions_for);
         for (let attempt = 0; attempt <= TRADE_RETRIES; attempt++) {
             try {
                 const signature = await send_tx(instructions, [owner], PriorityLevel.DEFAULT);
@@ -1389,7 +1780,22 @@ export async function close_accounts(
                 closed.push({ count: chunk.length, attempts: attempt + 1, signature });
                 break;
             } catch (err) {
-                if (attempt === TRADE_RETRIES) {
+                const instruction_failed =
+                    err instanceof TransactionSimulationError &&
+                    typeof err.transaction_error === 'object' &&
+                    err.transaction_error !== null &&
+                    'InstructionError' in err.transaction_error;
+                if (instruction_failed && chunk.length > 1) {
+                    const middle = Math.ceil(chunk.length / 2);
+                    batches.splice(batch_index, 1, chunk.slice(0, middle), chunk.slice(middle));
+                    batch_index--;
+                    break;
+                }
+                if (
+                    attempt === TRADE_RETRIES ||
+                    instruction_failed ||
+                    (err instanceof TransactionSubmissionError && err.outcome === 'unknown')
+                ) {
                     failed_cnt += chunk.length;
                     failures.push({ count: chunk.length, attempts: attempt + 1, error: String(err) });
                     break;
@@ -1436,14 +1842,14 @@ export function get_token_amount_by_percent(token_amount: TokenAmount, percent: 
     } as TokenAmount;
 }
 
-export async function create_lta(payer: Signer): Promise<[PublicKey, String]> {
+export async function create_lta(payer: Keypair): Promise<[PublicKey, String]> {
     const commitment: Commitment = 'finalized';
     let retries = TRADE_RETRIES;
 
     while (retries > 0) {
         try {
             const recent_slot = await global.CONNECTION.getSlot(commitment);
-            const [instruction, lt_address] = AddressLookupTableProgram.createLookupTable({
+            const [instruction, lt_address] = await AddressLookupTableProgram.createLookupTable({
                 authority: payer.publicKey,
                 payer: payer.publicKey,
                 recentSlot: recent_slot
@@ -1492,7 +1898,7 @@ export async function get_ltas(addresses: PublicKey[]): Promise<AddressLookupTab
     return results.filter((acc) => acc !== null);
 }
 
-export async function extend_lta(lta: PublicKey, payer: Signer, addresses: PublicKey[]): Promise<String[]> {
+export async function extend_lta(lta: PublicKey, payer: Keypair, addresses: PublicKey[]): Promise<String[]> {
     const max_addresses = 256;
     const lt_account = (await global.CONNECTION.getAddressLookupTable(lta, { commitment: COMMITMENT })).value;
     if (!lt_account) throw new Error('Address Lookup Table not found');
@@ -1517,7 +1923,7 @@ export async function extend_lta(lta: PublicKey, payer: Signer, addresses: Publi
     return await Promise.all(txs);
 }
 
-export async function close_ltas(payer: Signer, ltas: readonly AddressLookupTableAccount[]): Promise<String[]> {
+export async function close_ltas(payer: Keypair, ltas: readonly AddressLookupTableAccount[]): Promise<String[]> {
     const deactivated_ltas = ltas.filter((item) => !item.isActive());
 
     const instructions = deactivated_ltas.map((lta) =>
@@ -1555,7 +1961,7 @@ export async function get_ltas_by_authority(
 }
 
 export async function deactivate_ltas(
-    authority: Signer,
+    authority: Keypair,
     ltas: readonly AddressLookupTableAccount[]
 ): Promise<String[]> {
     const active_ltas = ltas.filter((item) => item.isActive());
@@ -1572,14 +1978,14 @@ export async function deactivate_ltas(
 }
 
 export async function generate_trade_lta(
-    funder: Signer,
+    funder: Keypair,
     wallets: Keypair[],
     mint: PublicKey
 ): Promise<AddressLookupTableAccount> {
     try {
         const [created_lt] = await create_lta(funder);
-        const token_atas = wallets.map((keypair) => calc_ata(keypair.publicKey, mint));
-        const wsol_atas = wallets.map((keypair) => calc_ata(keypair.publicKey, SOL_MINT));
+        const token_atas = await Promise.all(wallets.map((keypair) => calc_ata(keypair.publicKey, mint)));
+        const wsol_atas = await Promise.all(wallets.map((keypair) => calc_ata(keypair.publicKey, SOL_MINT)));
         const keys = [
             ...wallets.map((keypair) => keypair.publicKey),
             mint,
@@ -1596,9 +2002,9 @@ export async function generate_trade_lta(
     }
 }
 
-export async function burn_token(amount: TokenAmount, owner: Signer, mint: PublicKey): Promise<String> {
+export async function burn_token(amount: TokenAmount, owner: Keypair, mint: PublicKey): Promise<String> {
     if (amount.uiAmount === null) throw new Error(`Invalid token amount.`);
-    const ata = calc_ata(owner.publicKey, mint);
+    const ata = await calc_ata(owner.publicKey, mint);
     const instructions = [createBurnInstruction(ata, mint, owner.publicKey, BigInt(amount.amount))];
     return await send_tx(instructions, [owner]);
 }

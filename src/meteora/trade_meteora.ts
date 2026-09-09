@@ -5,7 +5,6 @@ import {
     Keypair,
     LAMPORTS_PER_SOL,
     PublicKey,
-    Signer,
     SystemProgram,
     TokenAmount,
     TransactionInstruction
@@ -36,16 +35,12 @@ import {
     createAssociatedTokenAccountIdempotentInstruction,
     createCloseAccountInstruction,
     createSyncNativeInstruction,
-    AccountLayout,
-    calculateFee,
-    ExtensionType,
-    getEpochFee,
-    getExtensionTypes,
+    decode_token_account,
+    decode_mint_account,
     getMint,
-    getTransferFeeConfig,
     TOKEN_2022_PROGRAM_ID,
     TOKEN_PROGRAM_ID
-} from '@solana/spl-token';
+} from '../common/token';
 import {
     bytes,
     define_decoder_struct,
@@ -350,7 +345,7 @@ export class Trader implements trade.IProgramTrader {
         return MeteoraMintMeta.deserialize(data);
     }
 
-    public async get_trader_fees(trader: Signer): Promise<MeteoraClaimableAsset[]> {
+    public async get_trader_fees(trader: Keypair): Promise<MeteoraClaimableAsset[]> {
         const pools = await trade.get_program_accounts_v2(METEORA_DBC_PROGRAM_ID, [
             { memcmp: { offset: DBCStateStruct.get_offset('creator'), bytes: trader.publicKey.toBase58() } },
             { memcmp: { offset: 0, bytes: base58.encode(METEORA_DBC_STATE_HEADER) } }
@@ -404,18 +399,18 @@ export class Trader implements trade.IProgramTrader {
     }
 
     public async claim_trader_fees(
-        trader: Signer,
+        trader: Keypair,
         assets: MeteoraClaimableAsset[],
         priority?: PriorityLevel
     ): Promise<String> {
         if (assets.length === 0) throw new Error(`No assets were provided`);
 
         const created_atas = new Set<string>();
-        const add_ata = (mint: PublicKey) => {
-            const ata = trade.calc_ata(trader.publicKey, mint);
+        const add_ata = async (mint: PublicKey) => {
+            const ata = await trade.calc_ata(trader.publicKey, mint);
             if (!created_atas.has(ata.toBase58())) {
                 instructions.push(
-                    createAssociatedTokenAccountIdempotentInstruction(trader.publicKey, ata, trader.publicKey, mint)
+                    createAssociatedTokenAccountIdempotentInstruction(trader, ata, trader.publicKey, mint)
                 );
                 created_atas.add(ata.toBase58());
             }
@@ -436,8 +431,8 @@ export class Trader implements trade.IProgramTrader {
                 const state = asset.damm_state;
                 const token_a_program = await this.get_token_program(state.token_a_mint);
                 const token_b_program = await this.get_token_program(state.token_b_mint);
-                const token_a_ata = trade.calc_ata(trader.publicKey, state.token_a_mint, token_a_program);
-                const token_b_ata = trade.calc_ata(trader.publicKey, state.token_b_mint, token_b_program);
+                const token_a_ata = await trade.calc_ata(trader.publicKey, state.token_a_mint, token_a_program);
+                const token_b_ata = await trade.calc_ata(trader.publicKey, state.token_b_mint, token_b_program);
                 for (const [mint, ata, program] of [
                     [state.token_a_mint, token_a_ata, token_a_program],
                     [state.token_b_mint, token_b_ata, token_b_program]
@@ -445,7 +440,7 @@ export class Trader implements trade.IProgramTrader {
                     if (!created_atas.has(ata.toBase58())) {
                         instructions.push(
                             createAssociatedTokenAccountIdempotentInstruction(
-                                trader.publicKey,
+                                trader,
                                 ata,
                                 trader.publicKey,
                                 mint,
@@ -455,11 +450,11 @@ export class Trader implements trade.IProgramTrader {
                         created_atas.add(ata.toBase58());
                     }
                 }
-                const [pool_authority] = PublicKey.findProgramAddressSync(
+                const [pool_authority] = await PublicKey.findProgramAddress(
                     [Buffer.from('pool_authority')],
                     METEORA_DAMM_V2_PROGRAM_ID
                 );
-                const [event_authority] = PublicKey.findProgramAddressSync(
+                const [event_authority] = await PublicKey.findProgramAddress(
                     [Buffer.from('__event_authority')],
                     METEORA_DAMM_V2_PROGRAM_ID
                 );
@@ -488,11 +483,11 @@ export class Trader implements trade.IProgramTrader {
                         })
                     );
                 } else if (asset.reward_index !== undefined && asset.token_program) {
-                    const reward_ata = trade.calc_ata(trader.publicKey, asset.mint, asset.token_program);
+                    const reward_ata = await trade.calc_ata(trader.publicKey, asset.mint, asset.token_program);
                     if (!created_atas.has(reward_ata.toBase58())) {
                         instructions.push(
                             createAssociatedTokenAccountIdempotentInstruction(
-                                trader.publicKey,
+                                trader,
                                 reward_ata,
                                 trader.publicKey,
                                 asset.mint,
@@ -530,8 +525,8 @@ export class Trader implements trade.IProgramTrader {
             const state = asset.state!;
             const config = asset.config!;
 
-            const base_ata = add_ata(state.base_mint);
-            const quote_ata = add_ata(config.quote_mint);
+            const base_ata = await add_ata(state.base_mint);
+            const quote_ata = await add_ata(config.quote_mint);
             const data = Buffer.alloc(24);
             Buffer.from(METEORA_DBC_CLAIM_CREATOR_FEE_DISCRIMINATOR).copy(data);
             data.writeBigUInt64LE(state.creator_base_fee, 8);
@@ -603,22 +598,24 @@ export class Trader implements trade.IProgramTrader {
         };
     }
 
-    private async get_damm_v2_position_rewards(trader: Signer): Promise<MeteoraClaimableAsset[]> {
+    private async get_damm_v2_position_rewards(trader: Keypair): Promise<MeteoraClaimableAsset[]> {
         const nft_accounts = await global.CONNECTION.getTokenAccountsByOwner(
             trader.publicKey,
             { programId: TOKEN_2022_PROGRAM_ID },
             COMMITMENT
         );
-        const positions = nft_accounts.value
-            .filter(({ account }) => AccountLayout.decode(account.data).amount === 1n)
-            .map(({ pubkey, account }) => {
-                const nft_mint = AccountLayout.decode(account.data).mint;
-                const [position] = PublicKey.findProgramAddressSync(
-                    [Buffer.from('position'), nft_mint.toBuffer()],
-                    METEORA_DAMM_V2_PROGRAM_ID
-                );
-                return { position, nft_account: pubkey };
-            });
+        const positions = await Promise.all(
+            nft_accounts.value
+                .filter(({ account }) => decode_token_account(account).amount === 1n)
+                .map(async ({ pubkey, account }) => {
+                    const nft_mint = decode_token_account(account).mint;
+                    const [position] = await PublicKey.findProgramAddress(
+                        [Buffer.from('position'), nft_mint.toBytes()],
+                        METEORA_DAMM_V2_PROGRAM_ID
+                    );
+                    return { position, nft_account: pubkey };
+                })
+        );
         if (positions.length === 0) return [];
 
         const position_infos = await global.CONNECTION.getMultipleAccountsInfo(
@@ -732,7 +729,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_token(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number,
         priority?: PriorityLevel,
@@ -753,7 +750,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async sell_token(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number,
         priority?: PriorityLevel,
@@ -774,7 +771,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_token_instructions(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -788,7 +785,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async sell_token_instructions(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -802,7 +799,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell_instructions(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<[TransactionInstruction[], TransactionInstruction[], AddressLookupTableAccount[]?]> {
@@ -834,7 +831,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell_bundle(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: MeteoraMintMeta,
         tip: number,
         slippage: number,
@@ -858,7 +855,7 @@ export class Trader implements trade.IProgramTrader {
 
     public async buy_sell(
         sol_amount: number,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number,
         interval_ms?: number,
@@ -910,12 +907,12 @@ export class Trader implements trade.IProgramTrader {
 
     public create_token(
         _mint: Keypair,
-        _creator: Signer,
+        _creator: Keypair,
         _token_name: string,
         _token_symbol: string,
         _meta_cid: string,
         _sol_amount?: number,
-        _traders?: [Signer, number][],
+        _traders?: [Keypair, number][],
         _bundle_tip?: number,
         _priority?: PriorityLevel
     ): Promise<String> {
@@ -951,10 +948,10 @@ export class Trader implements trade.IProgramTrader {
         let damm_sub: number | undefined;
         let stopped = false;
         let current_mint_meta = mint_meta;
-        let latest_slot = 0;
+        let latest_slot = 0n;
         let damm_started = false;
 
-        const publish = (update: MeteoraMintMeta, slot: number = 0) => {
+        const publish = (update: MeteoraMintMeta, slot: bigint = 0n) => {
             if (stopped || (slot && slot < latest_slot)) return;
             if (slot) latest_slot = slot;
             current_mint_meta = update;
@@ -963,7 +960,7 @@ export class Trader implements trade.IProgramTrader {
         const unsubscribe = (id: number | undefined) => {
             if (id !== undefined) global.CONNECTION.removeAccountChangeListener(id).catch(() => {});
         };
-        const subscribe_damm = (pool: trade.ProgramAccount, slot: number = 0) => {
+        const subscribe_damm = (pool: trade.ProgramAccount, slot: bigint = 0n) => {
             if (damm_started) return;
             damm_started = true;
             publish(this.damm_v2_mint_meta(current_mint_meta, pool, sol_price), slot);
@@ -985,7 +982,7 @@ export class Trader implements trade.IProgramTrader {
             subscribe_damm(damm);
         } else {
             const dbc_pool = new PublicKey(mint_meta.pool);
-            const process_dbc = async (account: AccountInfo<Buffer>, slot: number = 0) => {
+            const process_dbc = async (account: AccountInfo<Uint8Array>, slot: bigint = 0n) => {
                 if (stopped || (slot && slot < latest_slot)) return;
                 const state = DBCStateStruct.decode(account.data);
                 const metrics = this.get_dbc_token_metrics({
@@ -1290,11 +1287,14 @@ export class Trader implements trade.IProgramTrader {
         const mint_info = await global.CONNECTION.getAccountInfo(mint, COMMITMENT);
         if (!mint_info || (!mint_info.owner.equals(TOKEN_PROGRAM_ID) && !mint_info.owner.equals(TOKEN_2022_PROGRAM_ID)))
             throw new Error(`Unsupported token program for mint ${mint}.`);
-        if (
-            mint_info.owner.equals(TOKEN_2022_PROGRAM_ID) &&
-            getExtensionTypes(mint_info.data).includes(ExtensionType.TransferHook)
-        )
-            throw new Error('Meteora transfer-hook tokens are not supported.');
+        if (mint_info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            const { extensions } = decode_mint_account(mint_info);
+            if (
+                extensions.__option === 'Some' &&
+                extensions.value.some((extension) => extension.__kind === 'TransferHook')
+            )
+                throw new Error('Meteora transfer-hook tokens are not supported.');
+        }
         return mint_info.owner;
     }
 
@@ -1302,7 +1302,7 @@ export class Trader implements trade.IProgramTrader {
         amount_in: bigint,
         input_is_token_a: boolean,
         state: ReturnType<typeof DAMMV2StateStruct.decode>,
-        slot: number
+        slot: bigint
     ) {
         this.validate_damm_v2_state(state);
         const current_point =
@@ -1320,12 +1320,21 @@ export class Trader implements trade.IProgramTrader {
         mint: PublicKey,
         program: PublicKey,
         amount: bigint,
-        epoch: number
+        epoch: bigint
     ): Promise<bigint> {
         if (!program.equals(TOKEN_2022_PROGRAM_ID) || amount === 0n) return 0n;
-        const transfer_fee_config = getTransferFeeConfig(await getMint(global.CONNECTION, mint, COMMITMENT, program));
+        const { extensions } = await getMint(global.CONNECTION, mint, COMMITMENT, program);
+        const transfer_fee_config =
+            extensions.__option === 'Some'
+                ? extensions.value.find((extension) => extension.__kind === 'TransferFeeConfig')
+                : undefined;
         if (!transfer_fee_config) return 0n;
-        return calculateFee(getEpochFee(transfer_fee_config, BigInt(epoch)), amount);
+        const fee =
+            epoch >= transfer_fee_config.newerTransferFee.epoch
+                ? transfer_fee_config.newerTransferFee
+                : transfer_fee_config.olderTransferFee;
+        const calculated = (amount * BigInt(fee.transferFeeBasisPoints) + 9999n) / 10000n;
+        return calculated > fee.maximumFee ? fee.maximumFee : calculated;
     }
 
     private damm_v2_swap_data(amount_in: bigint, minimum_amount_out: bigint): Buffer {
@@ -1348,7 +1357,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async get_buy_dbc_instructions(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
@@ -1369,18 +1378,12 @@ export class Trader implements trade.IProgramTrader {
 
         const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw);
         const token_program = await this.get_token_program(mint);
-        const token_ata = trade.calc_ata(buyer.publicKey, mint, token_program);
-        const wsol_ata = trade.calc_ata(buyer.publicKey, SOL_MINT);
+        const token_ata = await trade.calc_ata(buyer.publicKey, mint, token_program);
+        const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 
         return [
-            createAssociatedTokenAccountIdempotentInstruction(
-                buyer.publicKey,
-                token_ata,
-                buyer.publicKey,
-                mint,
-                token_program
-            ),
-            createAssociatedTokenAccountIdempotentInstruction(buyer.publicKey, wsol_ata, buyer.publicKey, SOL_MINT),
+            createAssociatedTokenAccountIdempotentInstruction(buyer, token_ata, buyer.publicKey, mint, token_program),
+            createAssociatedTokenAccountIdempotentInstruction(buyer, wsol_ata, buyer.publicKey, SOL_MINT),
             SystemProgram.transfer({
                 fromPubkey: buyer.publicKey,
                 toPubkey: wsol_ata,
@@ -1414,7 +1417,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async get_sell_dbc_instructions(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: Partial<MeteoraMintMeta>,
         slippage: number = 0.05
     ): Promise<TransactionInstruction[]> {
@@ -1436,11 +1439,11 @@ export class Trader implements trade.IProgramTrader {
 
         const instruction_data = this.swap_data(token_amount_raw, sol_amount_raw);
         const token_program = await this.get_token_program(mint);
-        const token_ata = trade.calc_ata(seller.publicKey, mint, token_program);
-        const wsol_ata = trade.calc_ata(seller.publicKey, SOL_MINT);
+        const token_ata = await trade.calc_ata(seller.publicKey, mint, token_program);
+        const wsol_ata = await trade.calc_ata(seller.publicKey, SOL_MINT);
 
         return [
-            createAssociatedTokenAccountIdempotentInstruction(seller.publicKey, wsol_ata, seller.publicKey, SOL_MINT),
+            createAssociatedTokenAccountIdempotentInstruction(seller, wsol_ata, seller.publicKey, SOL_MINT),
             new TransactionInstruction({
                 keys: [
                     { pubkey: METEORA_DBC_POOL_AUTHORITY, isSigner: false, isWritable: false },
@@ -1468,7 +1471,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async get_buy_damm_v2_instructions(
         sol_amount: number,
-        buyer: Signer,
+        buyer: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<TransactionInstruction[]> {
@@ -1484,7 +1487,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async get_sell_damm_v2_instructions(
         token_amount: TokenAmount,
-        seller: Signer,
+        seller: Keypair,
         mint_meta: MeteoraMintMeta,
         slippage: number
     ): Promise<TransactionInstruction[]> {
@@ -1496,7 +1499,7 @@ export class Trader implements trade.IProgramTrader {
 
     private async get_damm_v2_swap_instructions(
         amount_in: bigint,
-        trader: Signer,
+        trader: Keypair,
         mint_meta: MeteoraMintMeta,
         buy: boolean,
         slippage: number
@@ -1517,12 +1520,12 @@ export class Trader implements trade.IProgramTrader {
         if (!state.token_a_mint.equals(output_mint) && !state.token_b_mint.equals(output_mint))
             throw new Error('DAMM v2 pool does not contain the output mint.');
         const input_is_token_a = state.token_a_mint.equals(input_mint);
-        const input_ata = trade.calc_ata(trader.publicKey, input_mint, input_program);
-        const output_ata = trade.calc_ata(trader.publicKey, output_mint, output_program);
+        const input_ata = await trade.calc_ata(trader.publicKey, input_mint, input_program);
+        const output_ata = await trade.calc_ata(trader.publicKey, output_mint, output_program);
         const epoch =
             input_program.equals(TOKEN_2022_PROGRAM_ID) || output_program.equals(TOKEN_2022_PROGRAM_ID)
                 ? (await global.CONNECTION.getEpochInfo(COMMITMENT)).epoch
-                : 0;
+                : 0n;
         const actual_amount_in =
             amount_in - (await this.get_damm_v2_transfer_fee(input_mint, input_program, amount_in, epoch));
         const quote = await this.quote_damm_v2_exact_in(
@@ -1535,24 +1538,24 @@ export class Trader implements trade.IProgramTrader {
             quote.output_amount -
             (await this.get_damm_v2_transfer_fee(output_mint, output_program, quote.output_amount, epoch));
         const minimum_amount_out = this.calc_slippage_down(output_amount, slippage);
-        const [pool_authority] = PublicKey.findProgramAddressSync(
+        const [pool_authority] = await PublicKey.findProgramAddress(
             [Buffer.from('pool_authority')],
             METEORA_DAMM_V2_PROGRAM_ID
         );
-        const [event_authority] = PublicKey.findProgramAddressSync(
+        const [event_authority] = await PublicKey.findProgramAddress(
             [Buffer.from('__event_authority')],
             METEORA_DAMM_V2_PROGRAM_ID
         );
         const instructions: TransactionInstruction[] = [
             createAssociatedTokenAccountIdempotentInstruction(
-                trader.publicKey,
+                trader,
                 output_ata,
                 trader.publicKey,
                 output_mint,
                 output_program
             ),
             createAssociatedTokenAccountIdempotentInstruction(
-                trader.publicKey,
+                trader,
                 input_ata,
                 trader.publicKey,
                 input_mint,

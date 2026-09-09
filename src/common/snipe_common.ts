@@ -63,6 +63,7 @@ export type WorkerConfig = {
     mev_protect: boolean;
     priority_level: PriorityLevel;
     transaction_relay: TransactionRelay;
+    transaction_version: 0 | 1;
     rpc_rate_limit_state: SharedArrayBuffer;
 };
 
@@ -521,6 +522,7 @@ export abstract class SniperBase implements ISniper {
                 protection_tip: this.bot_config.protection_tip,
                 mev_protect: this.bot_config.mev_protect,
                 transaction_relay: global.TRANSACTION_RELAY,
+                transaction_version: global.TRANSACTION_VERSION,
                 rpc_rate_limit_state: this.rpc_rate_limit_state
             };
 

@@ -21,8 +21,9 @@
         "typescript": "^7.0.2"
     },
     "dependencies": {
-        "@solana/spl-token": "^0.4.15",
-        "@solana/web3.js": "^1.99.0",
+        "@solana-program/token": "^0.16.1",
+        "@solana-program/token-2022": "^0.16.1",
+        "@solana/web3.js": "3.0.0-rc.3",
         "bs58": "^6.0.0",
         "commander": "^15.0.0",
         "csv-parse": "^7.0.2",

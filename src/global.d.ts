@@ -9,6 +9,7 @@ declare global {
     var NO_COLORS: boolean;
     var PROGRAM: Program;
     var TRANSACTION_RELAY: TransactionRelay;
+    var TRANSACTION_VERSION: 0 | 1;
     var PRIORITY_FEE: number | undefined;
 }
 
