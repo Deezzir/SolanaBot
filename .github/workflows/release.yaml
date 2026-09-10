@@ -1,0 +1,54 @@
+name: Release
+
+on:
+    push:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    checks:
+        uses: ./.github/workflows/check.yaml
+
+    release:
+        name: Publish release
+        needs: checks
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            id-token: write
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v7.0.1
+            - name: Set up Node.js
+              uses: actions/setup-node@v7.0.0
+              with:
+                  node-version: '24'
+                  registry-url: https://registry.npmjs.org
+                  package-manager-cache: false
+            - name: Publish npm package
+              env:
+                  VERSION: ${{ needs.checks.outputs.version }}
+              run: |
+                  name=$(node -p "require('./package.json').name")
+                  if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+                    echo "Package ${name}@${VERSION} already exists."
+                  else
+                    npm publish --access public
+                  fi
+            - name: Create tag and GitHub release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  VERSION: ${{ needs.checks.outputs.version }}
+              run: |
+                  tag="v${VERSION}"
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                    echo "Release $tag already exists."
+                  else
+                    gh release create "$tag" \
+                      --target "$GITHUB_SHA" \
+                      --title "$tag" \
+                      --generate-notes
+                  fi

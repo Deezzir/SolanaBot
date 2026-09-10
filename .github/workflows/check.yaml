@@ -1,0 +1,60 @@
+name: Check
+
+on:
+    pull_request:
+        branches: [main]
+    workflow_call:
+        outputs:
+            version:
+                description: Validated package version
+                value: ${{ jobs.check.outputs.version }}
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        name: Checks
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v7.0.1
+              with:
+                  fetch-depth: 0
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2.2.0
+              with:
+                  bun-version-file: package.json
+            - name: Validate version bump
+              id: version
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+              run: |
+                  bun - <<'BUN'
+                  import { semver } from 'bun';
+                  import { appendFileSync, readFileSync } from 'node:fs';
+                  import { execFileSync } from 'node:child_process';
+
+                  const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+                  const base = JSON.parse(execFileSync('git', ['show', `${process.env.BASE_SHA}:package.json`], { encoding: 'utf8' }));
+                  if (typeof version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version))
+                    throw new Error('package.json version must be a stable major.minor.patch version.');
+                  if (semver.order(version, base.version) <= 0)
+                    throw new Error(`Bump package.json version above ${base.version} before merging.`);
+                  if (process.env.GITHUB_EVENT_NAME === 'pull_request' &&
+                      execFileSync('git', ['tag', '--list', `v${version}`], { encoding: 'utf8' }).trim())
+                    throw new Error(`Tag v${version} already exists. Choose a new version.`);
+
+                  appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+                  console.log(`Release version: ${base.version} -> ${version}`);
+                  BUN
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+            - name: Check formatting
+              run: bun run lint
+            - name: Check types
+              run: bun run typecheck
+            - name: Run tests
+              run: bun run test

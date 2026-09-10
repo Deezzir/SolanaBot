@@ -182,8 +182,8 @@ export abstract class SniperBase implements ISniper {
     ): { name: string; symbol: string; misc?: object } | null;
     protected abstract is_create_tx(logs: string[]): boolean;
 
-    private get_worker_path(): string {
-        return './src/common/snipe_worker.ts';
+    private get_worker_path(): URL {
+        return new URL('./snipe_worker.ts', import.meta.url);
     }
 
     private async wait_create_unsubscribe(): Promise<void> {

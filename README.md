@@ -20,6 +20,7 @@
 
     ```shell
     HELIUS_API_KEY=
+    PINATA_IPFS_JWT=
     ```
 
 4. Run the project
@@ -76,6 +77,18 @@
     ```
 
 > ⚠️ Help is available for each command. Use `bot <command> -h` to see the options for that command.
+
+## Run with bunx
+
+Bun can install and run the CLI without cloning the repository:
+
+```shell
+bunx solana-bot balance
+bunx solana-bot generate keys.csv --help
+bunx solana-bot --version
+```
+
+Run from the directory containing your `.env` and wallet CSV. The current CLI requires both environment variables shown above at startup.
 
 ## Transaction versions
 

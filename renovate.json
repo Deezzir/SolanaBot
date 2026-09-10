@@ -1,6 +1,13 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ]
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": ["config:recommended"],
+    "automerge": false,
+    "reviewers": ["Deezzir"],
+    "bumpVersions": [
+        {
+            "filePatterns": ["package.json"],
+            "matchStrings": ["\"version\":\\s*\"(?<version>[^\"]+)\""],
+            "bumpType": "patch"
+        }
+    ]
 }
