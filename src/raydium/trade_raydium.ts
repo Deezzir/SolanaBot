@@ -24,9 +24,11 @@ import {
     RAYDIUM_CPMM_POOL_STATE_HEADER,
     RAYDIUM_CPMM_PROGRAM_ID,
     RAYDIUM_CPMM_SWAP_DISCRIMINATOR,
+    RAYDIUM_CPMM_SWAP_EXACT_OUT_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_AUTHORITY,
     RAYDIUM_LAUNCHPAD_API_URL,
     RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR,
+    RAYDIUM_LAUNCHPAD_BUY_EXACT_OUT_DISCRIMINATOR,
     RAYDIUM_LAUNCHPAD_EVENT_AUTHORITY,
     RAYDIUM_LAUNCHPAD_GLOBAL_CONFIG,
     RAYDIUM_LAUNCHPAD_PLATFORM_CONFIG,
@@ -440,7 +442,10 @@ export class RaydiumTrader implements trade.IProgramTrader {
         trade.validate_trade_parameters(sol_amount, slippage);
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
-        let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
+        const buy_instructions = mint_meta.complete
+            ? await this.get_buy_cpmm_instructions(sol_amount, trader, mint_meta, slippage, token_amount_raw)
+            : await this.get_buy_instructions(sol_amount, trader, mint_meta, slippage, token_amount_raw);
+        const lta = await trade.get_ltas([RAYDIUM_LTA_ACCOUNT]);
         let [sell_instructions] = await this.sell_token_instructions(
             {
                 uiAmount: Number(token_amount_raw) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS,
@@ -753,7 +758,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             string(symbol),
             string(uri),
             curve,
-            Buffer.alloc(25) // Zero vesting amounts followed by cpmmCreatorFeeOn = OnlyTokenB (0).
+            Buffer.alloc(25)
         ]);
     }
 
@@ -1110,11 +1115,23 @@ export class RaydiumTrader implements trade.IProgramTrader {
         return user_volume_accumulator;
     }
 
+    private buy_exact_out_data(sol_amount: bigint, token_amount: bigint, slippage: number, cpmm: boolean): Buffer {
+        const max_sol_amount = this.calc_slippage_up(sol_amount, slippage);
+        const data = Buffer.alloc(cpmm ? 24 : 32);
+        Buffer.from(
+            cpmm ? RAYDIUM_CPMM_SWAP_EXACT_OUT_DISCRIMINATOR : RAYDIUM_LAUNCHPAD_BUY_EXACT_OUT_DISCRIMINATOR
+        ).copy(data);
+        data.writeBigUInt64LE(cpmm ? max_sol_amount : token_amount, 8);
+        data.writeBigUInt64LE(cpmm ? token_amount : max_sol_amount, 16);
+        return data;
+    }
+
     protected async get_buy_instructions(
         sol_amount: number,
         buyer: Keypair,
         mint_meta: Partial<RaydiumMintMeta>,
-        slippage: number = 0.05
+        slippage: number = 0.05,
+        exact_out_amount?: bigint
     ): Promise<TransactionInstruction[]> {
         if (
             !mint_meta.mint ||
@@ -1144,7 +1161,10 @@ export class RaydiumTrader implements trade.IProgramTrader {
             this.calc_token_amount_raw(sol_amount_raw, mint_meta),
             slippage
         );
-        const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw, 'buy');
+        const instruction_data =
+            exact_out_amount === undefined
+                ? this.swap_data(sol_amount_raw, token_amount_raw, 'buy')
+                : this.buy_exact_out_data(sol_amount_raw, exact_out_amount, slippage, false);
 
         return [
             createAssociatedTokenAccountIdempotentInstruction(buyer, token_ata, buyer.publicKey, mint),
@@ -1251,7 +1271,8 @@ export class RaydiumTrader implements trade.IProgramTrader {
         sol_amount: number,
         buyer: Keypair,
         mint_meta: RaydiumMintMeta,
-        slippage: number = 0.05
+        slippage: number = 0.05,
+        exact_out_amount?: bigint
     ): Promise<TransactionInstruction[]> {
         if (
             !mint_meta.mint ||
@@ -1276,7 +1297,10 @@ export class RaydiumTrader implements trade.IProgramTrader {
             slippage
         );
 
-        const instruction_data = this.swap_cpmm_data(sol_amount_raw, token_amount_raw);
+        const instruction_data =
+            exact_out_amount === undefined
+                ? this.swap_cpmm_data(sol_amount_raw, token_amount_raw)
+                : this.buy_exact_out_data(sol_amount_raw, exact_out_amount, slippage, true);
         const token_ata = await trade.calc_ata(buyer.publicKey, mint, mint_meta.token_program);
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 

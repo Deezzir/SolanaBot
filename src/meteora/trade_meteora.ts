@@ -35,6 +35,7 @@ import {
     METEORA_DBC_STATE_HEADER,
     METEORA_LTA_ACCOUNT,
     METEORA_SWAP_DISCRIMINATOR,
+    METEORA_SWAP2_DISCRIMINATOR,
     PriorityLevel,
     SOL_MINT,
     TOKEN_METADATA_MAX_BYTES,
@@ -422,13 +423,11 @@ export class Trader implements trade.IProgramTrader {
 
                 const config_info = await global.CONNECTION.getAccountInfo(state.config, COMMITMENT);
                 if (!config_info) {
-                    // common.warn('DBC configuration account is missing.');
                     return [];
                 }
 
                 const config = DBCConfigStruct.decode(config_info.data);
                 if (config.token_type !== 0 || config.quote_token_flag !== 0) {
-                    // common.warn('DBC Token-2022 or transfer-hook creator-fee claims are not supported.');
                     return [];
                 }
                 const claimable: MeteoraClaimableAsset[] = [];
@@ -875,13 +874,27 @@ export class Trader implements trade.IProgramTrader {
         let lta: AddressLookupTableAccount[] | undefined;
         let token_amount_raw: bigint;
         if (mint_meta.migrated) {
-            const result = await this.get_damm_v2_swap_instructions(sol_amount_raw, trader, mint_meta, true, slippage);
+            const result = await this.get_damm_v2_swap_instructions(
+                sol_amount_raw,
+                trader,
+                mint_meta,
+                true,
+                slippage,
+                true
+            );
             buy_instructions = result.instructions;
             token_amount_raw = result.output_amount;
             lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         } else {
-            [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
             token_amount_raw = this.calc_dbc_token_amount_raw(sol_amount_raw, mint_meta.dbc_data!);
+            buy_instructions = await this.get_buy_dbc_instructions(
+                sol_amount,
+                trader,
+                mint_meta,
+                slippage,
+                token_amount_raw
+            );
+            lta = await trade.get_ltas([METEORA_LTA_ACCOUNT]);
         }
         let [sell_instructions] = await this.sell_token_instructions(
             {
@@ -1030,7 +1043,6 @@ export class Trader implements trade.IProgramTrader {
             );
 
         if (sol_amount > 0) mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        // Only a swap in the pool-creation transaction qualifies for the first-swap discount.
         mint_meta.dbc_data!.creation!.first_swap = false;
         const buy_instructions: TransactionInstruction[][] = [];
         const bundle_signers: Keypair[][] = [];
@@ -1391,7 +1403,6 @@ export class Trader implements trade.IProgramTrader {
                 const lower = a > b ? b : a;
                 return (((upper * ONE_Q64) / lower - ONE_Q64) / METEORA_DBC_PARAMS.bin_step_u128) * 2n;
             };
-            // Creation and its bundle execute in one slot, so only the initial reference reset applies.
             if (!creation.has_swap_timestamp || config.filter_period === 0)
                 creation.sqrt_price_reference = info.sqrt_price;
             const reference =
@@ -1780,11 +1791,21 @@ export class Trader implements trade.IProgramTrader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf]);
     }
 
+    private swap_exact_out_data(amount_out: bigint, maximum_amount_in: bigint): Buffer {
+        const data = Buffer.alloc(25);
+        Buffer.from(METEORA_SWAP2_DISCRIMINATOR).copy(data);
+        data.writeBigUInt64LE(amount_out, 8);
+        data.writeBigUInt64LE(maximum_amount_in, 16);
+        data.writeUInt8(2, 24);
+        return data;
+    }
+
     private async get_buy_dbc_instructions(
         sol_amount: number,
         buyer: Keypair,
         mint_meta: Partial<MeteoraMintMeta>,
-        slippage: number = 0.05
+        slippage: number = 0.05,
+        exact_out_amount?: bigint
     ): Promise<TransactionInstruction[]> {
         if (!mint_meta.mint || !mint_meta.dbc_data || !mint_meta.pool)
             throw new Error(`Incomplete mint meta data for buy instructions.`);
@@ -1807,7 +1828,10 @@ export class Trader implements trade.IProgramTrader {
             slippage
         );
 
-        const instruction_data = this.swap_data(sol_amount_raw, token_amount_raw);
+        const instruction_data =
+            exact_out_amount === undefined
+                ? this.swap_data(sol_amount_raw, token_amount_raw)
+                : this.swap_exact_out_data(exact_out_amount, this.calc_slippage_up(sol_amount_raw, slippage));
         const token_program = mint_meta.dbc_data.creation
             ? new PublicKey(mint_meta.token_program_id!)
             : await this.get_token_program(mint);
@@ -1938,7 +1962,8 @@ export class Trader implements trade.IProgramTrader {
         trader: Keypair,
         mint_meta: MeteoraMintMeta,
         buy: boolean,
-        slippage: number
+        slippage: number,
+        exact_out: boolean = false
     ): Promise<{ instructions: TransactionInstruction[]; output_amount: bigint }> {
         if (!mint_meta.pool || !mint_meta.damm_v2_data) throw new Error('Incomplete DAMM v2 pool data.');
         if (amount_in <= 0n) throw new RangeError('DAMM v2 swap amount must be positive.');
@@ -1974,6 +1999,7 @@ export class Trader implements trade.IProgramTrader {
             quote.output_amount -
             (await this.get_damm_v2_transfer_fee(output_mint, output_program, quote.output_amount, epoch));
         const minimum_amount_out = this.calc_slippage_down(output_amount, slippage);
+        const maximum_amount_in = exact_out ? this.calc_slippage_up(amount_in, slippage) : amount_in;
         const [pool_authority] = await PublicKey.findProgramAddress(
             [Buffer.from('pool_authority')],
             METEORA_DAMM_V2_PROGRAM_ID
@@ -2000,7 +2026,11 @@ export class Trader implements trade.IProgramTrader {
         ];
         if (buy) {
             instructions.push(
-                SystemProgram.transfer({ fromPubkey: trader.publicKey, toPubkey: input_ata, lamports: amount_in }),
+                SystemProgram.transfer({
+                    fromPubkey: trader.publicKey,
+                    toPubkey: input_ata,
+                    lamports: maximum_amount_in
+                }),
                 createSyncNativeInstruction(input_ata)
             );
         }
@@ -2031,7 +2061,9 @@ export class Trader implements trade.IProgramTrader {
                     { pubkey: METEORA_DAMM_V2_PROGRAM_ID, isSigner: false, isWritable: false }
                 ],
                 programId: METEORA_DAMM_V2_PROGRAM_ID,
-                data: this.damm_v2_swap_data(amount_in, minimum_amount_out)
+                data: exact_out
+                    ? this.swap_exact_out_data(output_amount, maximum_amount_in)
+                    : this.damm_v2_swap_data(amount_in, minimum_amount_out)
             }),
             createCloseAccountInstruction(buy ? input_ata : output_ata, trader.publicKey, trader.publicKey)
         );

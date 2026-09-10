@@ -43,6 +43,7 @@ import {
     PUMP_BUY_V2_DISCRIMINATOR,
     PUMP_SELL_V2_DISCRIMINATOR,
     PUMP_AMM_BUY_EXACT_QUOTE_IN_DISCRIMINATOR,
+    PUMP_AMM_BUY_EXACT_OUT_DISCRIMINATOR,
     PUMP_SELL_DISCRIMINATOR,
     PUMP_SWAP_PERCENTAGE,
     PriorityLevel,
@@ -626,7 +627,10 @@ export class Trader implements trade.IProgramTrader {
         trade.validate_trade_parameters(sol_amount, slippage);
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
         const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
-        let [buy_instructions, lta] = await this.buy_token_instructions(sol_amount, trader, mint_meta, slippage);
+        const buy_instructions = this.get_amm(mint_meta)
+            ? await this.get_buy_amm_instructions(sol_amount, trader, mint_meta, slippage, token_amount_raw)
+            : await this.get_buy_instructions(sol_amount, trader, mint_meta, slippage);
+        const lta = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
         let [sell_instructions] = await this.sell_token_instructions(
             {
                 uiAmount: Number(token_amount_raw) / 10 ** PUMP_TOKEN_DECIMALS,
@@ -1239,6 +1243,14 @@ export class Trader implements trade.IProgramTrader {
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf, Buffer.from([0])]);
     }
 
+    private amm_buy_exact_out_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
+        const data = Buffer.alloc(25);
+        Buffer.from(PUMP_AMM_BUY_EXACT_OUT_DISCRIMINATOR).copy(data);
+        data.writeBigUInt64LE(token_amount_raw, 8);
+        data.writeBigUInt64LE(this.calc_slippage_up(sol_amount_raw, slippage), 16);
+        return data;
+    }
+
     private amm_sell_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from(PUMP_SELL_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
@@ -1684,7 +1696,8 @@ export class Trader implements trade.IProgramTrader {
         sol_amount: number,
         buyer: Keypair,
         mint_meta: Partial<PumpMintMeta>,
-        slippage: number = 0.05
+        slippage: number = 0.05,
+        exact_out_amount?: bigint
     ): Promise<TransactionInstruction[]> {
         if (
             !mint_meta.mint ||
@@ -1707,8 +1720,11 @@ export class Trader implements trade.IProgramTrader {
         const assoc_bonding_curve = new PublicKey(mint_meta.quote_vault);
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
 
-        const token_amount_raw = this.calc_token_amount_raw(sol_amount_raw, mint_meta);
-        const instruction_data = this.amm_buy_exact_quote_in_data(sol_amount_raw, token_amount_raw, slippage);
+        const token_amount_raw = exact_out_amount ?? this.calc_token_amount_raw(sol_amount_raw, mint_meta);
+        const instruction_data =
+            exact_out_amount === undefined
+                ? this.amm_buy_exact_quote_in_data(sol_amount_raw, token_amount_raw, slippage)
+                : this.amm_buy_exact_out_data(sol_amount_raw, token_amount_raw, slippage);
         const token_ata = await trade.calc_ata(buyer.publicKey, mint, token_program);
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
         const wsol_user_accumulator_ata = await trade.calc_ata(user_volume_accumulator, SOL_MINT);

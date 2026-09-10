@@ -13,6 +13,7 @@ import {
 } from '@solana-program/token';
 import {
     TOKEN_2022_PROGRAM_ADDRESS,
+    getHarvestWithheldTokensToMintInstruction,
     getMintDecoder as getMint2022Decoder,
     getTokenDecoder as getToken2022Decoder
 } from '@solana-program/token-2022';
@@ -83,6 +84,18 @@ export function createCloseAccountInstruction(
             { programAddress: program.toBase58() }
         ),
         owner
+    );
+}
+
+export function createHarvestWithheldTokensToMintInstruction(
+    mint: PublicKey,
+    sources: PublicKey[]
+): TransactionInstruction {
+    return instruction(
+        getHarvestWithheldTokensToMintInstruction({
+            mint: mint.toBase58(),
+            sources: sources.map((source) => source.toBase58())
+        })
     );
 }
 

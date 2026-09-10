@@ -250,11 +250,10 @@ async function main() {
         .description('Start the volume bot')
         .option('-s, --simulate', 'Simulate the volume', false)
         .addOption(get_json_config_option())
-        .hook('preAction', () => reserve_wallet_check(wallets))
         .action(async (options: any) => {
             const { config, simulate } = options;
             const funder = common.get_reserve_wallet(wallets);
-            await commands.start_volume(funder!.keypair, simulate, config);
+            await commands.start_volume(funder?.keypair, simulate, config, wallets);
         });
 
     program

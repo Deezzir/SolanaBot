@@ -1146,24 +1146,30 @@ export async function wallet_pnl(public_key: PublicKey): Promise<void> {
     common.log(`Total PnL: ${accent(total_pnl.toFixed(2) + '%')}\n`);
 }
 
-export async function start_volume(funder: Keypair, simulate: boolean = false, json_config?: object): Promise<void> {
+export async function start_volume(
+    funder: Keypair | undefined,
+    simulate: boolean = false,
+    json_config?: object,
+    wallets: common.Wallet[] = []
+): Promise<void> {
     const trader = get_trader();
     const volume_config = await volume.setup_config(json_config);
     const volume_type_name = volume.VolumeType[volume_config.type];
+    const natural = volume_config.type === volume.VolumeType.Natural;
+    if (!natural && !funder) throw new Error('Fast and Bump volume require a reserve wallet.');
 
     if (simulate) {
         const sol_price = await common.fetch_sol_price();
-        const funder_balance = (await trade.get_balance(funder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
         common.log(common.yellow(`Simulating the ${volume_type_name} Volume Bot...\n`));
-        const results = await volume.simulate(sol_price, volume_config, trader);
-
-        if (volume_config.type === volume.VolumeType.Natural)
-            common.log(common.red('Natural Volume simulation results may differ from the actual results\n'));
+        const results = await volume.simulate(sol_price, volume_config, trader, wallets);
 
         common.log(common.bold('Simulation Results:'));
         common.log(`SOL price: $${common.format_currency(sol_price)}`);
         common.log(`Total SOL utilization: ${common.format_currency(results.total_sol_utilization)}`);
-        common.log(`Post Funder balance: ${common.format_currency(funder_balance - results.total_fee_sol)}`);
+        if (funder && !natural) {
+            const funder_balance = (await trade.get_balance(funder.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
+            common.log(`Post Funder balance: ${common.format_currency(funder_balance - results.total_fee_sol)}`);
+        }
         let accent = common.red;
         common.log(
             `\nTotal spent on fees: ${accent('$' + common.format_currency(results.total_fee_usd))} | ${accent(common.format_currency(results.total_fee_sol) + 'SOL')}`
@@ -1180,22 +1186,24 @@ export async function start_volume(funder: Keypair, simulate: boolean = false, j
     let rescue_wallets: common.Wallet[] = [];
     switch (volume_config.type) {
         case volume.VolumeType.Fast: {
-            rescue_wallets = await volume.execute_fast(funder, volume_config, trader);
+            rescue_wallets = await volume.execute_fast(funder!, volume_config, trader);
             break;
         }
         case volume.VolumeType.Natural: {
-            await volume.execute_natural(volume_config, trader);
+            await volume.execute_natural(wallets, volume_config, trader);
             break;
         }
         case volume.VolumeType.Bump: {
-            await volume.execute_bump(volume_config, trader);
+            rescue_wallets = await volume.execute_bump(funder!, volume_config, trader);
             break;
         }
         default:
             throw new Error('Invalid Volume Bot type.');
     }
-    common.log(`\nPerforming cleanup of the temporary wallets...\n`);
-    await collect(rescue_wallets, funder.publicKey);
+    if (rescue_wallets.length && funder) {
+        common.log(`\nPerforming cleanup of the temporary wallets...\n`);
+        await collect(rescue_wallets, funder.publicKey);
+    }
 }
 
 export async function benchmark(

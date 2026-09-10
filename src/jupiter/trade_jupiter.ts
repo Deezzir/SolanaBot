@@ -246,8 +246,21 @@ export class Trader implements trade.IProgramTrader {
         const sol_token_amount = trade.get_sol_token_amount(sol_amount);
         const mint = new PublicKey(mint_meta.mint);
         const quote = await this.quote_jupiter(sol_token_amount, SOL_MINT, mint, slippage);
-        let [buy_instructions, ltas] = await this.swap_jupiter_instructions(trader, quote);
-        let [sell_instructions] = await this.sell_token_instructions(
+        const exact_out_quote = await this.quote_jupiter(
+            { amount: quote.outAmount, decimals: TRADE_DEFAULT_TOKEN_DECIMALS, uiAmount: null },
+            SOL_MINT,
+            mint,
+            slippage,
+            'ExactOut'
+        );
+        if (exact_out_quote.swapMode !== 'ExactOut' || exact_out_quote.outAmount !== quote.outAmount)
+            throw new Error('Jupiter did not return the requested exact-output buy quote.');
+        const amount = BigInt(sol_token_amount.amount);
+        const max_amount = amount + (amount * BigInt(Math.floor(slippage * 10000))) / 10000n;
+        if (BigInt(exact_out_quote.otherAmountThreshold) > max_amount)
+            throw new Error('Jupiter exact-output buy exceeds the SOL budget.');
+        let [buy_instructions, ltas] = await this.swap_jupiter_instructions(trader, exact_out_quote);
+        let [sell_instructions, sell_ltas] = await this.sell_token_instructions(
             {
                 uiAmount: Number(quote.outAmount) / 10 ** TRADE_DEFAULT_TOKEN_DECIMALS,
                 amount: quote.outAmount,
@@ -258,7 +271,7 @@ export class Trader implements trade.IProgramTrader {
             slippage
         );
 
-        return [buy_instructions, sell_instructions, ltas];
+        return [buy_instructions, sell_instructions, [...ltas, ...(sell_ltas ?? [])]];
     }
 
     public async buy_sell(
@@ -439,13 +452,15 @@ export class Trader implements trade.IProgramTrader {
         amount: TokenAmount,
         from: PublicKey,
         to: PublicKey,
-        slippage: number = 0.05
+        slippage: number = 0.05,
+        swap_mode: 'ExactIn' | 'ExactOut' = 'ExactIn'
     ): Promise<JupiterQuote> {
         trade.validate_trade_parameters(amount, slippage);
         const params = new URLSearchParams({
             inputMint: from.toBase58(),
             outputMint: to.toBase58(),
             amount: amount.amount,
+            swapMode: swap_mode,
             slippageBps: String(slippage * 10000)
         });
         return await this.jupiter_request<JupiterQuote>(`quote?${params.toString()}`);

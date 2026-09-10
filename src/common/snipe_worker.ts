@@ -310,7 +310,6 @@ async function main() {
     const balance = (await trade.get_balance(KEYPAIR.publicKey, COMMITMENT)) / LAMPORTS_PER_SOL;
     CONFIG.spend_limit = Math.min(balance, CONFIG.spend_limit) - SNIPE_MIN_BUY;
 
-    // Warmup
     await trade.get_ltas(TRADER.get_lta_addresses());
     await warm_sender_connection();
     SENDER_WARM_TIMER = setInterval(() => void warm_sender_connection(), 5000);

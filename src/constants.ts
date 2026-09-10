@@ -104,6 +104,9 @@ export const SENDER_MAX_MIN_TIP: number = 1000000 / LAMPORTS_PER_SOL;
 export const SENDER_MAX_BUNDLE_SIZE = 4;
 export const SENDER_MAX_MIN_PRIORITY_FEE = 5000;
 export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
+export const MAX_TRANSACTION_SIGNATURES = 12;
+export const MAX_TRANSACTION_ACCOUNTS = 64;
+export const MAX_TRANSACTION_INSTRUCTIONS = 64;
 export const MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES = 64 * 1024 * 1024;
 export const LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES = 32 * 1024;
 export const COMPUTE_UNIT_BUFFER = 1.1;
@@ -157,11 +160,13 @@ export const RAYDIUM_DEFAULT_MINT_META = {
 };
 export const RAYDIUM_LAUNCHPAD_SELL_DISCRIMINATOR = new Uint8Array([149, 39, 222, 155, 211, 124, 152, 26]);
 export const RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR = new Uint8Array([250, 234, 13, 123, 213, 156, 19, 236]);
+export const RAYDIUM_LAUNCHPAD_BUY_EXACT_OUT_DISCRIMINATOR = new Uint8Array([24, 211, 116, 40, 105, 3, 153, 56]);
 export const RAYDIUM_CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
 export const RAYDIUM_CPMM_CREATOR_FEE_CLAIM_DISCRIMINATOR = new Uint8Array([20, 22, 86, 123, 198, 28, 219, 132]);
 export const RAYDIUM_CPMM_POOL_STATE_HEADER = new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]);
 export const RAYDIUM_CPMM_AUTHORITY = new PublicKey('GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL');
 export const RAYDIUM_CPMM_SWAP_DISCRIMINATOR = new Uint8Array([143, 190, 90, 218, 196, 30, 51, 222]);
+export const RAYDIUM_CPMM_SWAP_EXACT_OUT_DISCRIMINATOR = new Uint8Array([55, 217, 98, 86, 163, 74, 180, 173]);
 export const RAYDIUM_LTA_ACCOUNT = new PublicKey('DiVZACwhLuhxtVDm7tXqcTBch9WrvUkraHLWwcTPEura');
 export const RAYDIUM_LTA_ACCOUNT_EXTRA = new PublicKey('39TSYuyedPtTakGJdUpx7Qp9EHTuA93Yx2vGiRqyuYKD');
 
@@ -197,6 +202,7 @@ export const METEORA_DAMM_V2_STATE_HEADER = new Uint8Array([241, 154, 109, 4, 17
 export const METEORA_DBC_STATE_HEADER = new Uint8Array([213, 224, 5, 209, 98, 69, 119, 92]);
 export const METEORA_CONFIG_HEADER = new Uint8Array([26, 108, 14, 123, 116, 230, 129, 43]);
 export const METEORA_SWAP_DISCRIMINATOR = new Uint8Array([248, 198, 158, 145, 225, 117, 135, 200]);
+export const METEORA_SWAP2_DISCRIMINATOR = new Uint8Array([65, 75, 63, 76, 235, 91, 91, 136]);
 export const METEORA_DBC_CREATE_DISCRIMINATOR = new Uint8Array([140, 85, 215, 176, 102, 54, 104, 79]);
 export const METEORA_DBC_CREATE_TOKEN_2022_DISCRIMINATOR = new Uint8Array([169, 118, 51, 78, 145, 110, 220, 155]);
 export const METEORA_DBC_CLAIM_CREATOR_FEE_DISCRIMINATOR = new Uint8Array([82, 220, 250, 189, 3, 85, 107, 45]);
@@ -285,6 +291,7 @@ export const PUMP_SELL_DISCRIMINATOR = new Uint8Array([51, 230, 133, 164, 1, 127
 export const PUMP_BUY_V2_DISCRIMINATOR = new Uint8Array([184, 23, 238, 97, 103, 197, 211, 61]);
 export const PUMP_SELL_V2_DISCRIMINATOR = new Uint8Array([93, 246, 130, 60, 231, 233, 64, 178]);
 export const PUMP_AMM_BUY_EXACT_QUOTE_IN_DISCRIMINATOR = new Uint8Array([198, 46, 21, 82, 180, 217, 232, 112]);
+export const PUMP_AMM_BUY_EXACT_OUT_DISCRIMINATOR = new Uint8Array([102, 6, 61, 18, 1, 218, 235, 234]);
 export const PUMP_CREATE_V1_DISCRIMINATOR = new Uint8Array([24, 30, 200, 40, 5, 28, 7, 119]);
 export const PUMP_CREATE_V2_DISCRIMINATOR = new Uint8Array([214, 144, 76, 236, 95, 139, 49, 180]);
 export const PUMP_EXTEND_DISCRIMINATOR = new Uint8Array([234, 102, 194, 203, 150, 72, 62, 229]);
@@ -316,9 +323,11 @@ export const DROP_PRESALE_CSV = 'presaleusers.csv';
 
 // VOLUME CONSTANTS
 export const VOLUME_MAX_WALLETS_PER_EXEC = 20;
+export const VOLUME_SIGNATURE_FEE_LAMPORTS = 5000;
+export const VOLUME_WALLET_RENT_RESERVE_SOL = 0.0063;
+export const VOLUME_NATURAL_DEFAULTS = { wallet_cnt: 3, delay: 5, hold_min: 15, hold_max: 60 };
 export const VOLUME_TRADE_SLIPPAGE = 0.9;
-export const VOLUME_MAX_WALLETS_PER_TRADE_TX = 2;
-export const VOLUME_MAX_WALLETS_PER_COLLECT_TX = 10;
+export const VOLUME_MAX_WALLETS_PER_COLLECT_TX = 8;
 export const VOLUME_MAX_WALLETS_PER_FUND_TX = 20;
 
 // WALLET PNL CONSTANTS

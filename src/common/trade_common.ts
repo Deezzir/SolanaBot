@@ -62,6 +62,9 @@ import {
     SENDER_MAX_MIN_TIP,
     TransactionRelay,
     MAX_COMPUTE_UNIT_LIMIT,
+    MAX_TRANSACTION_SIGNATURES,
+    MAX_TRANSACTION_ACCOUNTS,
+    MAX_TRANSACTION_INSTRUCTIONS,
     MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
     LOADED_ACCOUNTS_DATA_PAGE_SIZE_BYTES,
     COMPUTE_UNIT_BUFFER,
@@ -725,7 +728,6 @@ export async function get_cost_basis(
         .filter((tx) => tx !== null)
         .map((tx) => calc_token_balance_changes(tx, account, mint.toBase58()))
         .filter((change) => change !== null);
-    // .filter((change) => change.change_tokens > 0);
 
     const purchases = changes.filter((change) => change.change_tokens > 0 && change.change_sol < 0);
     const total_tokens = purchases.reduce((sum: number, cur: TxBalanceChanges) => sum + cur.change_tokens, 0);
@@ -1471,7 +1473,7 @@ export function compile_tx(
         loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES
     }
 ): VersionedTransaction {
-    if (instructions.length === 0 || instructions.length > 64)
+    if (instructions.length === 0 || instructions.length > MAX_TRANSACTION_INSTRUCTIONS)
         throw new Error('Transaction instruction limit exceeded.');
     if (
         version === 1 &&
@@ -1493,7 +1495,7 @@ export function compile_tx(
                   0
               )
             : 0);
-    if (account_count > 64 || message.header.numRequiredSignatures > 12)
+    if (account_count > MAX_TRANSACTION_ACCOUNTS || message.header.numRequiredSignatures > MAX_TRANSACTION_SIGNATURES)
         throw new Error('Transaction account or signer limit exceeded.');
 
     const transaction = new VersionedTransaction(message);
@@ -1583,8 +1585,6 @@ async function submit_tx(
                     maxRetries: BigInt(TRADE_TX_RETRIES)
                 });
             } catch (error) {
-                // With RPC preflight enabled, this SDK error reports rejection before broadcast.
-                // AlreadyProcessed may refer to an earlier successful submission of these same bytes.
                 const rejected =
                     error instanceof SendTransactionError &&
                     !/already.*processed/i.test(error.transactionError.message);
@@ -1746,8 +1746,6 @@ export function pack_tx_groups<T>(
             })
         );
     const validate_capacity = (instructions: TransactionInstruction[]) => {
-        // Checks the complete wire size (v0: 1232, v1: 4096), accounts and signatures.
-        // V0 includes CU instructions and ALTs; v1 includes inline config and account keys.
         compile_tx(
             [...overhead, ...instructions, ...trailing_instructions],
             payer,
@@ -1945,6 +1943,7 @@ export async function create_lta(payer: Keypair): Promise<[PublicKey, String]> {
             const signature = await send_tx([instruction], [payer], PriorityLevel.HIGH);
             return [lt_address, signature];
         } catch (err) {
+            if (retries === 1 || (err instanceof TransactionSubmissionError && err.outcome === 'unknown')) throw err;
             retries--;
         }
     }

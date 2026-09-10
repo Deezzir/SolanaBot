@@ -149,6 +149,52 @@ Set `priority_level` to control transaction fees.
 }
 ```
 
+## Volume config (JSON)
+
+The `volume` subcommand optionally accepts a JSON config with the following fields:
+
+- `Fast` – Generates and funds new wallets each execution for atomic buy/sell cycles.
+- `Bump` – Generates and funds one wallet, then reuses it for atomic buy/sell cycles.
+- `Natural` – Uses existing non-reserve wallets from `keys.csv` (or `--keys`), with separate buys and delayed sells.
+
+Fast and Bump require a reserve wallet. Natural uses existing balances without funding or collecting wallets.
+
+### Required fields
+
+- `mint` (`string`, valid pubkey) – Token mint address
+- `executions` (`number`) – Positive integer; execution count for Fast, bump count for Bump, buy-round count for Natural
+- `min_sol_amount` (`number`) – Minimum SOL amount (> 0)
+- `max_sol_amount` (`number`) – Maximum SOL amount (≥ `min_sol_amount`)
+- `bundle_tip` (`number`) – **Fast/Bump only**; tip in SOL, currently ≥ 0.001. Omit for Natural
+
+SOL amounts are per-wallet funding budgets for Fast and buy amounts for Bump/Natural. Set equal bounds for a fixed amount.
+
+### Optional fields
+
+| Field        | Type     | Default                | Notes                                                                    |
+| ------------ | -------- | ---------------------- | ------------------------------------------------------------------------ |
+| `type`       | `string` | `Fast`                 | `Fast`, `Bump`, or `Natural`                                              |
+| `wallet_cnt` | `number` | `1`; `3` for Natural   | Integer 1–20; Fast: count per execution; Natural: subset cap; Bump: 1      |
+| `delay`      | `number` | `0`; `5` for Natural   | Base delay in seconds; ≥ 0, strictly > 0 for Natural                       |
+| `hold_min`   | `number` | `15`                   | Natural only; minimum holding time in seconds (> 0)                       |
+| `hold_max`   | `number` | `60`                   | Natural only; maximum holding time in seconds (≥ `hold_min`)              |
+
+### Example Config
+
+```json
+{
+    "type": "Natural",
+    "mint": "<TOKEN_MINT>",
+    "wallet_cnt": 3,
+    "min_sol_amount": 0.01,
+    "max_sol_amount": 0.05,
+    "executions": 20,
+    "delay": 5,
+    "hold_min": 15,
+    "hold_max": 60
+}
+```
+
 ## Token Metadata Config (JSON)
 
 The `create-metadata` subcommand accepts a JSON config with the following fields:
