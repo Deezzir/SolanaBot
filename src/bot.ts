@@ -1,6 +1,8 @@
+#!/usr/bin/env bun
+
 import figlet from 'figlet';
 import { Command, InvalidArgumentError, InvalidOptionArgumentError, Option } from 'commander';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import * as common from './common/common';
 import * as commands from './commands';
 import { exit } from 'process';
@@ -159,6 +161,11 @@ function single_dash_aliases(flags: string): string {
     return flags.replace(/^--([a-z]{2}), /, '-$1, ');
 }
 
+function get_version(): string {
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    return version;
+}
+
 //------------------------------------------------------------
 // MAIN
 // -----------------------------------------------------------
@@ -177,7 +184,7 @@ async function main() {
 
     const program = new Command();
 
-    program.version('1.0.0', '-v, --version').description('Solana Bot CLI');
+    program.version(get_version(), '-v, --version').description('Solana Bot CLI');
 
     program.addHelpText('beforeAll', figlet.textSync('Solana Bot', { horizontalLayout: 'full' }));
     program.showHelpAfterError('Use --help for additional information');

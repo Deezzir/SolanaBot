@@ -158,7 +158,4 @@ configs
 .DS_Store
 .worktrees/
 
-src/test*
-
-.github
 src/scripts
