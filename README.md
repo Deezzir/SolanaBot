@@ -1,5 +1,7 @@
 # Solana Bot
 
+[![npm version](https://img.shields.io/npm/v/solana-bot)](https://www.npmjs.com/package/solana-bot)
+
 ## Quick Start
 
 1. Open the terminal and clone the repo
