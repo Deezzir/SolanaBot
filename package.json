@@ -1,6 +1,6 @@
 {
     "name": "solana-bot",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "Solana bot",
     "main": "./src/bot.ts",
     "bin": {
