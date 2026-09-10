@@ -84,6 +84,26 @@ import { basename } from 'path';
 import base58 from 'bs58';
 import { define_decoder_struct, skip, u8, u64, i128, discriminator, pubkey, u16, bool } from '../common/struct_decoder';
 
+type State = ReturnType<typeof StateStruct.decode>;
+
+type AMMState = ReturnType<typeof AMMStateStruct.decode> & {
+    base_vault_balance: bigint;
+    quote_vault_balance: bigint;
+    supply: bigint;
+};
+
+type PumpClaimableAsset = trade.ClaimableAsset & {
+    vault: PublicKey;
+    vault_ata: PublicKey;
+    curve: 'v1' | 'v2';
+    quote_mint?: PublicKey;
+    quote_token_program?: PublicKey;
+    claim?: 'cashback' | 'incentives';
+    program?: PublicKey;
+    accumulator?: PublicKey;
+    global_accumulator?: PublicKey;
+};
+
 const PUMP_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Pump];
 
 class PumpMintMeta implements trade.IMintMeta {
@@ -212,8 +232,6 @@ const StateStruct = define_decoder_struct({
     is_cashback: bool()
 });
 
-type State = ReturnType<typeof StateStruct.decode>;
-
 const AMMStateStruct = define_decoder_struct({
     discriminator: discriminator(Buffer.from(PUMP_AMM_STATE_HEADER)),
     pool_bump: skip(u8().size),
@@ -251,24 +269,6 @@ const GlobalVolumeAccumulatorStruct = define_decoder_struct({
     padding: skip(24),
     mint: pubkey()
 });
-
-type AMMState = ReturnType<typeof AMMStateStruct.decode> & {
-    base_vault_balance: bigint;
-    quote_vault_balance: bigint;
-    supply: bigint;
-};
-
-type PumpClaimableAsset = trade.ClaimableAsset & {
-    vault: PublicKey;
-    vault_ata: PublicKey;
-    curve: 'v1' | 'v2';
-    quote_mint?: PublicKey;
-    quote_token_program?: PublicKey;
-    claim?: 'cashback' | 'incentives';
-    program?: PublicKey;
-    accumulator?: PublicKey;
-    global_accumulator?: PublicKey;
-};
 
 export class Trader implements trade.IProgramTrader {
     public get_name(): string {
@@ -655,15 +655,11 @@ export class Trader implements trade.IProgramTrader {
     }
 
     public async get_random_mints(count: number): Promise<PumpMintMeta[]> {
-        if (!Number.isSafeInteger(count) || count <= 0) return [];
-        const graduated_length = Math.floor((count + 1) * Math.random());
-        const ungraduated_length = count - graduated_length;
-        return (
-            await Promise.all([
-                this.get_random_graduated_mints(graduated_length),
-                this.get_random_ungraduated_mints(ungraduated_length)
-            ])
-        ).flat();
+        return trade.sample_mint_sources(
+            count,
+            (size) => this.get_random_graduated_mints(size),
+            (size) => this.get_random_ungraduated_mints(size)
+        );
     }
 
     public async create_token(
@@ -733,7 +729,7 @@ export class Trader implements trade.IProgramTrader {
             create_instructions.push(...buy_instructions);
         }
 
-        const ltas = await trade.get_ltas([PUMP_LTA_ACCOUNT]);
+        const ltas = global.TRANSACTION_VERSION === 1 ? [] : await trade.get_ltas([PUMP_LTA_ACCOUNT]);
         if (!traders)
             return await trade.retry_send_tx(
                 create_instructions,
@@ -745,34 +741,23 @@ export class Trader implements trade.IProgramTrader {
                 PUMP_COMPUTE_UNIT_LIMIT
             );
 
-        const generated_lta = await trade.generate_trade_lta(
-            creator,
-            traders.map(([trader]) => trader),
-            mint.publicKey
-        );
         mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
-        const txs = common.chunks(traders, chunk_size);
-        const buy_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Keypair[][] = [];
-        for (const tx of txs) {
-            const instructions: TransactionInstruction[] = [];
-            for (const trader of tx) {
-                const [buyer, buy_amount] = trader;
-                instructions.push(...(await this.get_buy_instructions(buy_amount, buyer, mint_meta, 0.05)));
-                mint_meta = this.update_mint_meta_reserves(mint_meta, buy_amount);
-            }
-            buy_instructions.push(instructions);
-            bundle_signers.push(tx.map((trader) => trader[0]));
+        const buyers: trade.InitialBuy[] = [];
+        for (const [buyer, amount] of traders) {
+            buyers.push({ buyer, instructions: await this.get_buy_instructions(amount, buyer, mint_meta, 0.05) });
+            mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
         }
-        return await trade.retry_send_bundle(
-            [create_instructions, ...buy_instructions],
-            [[creator, mint], ...bundle_signers],
-            bundle_tip!,
+        return trade.send_create_bundle({
+            instructions: create_instructions,
+            creator,
+            mint,
+            buyers,
+            tip: bundle_tip!,
             priority,
-            [generated_lta, ...ltas],
-            PUMP_COMPUTE_UNIT_LIMIT
-        );
+            alts: ltas,
+            token_program: mint_meta.token_program,
+            wallet_compute_units: PUMP_COMPUTE_UNIT_LIMIT!
+        });
     }
 
     public async default_mint_meta(mint: PublicKey, sol_price: number = 0, data?: object): Promise<PumpMintMeta> {
@@ -1206,22 +1191,12 @@ export class Trader implements trade.IProgramTrader {
         return n - fee;
     }
 
-    private calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
-        trade.validate_slippage(slippage);
-        return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
-    }
-
-    private calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
-        trade.validate_slippage(slippage);
-        return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
-    }
-
     private buy_v2_data(sol_amount_raw: bigint, token_amount_raw: bigint, slippage: number): Buffer {
         const instruction_buf = Buffer.from(PUMP_BUY_V2_DISCRIMINATOR);
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
         const slippage_buf = Buffer.alloc(8);
-        slippage_buf.writeBigUInt64LE(this.calc_slippage_up(sol_amount_raw, slippage), 0);
+        slippage_buf.writeBigUInt64LE(trade.slippage_up(sol_amount_raw, slippage), 0);
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
@@ -1230,7 +1205,7 @@ export class Trader implements trade.IProgramTrader {
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
         const slippage_buf = Buffer.alloc(8);
-        slippage_buf.writeBigUInt64LE(this.calc_slippage_down(sol_amount_raw, slippage), 0);
+        slippage_buf.writeBigUInt64LE(trade.slippage_down(sol_amount_raw, slippage), 0);
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
@@ -1239,7 +1214,7 @@ export class Trader implements trade.IProgramTrader {
         const sol_amount_buf = Buffer.alloc(8);
         sol_amount_buf.writeBigUInt64LE(sol_amount_raw, 0);
         const token_amount_buf = Buffer.alloc(8);
-        token_amount_buf.writeBigUInt64LE(this.calc_slippage_down(token_amount_raw, slippage), 0);
+        token_amount_buf.writeBigUInt64LE(trade.slippage_down(token_amount_raw, slippage), 0);
         return Buffer.concat([instruction_buf, sol_amount_buf, token_amount_buf, Buffer.from([0])]);
     }
 
@@ -1247,7 +1222,7 @@ export class Trader implements trade.IProgramTrader {
         const data = Buffer.alloc(25);
         Buffer.from(PUMP_AMM_BUY_EXACT_OUT_DISCRIMINATOR).copy(data);
         data.writeBigUInt64LE(token_amount_raw, 8);
-        data.writeBigUInt64LE(this.calc_slippage_up(sol_amount_raw, slippage), 16);
+        data.writeBigUInt64LE(trade.slippage_up(sol_amount_raw, slippage), 16);
         return data;
     }
 
@@ -1256,7 +1231,7 @@ export class Trader implements trade.IProgramTrader {
         const token_amount_buf = Buffer.alloc(8);
         token_amount_buf.writeBigUInt64LE(token_amount_raw, 0);
         const slippage_buf = Buffer.alloc(8);
-        slippage_buf.writeBigUInt64LE(this.calc_slippage_down(sol_amount_raw, slippage), 0);
+        slippage_buf.writeBigUInt64LE(trade.slippage_down(sol_amount_raw, slippage), 0);
         return Buffer.concat([instruction_buf, token_amount_buf, slippage_buf]);
     }
 
@@ -1742,7 +1717,7 @@ export class Trader implements trade.IProgramTrader {
             SystemProgram.transfer({
                 fromPubkey: buyer.publicKey,
                 toPubkey: wsol_ata,
-                lamports: this.calc_slippage_up(sol_amount_raw, slippage)
+                lamports: trade.slippage_up(sol_amount_raw, slippage)
             }),
             createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({

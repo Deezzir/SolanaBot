@@ -1,5 +1,6 @@
 import { PublicKey } from '@solana/web3.js';
 import * as common from '../common/common';
+import * as trade from '../common/trade_common';
 import {
     BONK_CONFIG,
     BONK_CONFIG_2,
@@ -29,25 +30,25 @@ export class BonkTrader extends RaydiumTrader {
     }
 
     public override async get_random_mints(count: number): Promise<RaydiumMintMeta[]> {
-        if (count <= 0) return [];
+        if (!Number.isSafeInteger(count) || count <= 0) return [];
         const url = new URL(`${RAYDIUM_LAUNCHPAD_API_URL}/get/list`);
         url.searchParams.set('sort', 'new');
-        url.searchParams.set('size', String(Math.min(count, 100)));
+        url.searchParams.set('size', String(Math.min(100, Math.max(20, count * 3))));
         url.searchParams.set('mintType', 'default');
         url.searchParams.set(
             'platformId',
             [BONK_CONFIG_2, BONK_CONFIG_3, BONK_CONFIG].map((config) => config.toBase58()).join(',')
         );
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
             const data = await response.json();
-            if (!data?.success) return [];
-            const mints = await Promise.all(
-                common
-                    .pick_random(data.data.rows as { mint: string }[], count)
-                    .map((item) => this.get_mint_meta(new PublicKey(item.mint)))
+            if (!response.ok || !data?.success || !Array.isArray(data.data?.rows))
+                throw new Error('Bonk mint discovery failed.');
+            return trade.resolve_random_mints(
+                data.data.rows.map((row: { mint: string }) => row.mint),
+                count,
+                (mint) => this.get_mint_meta(mint)
             );
-            return mints.filter((mint): mint is RaydiumMintMeta => mint !== undefined);
         } catch (error) {
             common.error(common.red(`Failed fetching the mints: ${error}`));
             return [];

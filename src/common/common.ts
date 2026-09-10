@@ -169,16 +169,10 @@ export function save_rescue_key(keypair: Keypair, target_file_path: string, pref
     const public_key = keypair.publicKey.toString();
     const date = new Date().toLocaleDateString();
 
-    if (existsSync(target_file_path)) {
-        try {
-            const row = [key_name, private_key, false, public_key, date].join(',');
-            appendFileSync(target_file_path, row + '\n', 'utf8');
-            return true;
-        } catch (err) {
-            error(red(`Failed to write a wallet to a rescue file: ${err}`));
-        }
-    }
-    return false;
+    if (!existsSync(target_file_path)) throw new Error(`Rescue file does not exist: ${target_file_path}`);
+    const row = [key_name, private_key, false, public_key, date].join(',');
+    appendFileSync(target_file_path, row + '\n', 'utf8');
+    return true;
 }
 
 export async function get_wallets(keys_csv_path: string): Promise<Wallet[]> {
@@ -343,12 +337,6 @@ export const fetch_sol_price = async (): Promise<number> => {
         });
 };
 
-export function read_bytes(buf: Buffer, offset: number, length: number): Buffer {
-    const end = offset + length;
-    if (buf.byteLength < end) throw new RangeError('range out of bounds');
-    return buf.subarray(offset, end);
-}
-
 export function read_biguint_le(buf: Buffer, offset: number, length: number): bigint {
     switch (length) {
         case 1:
@@ -463,19 +451,6 @@ export function zip<T, A>(arr_1: readonly T[], arr_2: readonly A[]): [T, A][] {
     return arr_1.map((e, i) => [e, arr_2[i]]) as [T, A][];
 }
 
-export function pick_random<T>(arr: readonly T[], count: number): T[] {
-    const result: T[] = [];
-    const used = new Set<number>();
-
-    while (result.length < count && result.length < arr.length) {
-        const idx = Math.floor(Math.random() * arr.length);
-        if (!used.has(idx)) {
-            used.add(idx);
-            result.push(arr[idx]);
-        }
-    }
-    return result;
-}
 export function read_pubkeys(address_file_path: string): PublicKey[] {
     const pubkeys: PublicKey[] = [];
     try {

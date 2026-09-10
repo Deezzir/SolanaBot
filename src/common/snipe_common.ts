@@ -67,6 +67,24 @@ export type WorkerConfig = {
     rpc_rate_limit_state: SharedArrayBuffer;
 };
 
+type WorkerJob = {
+    worker: Worker;
+    index: number;
+    job: Promise<void>;
+};
+
+type WorkerMessage = 'stop' | 'buy' | 'mint' | 'sell' | 'config' | 'priority_fee';
+
+export interface ISniper {
+    snipe(wallets: common.Wallet[], sol_price: number): Promise<void>;
+    setup_config(keys_cnt: number, json_config?: object): Promise<void>;
+}
+
+enum Method {
+    Wait = 0,
+    Snipe = 1
+}
+
 export function update_config(config: WorkerConfig | BotConfig, key: string, value: string): [boolean, string?] {
     switch (key) {
         case 'trade_interval':
@@ -123,24 +141,6 @@ export function update_config(config: WorkerConfig | BotConfig, key: string, val
             return [false, 'Invalid key.'];
             break;
     }
-}
-
-type WorkerJob = {
-    worker: Worker;
-    index: number;
-    job: Promise<void>;
-};
-
-enum Method {
-    Wait = 0,
-    Snipe = 1
-}
-
-type WorkerMessage = 'stop' | 'buy' | 'mint' | 'sell' | 'config' | 'priority_fee';
-
-export interface ISniper {
-    snipe(wallets: common.Wallet[], sol_price: number): Promise<void>;
-    setup_config(keys_cnt: number, json_config?: object): Promise<void>;
 }
 
 export abstract class SniperBase implements ISniper {

@@ -18,15 +18,15 @@ import {
     getTokenDecoder as getToken2022Decoder
 } from '@solana-program/token-2022';
 
-export const TOKEN_PROGRAM_ID = new PublicKey(TOKEN_PROGRAM_ADDRESS);
-export const TOKEN_2022_PROGRAM_ID = new PublicKey(TOKEN_2022_PROGRAM_ADDRESS);
-export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
-
 type TokenInstruction = {
     programAddress: string;
     accounts: readonly { address: string; role: number }[];
     data: ArrayLike<number>;
 };
+
+export const TOKEN_PROGRAM_ID = new PublicKey(TOKEN_PROGRAM_ADDRESS);
+export const TOKEN_2022_PROGRAM_ID = new PublicKey(TOKEN_2022_PROGRAM_ADDRESS);
+export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
 
 function instruction(input: TokenInstruction, signer?: PublicKey): TransactionInstruction {
     const authority = signer?.toBase58();

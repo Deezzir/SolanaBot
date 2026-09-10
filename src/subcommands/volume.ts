@@ -21,13 +21,7 @@ import {
     COMMANDS_BUY_SLIPPAGE,
     COMMANDS_SELL_SLIPPAGE,
     PriorityLevel,
-    TRADE_RETRIES,
-    TRADE_RETRY_INTERVAL_MS,
-    JITO_MIN_TIP,
-    JITO_TIP_ACCOUNTS,
-    SENDER_MAX_MIN_TIP,
     SENDER_MAX_MIN_PRIORITY_FEE,
-    SENDER_TIP_ACCOUNTS,
     MAX_COMPUTE_UNIT_LIMIT,
     MAX_TRANSACTION_SIGNATURES,
     PROGRAM_COMPUTE_UNIT_LIMITS,
@@ -56,6 +50,15 @@ type VolumeConfig = {
     hold_max?: number;
 };
 
+type Position = {
+    buy_signature: string;
+    fill?: Awaited<ReturnType<typeof get_natural_fill>>;
+    sell_at: number;
+    sell_signature?: string;
+};
+
+type WalletTrade = { keypair: Keypair; instructions: TransactionInstruction[] };
+
 export enum VolumeType {
     Fast = 'Fast',
     Natural = 'Natural',
@@ -69,6 +72,7 @@ export async function execute_fast(
 ): Promise<common.Wallet[]> {
     const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create the volume rescue file.');
+    common.log(`Recovery wallets: ${target_file}`);
     const mint_meta = await trader.get_mint_meta(volume_config.mint);
     if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
     if (
@@ -101,29 +105,36 @@ export async function execute_fast(
         let lta: AddressLookupTableAccount | undefined;
         if ((global.TRANSACTION_VERSION ?? 0) === 0) {
             common.log(`\nCreating Address Lookup Table Account...`);
-            lta = await trade.generate_trade_lta(funder, keypairs, volume_config.mint);
+            lta = await trade.generate_trade_lta(funder, keypairs, volume_config.mint, mint_meta.token_program);
             common.log(common.green(`LTA created: ${lta.key.toBase58()}`));
         }
 
-        common.log('\nFunding the wallets...');
-        await fund_bundles(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
+        try {
+            common.log('\nFunding the wallets...');
+            await fund_bundles(keypairs_with_amounts, funder, volume_config.bundle_tip, lta);
 
-        common.log(`\nTrading the tokens...`);
-        await buy_sell_bundles(
-            keypairs_with_amounts,
-            trader,
-            await trader.update_mint_meta(mint_meta),
-            volume_config.bundle_tip,
-            lta
-        );
-
-        common.log('\nCollecting the funds from the wallets...');
-        await collect_bundles(keypairs, funder, volume_config.bundle_tip, lta);
-        if (lta) {
-            await trade.deactivate_ltas(funder, [lta]);
-            common.log(
-                `LTA deactivated: ${lta.key.toBase58()}. Its rent can be reclaimed with close-ltas after cooldown.`
+            common.log(`\nTrading the tokens...`);
+            await buy_sell_bundles(
+                keypairs_with_amounts,
+                trader,
+                await trader.update_mint_meta(mint_meta),
+                volume_config.bundle_tip,
+                lta
             );
+
+            common.log('\nCollecting the funds from the wallets...');
+            await collect_bundles(keypairs, funder, volume_config.bundle_tip, lta);
+        } finally {
+            if (lta) {
+                await trade
+                    .deactivate_ltas(funder, [lta])
+                    .then(() =>
+                        common.log(
+                            `LTA deactivated: ${lta.key.toBase58()}. Its rent can be reclaimed with close-ltas after cooldown.`
+                        )
+                    )
+                    .catch((error) => common.warn(`Could not deactivate ALT ${lta!.key}: ${error}`));
+            }
         }
 
         if (exec + 1 < volume_config.executions && volume_config.delay > 0) {
@@ -146,7 +157,7 @@ export async function execute_natural(
         wallet: common.Wallet;
         last_used: number;
         buy_at?: number;
-        position?: { baseline: bigint; amount: TokenAmount; slot: bigint; sell_at: number };
+        position?: Position;
     }[] = (await get_natural_wallets(wallets, config)).map(({ wallet }) => ({ wallet, last_used: 0 }));
     let mint_meta = await trader.get_mint_meta(config.mint);
     if (!mint_meta) throw new Error('Failed to fetch mint metadata.');
@@ -155,10 +166,25 @@ export async function execute_natural(
     const hold_max = config.hold_max ?? VOLUME_NATURAL_DEFAULTS.hold_max;
     let next_execution = Date.now();
     let executions = 0;
-    let buys = 0;
+    const buys = new Set<string>();
     let sells = 0;
+    let stopping = false;
+    const failures: string[] = [];
+    const unresolved: { wallet: string; position: Position }[] = [];
+    const stop_buys = (error: unknown) => {
+        stopping = true;
+        failures.push(String(error));
+        common.warn(`Natural volume is stopping new buys: ${error}`);
+        for (const state of states) {
+            state.buy_at = undefined;
+            if (state.position) state.position.sell_at = Date.now();
+        }
+    };
 
-    while (executions < config.executions || states.some((state) => state.buy_at !== undefined || state.position)) {
+    while (
+        (!stopping && executions < config.executions) ||
+        states.some((state) => state.buy_at !== undefined || state.position)
+    ) {
         const now = Date.now();
         const seller = states
             .filter((state) => state.position)
@@ -166,58 +192,92 @@ export async function execute_natural(
         const buyer = states.filter((state) => state.buy_at !== undefined).sort((a, b) => a.buy_at! - b.buy_at!)[0];
         if (seller?.position && seller.position.sell_at <= now) {
             const position = seller.position;
-            const ata = await trade.calc_ata(seller.wallet.keypair.publicKey, config.mint, mint_meta.token_program);
-            const account = await global.CONNECTION.getAccountInfo(ata, {
-                commitment: COMMITMENT,
-                minContextSlot: position.slot
-            });
-            const available = account ? decode_token_account(account).amount - position.baseline : 0n;
-            const bought = BigInt(position.amount.amount);
-            const amount = available < bought ? available : bought;
-            if (amount > 0n) {
-                mint_meta = await trader.update_mint_meta(mint_meta);
-                const signature = await trader.sell_token(
-                    { amount: amount.toString(), decimals: position.amount.decimals, uiAmount: null },
-                    seller.wallet.keypair,
-                    mint_meta,
-                    COMMANDS_SELL_SLIPPAGE,
-                    PriorityLevel.HIGH
-                );
-                common.log(common.green(`Natural sell | ${seller.wallet.name} | ${signature}`));
-                sells++;
-            } else
-                common.log(
-                    common.yellow(`Skipping ${seller.wallet.name}: the run's token balance is no longer available.`)
-                );
-            seller.position = undefined;
-            seller.last_used = Date.now();
+            try {
+                if (position.sell_signature) {
+                    const tx = await trade.retry_get_tx(position.sell_signature);
+                    if (!tx?.meta) throw new Error(`Sell outcome is still unknown: ${position.sell_signature}`);
+                    if (tx.meta.err === null) {
+                        sells++;
+                        seller.position = undefined;
+                        continue;
+                    }
+                    throw new Error(`Sell failed on-chain: ${position.sell_signature}`);
+                }
+                const fill = (position.fill ??= await get_natural_fill(
+                    position.buy_signature,
+                    seller.wallet.keypair.publicKey,
+                    mint_meta
+                ));
+                buys.add(position.buy_signature);
+                const ata = await trade.calc_ata(seller.wallet.keypair.publicKey, config.mint, mint_meta.token_program);
+                const account = await global.CONNECTION.getAccountInfo(ata, {
+                    commitment: COMMITMENT,
+                    minContextSlot: fill.slot
+                });
+                const available = account ? decode_token_account(account).amount - fill.baseline : 0n;
+                const bought = BigInt(fill.amount.amount);
+                const amount = available < bought ? available : bought;
+                if (amount > 0n) {
+                    mint_meta = await trader.update_mint_meta(mint_meta);
+                    const signature = await trader.sell_token(
+                        { amount: amount.toString(), decimals: fill.amount.decimals, uiAmount: null },
+                        seller.wallet.keypair,
+                        mint_meta,
+                        COMMANDS_SELL_SLIPPAGE,
+                        PriorityLevel.HIGH
+                    );
+                    common.log(common.green(`Natural sell | ${seller.wallet.name} | ${signature}`));
+                    sells++;
+                } else
+                    common.log(
+                        common.yellow(`Skipping ${seller.wallet.name}: the run's token balance is no longer available.`)
+                    );
+                seller.position = undefined;
+                seller.last_used = Date.now();
+            } catch (error) {
+                stop_buys(error);
+                if (error instanceof trade.TransactionSubmissionError && error.outcome === 'unknown') {
+                    position.sell_signature = error.signatures[0];
+                } else {
+                    unresolved.push({ wallet: seller.wallet.keypair.publicKey.toBase58(), position });
+                    seller.position = undefined;
+                }
+            }
             continue;
         }
         if (buyer?.buy_at !== undefined && buyer.buy_at <= now) {
             buyer.buy_at = undefined;
             buyer.last_used = now;
-            const balance = await trade.get_balance(buyer.wallet.keypair.publicKey, COMMITMENT);
-            const maximum = natural_buy_limit(balance, config);
-            if (maximum < config.min_sol_amount) {
-                common.log(common.yellow(`Skipping ${buyer.wallet.name}: insufficient SOL for a buy and fees.`));
-                continue;
+            try {
+                const balance = await trade.get_balance(buyer.wallet.keypair.publicKey, COMMITMENT);
+                const maximum = natural_buy_limit(balance, config);
+                if (maximum < config.min_sol_amount) {
+                    common.log(common.yellow(`Skipping ${buyer.wallet.name}: insufficient SOL for a buy and fees.`));
+                    continue;
+                }
+                const amount = common.uniform_random(config.min_sol_amount, maximum);
+                mint_meta = await trader.update_mint_meta(mint_meta);
+                const signature = await trader.buy_token(
+                    amount,
+                    buyer.wallet.keypair,
+                    mint_meta,
+                    COMMANDS_BUY_SLIPPAGE,
+                    PriorityLevel.HIGH
+                );
+                common.log(common.green(`Natural buy | ${buyer.wallet.name} | ${amount} SOL | ${signature}`));
+                buyer.position = {
+                    buy_signature: signature.toString(),
+                    sell_at: Date.now() + common.uniform_random(hold_min, hold_max) * 1000
+                };
+                buys.add(signature.toString());
+            } catch (error) {
+                stop_buys(error);
+                if (error instanceof trade.TransactionSubmissionError && error.outcome === 'unknown')
+                    buyer.position = { buy_signature: error.signatures[0], sell_at: Date.now() };
             }
-            const amount = common.uniform_random(config.min_sol_amount, maximum);
-            mint_meta = await trader.update_mint_meta(mint_meta);
-            const signature = await trader.buy_token(
-                amount,
-                buyer.wallet.keypair,
-                mint_meta,
-                COMMANDS_BUY_SLIPPAGE,
-                PriorityLevel.HIGH
-            );
-            common.log(common.green(`Natural buy | ${buyer.wallet.name} | ${amount} SOL | ${signature}`));
-            const fill = await get_natural_fill(signature.toString(), buyer.wallet.keypair.publicKey, mint_meta);
-            buyer.position = { ...fill, sell_at: Date.now() + common.uniform_random(hold_min, hold_max) * 1000 };
-            buys++;
             continue;
         }
-        if (executions < config.executions && next_execution <= now) {
+        if (!stopping && executions < config.executions && next_execution <= now) {
             const candidates = states
                 .filter((state) => !state.position && state.buy_at === undefined && now - state.last_used >= interval)
                 .map((state) => ({ state, rank: Math.random() * Math.max(interval, now - state.last_used) }))
@@ -239,11 +299,22 @@ export async function execute_natural(
         const next_event = Math.min(
             seller?.position?.sell_at ?? Infinity,
             buyer?.buy_at ?? Infinity,
-            executions < config.executions ? next_execution : Infinity
+            !stopping && executions < config.executions ? next_execution : Infinity
         );
         await common.sleep(Math.min(1000, Math.max(1, next_event - Date.now())));
     }
-    common.log(common.green(`\nNatural volume completed | ${buys} buys | ${sells} sells\n`));
+    if (failures.length) {
+        const pending = unresolved.map(
+            ({ wallet, position }) =>
+                `${wallet}: buy ${position.buy_signature}, sell ${position.sell_signature ?? 'not confirmed'}, ` +
+                `purchased tokens ${position.fill?.amount.amount ?? 'unresolved'}`
+        );
+        throw new Error(
+            `Natural volume stopped | ${buys.size} confirmed buys | ${sells} confirmed sells.\n` +
+                [...failures, ...pending].join('\n')
+        );
+    }
+    common.log(common.green(`\nNatural volume completed | ${buys.size} buys | ${sells} sells\n`));
 }
 
 async function get_natural_wallets(
@@ -290,33 +361,25 @@ async function get_natural_fill(
     mint_meta: trade.IMintMeta
 ): Promise<{ baseline: bigint; amount: TokenAmount; slot: bigint }> {
     const ata = await trade.calc_ata(owner, mint_meta.mint_pubkey, mint_meta.token_program);
-    for (let attempt = 0; attempt < TRADE_RETRIES; attempt++) {
-        const tx = await common.retry_with_backoff(() =>
-            global.CONNECTION.getParsedTransaction(signature, {
-                commitment: COMMITMENT,
-                maxSupportedTransactionVersion: 1
-            })
+    const tx = await trade.retry_get_tx(signature);
+    if (tx) {
+        if (!tx.meta || tx.meta.err || !tx.meta.preTokenBalances || !tx.meta.postTokenBalances)
+            throw new Error(`Missing successful token balance metadata for Natural buy ${signature}.`);
+        const index = tx.transaction.message.accountKeys.findIndex((key) => key.pubkey.equals(ata));
+        const before = tx.meta.preTokenBalances.find(
+            (entry) => entry.accountIndex === index && entry.mint === mint_meta.token_mint
         );
-        if (tx) {
-            if (!tx.meta || tx.meta.err || !tx.meta.preTokenBalances || !tx.meta.postTokenBalances)
-                throw new Error(`Missing successful token balance metadata for Natural buy ${signature}.`);
-            const index = tx.transaction.message.accountKeys.findIndex((key) => key.pubkey.equals(ata));
-            const before = tx.meta.preTokenBalances.find(
-                (entry) => entry.accountIndex === index && entry.mint === mint_meta.token_mint
-            );
-            const after = tx.meta.postTokenBalances.find(
-                (entry) => entry.accountIndex === index && entry.mint === mint_meta.token_mint
-            );
-            const baseline = BigInt(before?.uiTokenAmount.amount ?? '0');
-            const received = BigInt(after?.uiTokenAmount.amount ?? '0') - baseline;
-            if (!after || received <= 0n) throw new Error(`No token credit found for Natural buy ${signature}.`);
-            return {
-                baseline,
-                slot: tx.slot,
-                amount: { amount: received.toString(), decimals: after.uiTokenAmount.decimals, uiAmount: null }
-            };
-        }
-        if (attempt + 1 < TRADE_RETRIES) await common.sleep(TRADE_RETRY_INTERVAL_MS);
+        const after = tx.meta.postTokenBalances.find(
+            (entry) => entry.accountIndex === index && entry.mint === mint_meta.token_mint
+        );
+        const baseline = BigInt(before?.uiTokenAmount.amount ?? '0');
+        const received = BigInt(after?.uiTokenAmount.amount ?? '0') - baseline;
+        if (!after || received <= 0n) throw new Error(`No token credit found for Natural buy ${signature}.`);
+        return {
+            baseline,
+            slot: tx.slot,
+            amount: { amount: received.toString(), decimals: after.uiTokenAmount.decimals, uiAmount: null }
+        };
     }
     throw new Error(
         `Natural buy ${signature} was submitted, but its token credit could not be read. Stopping without resubmitting.`
@@ -339,6 +402,7 @@ export async function execute_bump(
 
     const target_file = common.setup_rescue_file();
     if (!target_file) throw new Error('Failed to create the volume rescue file.');
+    common.log(`Recovery wallets: ${target_file}`);
     const wallet = await Keypair.generate();
     common.save_rescue_key(wallet, target_file, 0, 0);
     const close_instructions = await get_token_close_instructions(
@@ -354,7 +418,8 @@ export async function execute_bump(
     for (let exec = 0; exec < volume_config.executions; exec++) {
         mint_meta = await trader.update_mint_meta(mint_meta);
         const amount = common.uniform_random(volume_config.min_sol_amount, volume_config.max_sol_amount);
-        const required = amount * (1 + VOLUME_TRADE_SLIPPAGE) + budget.cycle_cost + VOLUME_WALLET_RENT_RESERVE_SOL;
+        const cycle_cost = estimate_bump_cost(volume_config, mint_meta.platform_fee).cycle_cost;
+        const required = amount * (1 + VOLUME_TRADE_SLIPPAGE) + cycle_cost + VOLUME_WALLET_RENT_RESERVE_SOL;
         const wallet_balance = await trade.get_balance(wallet.publicKey, COMMITMENT);
         if (wallet_balance < Math.ceil(required * LAMPORTS_PER_SOL))
             throw new Error(
@@ -566,12 +631,8 @@ async function fund_bundles(
     });
 
     const version = global.TRANSACTION_VERSION ?? 0;
-    const tip_account = get_volume_tip_account();
-    const tip = SystemProgram.transfer({
-        fromPubkey: funder.publicKey,
-        toPubkey: tip_account,
-        lamports: common.sol_to_lamports(bundle_tip)
-    });
+    const tip = trade.create_tip_instruction(funder.publicKey, bundle_tip);
+    const tip_account = tip.keys[1].pubkey;
     const transactions = trade.pack_tx_groups(
         instructions,
         (instruction) => [instruction],
@@ -614,12 +675,8 @@ async function collect_bundles(
         )
     ).filter((pair) => pair !== undefined);
     const version = global.TRANSACTION_VERSION ?? 0;
-    const tip_account = get_volume_tip_account();
-    const tip = SystemProgram.transfer({
-        fromPubkey: receiver.publicKey,
-        toPubkey: tip_account,
-        lamports: common.sol_to_lamports(bundle_tip)
-    });
+    const tip = trade.create_tip_instruction(receiver.publicKey, bundle_tip);
+    const tip_account = tip.keys[1].pubkey;
     const transactions = trade.pack_tx_groups(
         filtered_keypairs,
         (wallet) => [
@@ -680,33 +737,13 @@ async function buy_sell_bundles(
 ): Promise<void> {
     if (wallets.length === 0) throw new Error('No wallets to buy/sell');
     const harvest_fees = await has_transfer_fee(mint_meta);
-    type WalletTrade = { keypair: Keypair; instructions: TransactionInstruction[] };
     const version = global.TRANSACTION_VERSION ?? 0;
     const wallet_limit = Math.min(wallets.length, get_trade_wallet_limit(trader));
-    const tip_account = get_volume_tip_account();
-    const ltas: AddressLookupTableAccount[] = [];
-    const check_capacity = (tx: WalletTrade[]) => {
-        const payer = tx[0].keypair.publicKey;
-        const tip = SystemProgram.transfer({
-            fromPubkey: payer,
-            toPubkey: tip_account,
-            lamports: common.sol_to_lamports(bundle_tip)
-        });
-        trade.pack_tx_groups([tx], (entries) => entries.flatMap((entry) => entry.instructions), payer, version, ltas, [
-            tip
-        ]);
-    };
-    let wallet_index = 0;
-    while (wallet_index < wallets.length) {
-        const bundle: WalletTrade[][] = [];
-        let tx: WalletTrade[] = [];
-        while (wallet_index < wallets.length && bundle.length < trade.get_bundle_size()) {
-            if (tx.length === wallet_limit) {
-                bundle.push(tx);
-                tx = [];
-                if (bundle.length === trade.get_bundle_size()) break;
-            }
-            const [keypair, amount] = wallets[wallet_index];
+    for (const wallet_group of common.chunks(wallets, wallet_limit * trade.get_bundle_size())) {
+        const entries: WalletTrade[] = [];
+        const ltas = new Map<string, AddressLookupTableAccount>();
+        if (lta) ltas.set(lta.key.toBase58(), lta);
+        for (const [keypair, amount] of wallet_group) {
             const adjusted_amount = calc_buy_amount(
                 amount,
                 VOLUME_TRADE_SLIPPAGE,
@@ -727,36 +764,35 @@ async function buy_sell_bundles(
                 ...sell_instrs,
                 ...(await get_token_close_instructions(keypair.publicKey, mint_meta, harvest_fees))
             ];
-            for (const table of [...(trade_ltas ?? []), ...(lta ? [lta] : [])])
-                if (!ltas.some((existing) => existing.key.equals(table.key))) ltas.push(table);
-            const entry = { keypair, instructions };
-            try {
-                check_capacity([...tx, entry]);
-            } catch (error) {
-                if (tx.length === 0) throw error;
-                bundle.push(tx);
-                tx = [];
-                if (bundle.length === trade.get_bundle_size()) break;
-                check_capacity([entry]);
-            }
-            tx.push(entry);
-            wallet_index++;
+            for (const table of trade_ltas ?? []) ltas.set(table.key.toBase58(), table);
+            entries.push({ keypair, instructions });
         }
-        if (tx.length) bundle.push(tx);
-        for (const entries of bundle) check_capacity(entries);
-        const signature = await trade.send_bundle(
-            bundle.map((entries) => entries.flatMap((entry) => entry.instructions)),
-            bundle.map((entries) => entries.map((entry) => entry.keypair)),
-            bundle_tip,
-            undefined,
-            ltas,
-            undefined,
+        const tables = [...ltas.values()];
+        const tip_account = trade.create_tip_instruction(entries[0].keypair.publicKey, bundle_tip).keys[1].pubkey;
+        const transactions = trade.pack_tx_groups(
+            entries,
+            (entry) => entry.instructions,
+            (entry) => entry.keypair.publicKey,
             version,
-            { tip_account }
+            tables,
+            (payer) => [trade.create_tip_instruction(payer, bundle_tip, undefined, tip_account)],
+            wallet_limit
         );
-        common.log(common.green(`Trade Bundle completed, signature: ${signature}`));
-        await common.sleep(trade.get_bundle_interval_ms());
-        mint_meta = await trader.update_mint_meta(mint_meta);
+        for (const bundle of common.chunks(transactions, trade.get_bundle_size())) {
+            const signature = await trade.send_bundle(
+                bundle.map((entries) => entries.flatMap((entry) => entry.instructions)),
+                bundle.map((entries) => entries.map((entry) => entry.keypair)),
+                bundle_tip,
+                undefined,
+                tables,
+                undefined,
+                version,
+                { tip_account }
+            );
+            common.log(common.green(`Trade Bundle completed, signature: ${signature}`));
+            await common.sleep(trade.get_bundle_interval_ms());
+            mint_meta = await trader.update_mint_meta(mint_meta);
+        }
     }
 }
 
@@ -963,103 +999,76 @@ export async function setup_config(json_config?: object): Promise<VolumeConfig> 
     }
 }
 
-async function validate_json_config(json: any): Promise<VolumeConfig> {
+function validate_json_config(json: unknown): VolumeConfig {
     if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('Volume config must be an object.');
-    const natural = json.type === VolumeType.Natural;
-    json = {
-        type: VolumeType.Fast,
-        wallet_cnt: 1,
-        delay: 0,
-        ...(natural ? { ...VOLUME_NATURAL_DEFAULTS, bundle_tip: 0 } : {}),
-        ...json
+    const input = json as Record<string, unknown>;
+    const type = input.type ?? VolumeType.Fast;
+    if (type !== VolumeType.Fast && type !== VolumeType.Natural && type !== VolumeType.Bump)
+        throw new Error(`Type must be one of: ${Object.values(VolumeType).join(', ')}.`);
+    const natural = type === VolumeType.Natural;
+    const number_field = (name: string, fallback?: number): number => {
+        const value = input[name] ?? fallback;
+        if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${name} must be a finite number.`);
+        return value;
     };
-    const required_fields = [
-        'mint',
-        'executions',
-        'min_sol_amount',
-        'max_sol_amount',
-        ...(!natural ? ['bundle_tip'] : [])
-    ];
-    for (const field of required_fields) {
-        if (json[field] === undefined || json[field] === null) throw new Error(`Missing required field: ${field}`);
-    }
-    const { mint, wallet_cnt, min_sol_amount, max_sol_amount, executions, delay, bundle_tip, type } = json;
-    if (type !== undefined) {
-        if (typeof type !== 'string' || !Object.values(VolumeType).includes(type as VolumeType)) {
-            throw new Error(`Type must be a valid string, values: ${Object.values(VolumeType)}`);
-        }
-        json.type = type as VolumeType;
-    }
+    const mint = input.mint;
+    const wallet_cnt = number_field('wallet_cnt', natural ? VOLUME_NATURAL_DEFAULTS.wallet_cnt : 1);
+    const min_sol_amount = number_field('min_sol_amount');
+    const max_sol_amount = number_field('max_sol_amount');
+    const executions = number_field('executions');
+    const delay = number_field('delay', natural ? VOLUME_NATURAL_DEFAULTS.delay : 0);
+    const bundle_tip = number_field('bundle_tip', natural ? 0 : undefined);
+    const hold_min = natural ? number_field('hold_min', VOLUME_NATURAL_DEFAULTS.hold_min) : undefined;
+    const hold_max = natural ? number_field('hold_max', VOLUME_NATURAL_DEFAULTS.hold_max) : undefined;
     if (typeof mint !== 'string' || !common.is_valid_pubkey(mint)) {
         throw new Error('Invalid token mint public key.');
     }
-    if (typeof min_sol_amount !== 'number' || !Number.isFinite(min_sol_amount) || min_sol_amount <= 0) {
+    if (min_sol_amount <= 0) {
         throw new Error('Invalid min_sol_amount number. Must be greater than 0.');
     }
-    if (
-        typeof max_sol_amount !== 'number' ||
-        !Number.isFinite(max_sol_amount) ||
-        max_sol_amount <= 0 ||
-        max_sol_amount < min_sol_amount
-    ) {
+    if (max_sol_amount < min_sol_amount) {
         throw new Error('Invalid max_sol_amount number. Must be greater than 0 and min_sol_amount.');
     }
     if (!Number.isSafeInteger(executions) || executions <= 0) {
         throw new Error('Invalid executions number. Must be greater than 0.');
     }
-    if (
-        natural
-            ? bundle_tip !== 0
-            : typeof bundle_tip !== 'number' || !Number.isFinite(bundle_tip) || bundle_tip < get_minimum_bundle_tip()
-    ) {
+    if (natural ? bundle_tip !== 0 : bundle_tip < get_minimum_bundle_tip()) {
         if (natural) throw new Error('Natural uses individual transactions; omit bundle_tip.');
         throw new Error(`Invalid bundle_tip. Must be at least ${get_minimum_bundle_tip()} SOL.`);
     }
-    if (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) {
+    if (delay < 0 || !Number.isFinite(delay * 1000)) {
         throw new Error('Invalid delay. Must be a finite number greater than or equal to 0.');
     }
-    if (
-        (json.type === VolumeType.Fast || natural) &&
-        (!Number.isSafeInteger(wallet_cnt) || wallet_cnt <= 0 || wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC)
-    ) {
+    if (!Number.isSafeInteger(wallet_cnt) || wallet_cnt <= 0 || wallet_cnt > VOLUME_MAX_WALLETS_PER_EXEC) {
         throw new Error(
             `Invalid wallet_cnt number. Must be greater than 0 and less than or equal to ${VOLUME_MAX_WALLETS_PER_EXEC}.`
         );
     }
-    if (natural) {
-        if (delay <= 0 || !Number.isFinite(delay * 1000)) throw new Error('Natural requires a positive delay.');
-        if (
-            typeof json.hold_min !== 'number' ||
-            !Number.isFinite(json.hold_min) ||
-            json.hold_min <= 0 ||
-            typeof json.hold_max !== 'number' ||
-            !Number.isFinite(json.hold_max * 1000) ||
-            json.hold_max < json.hold_min
-        )
+    if (hold_min !== undefined && hold_max !== undefined) {
+        if (delay <= 0) throw new Error('Natural requires a positive delay.');
+        if (hold_min <= 0 || !Number.isFinite(hold_max * 1000) || hold_max < hold_min)
             throw new Error('Natural holding times must be positive, with hold_max greater than or equal to hold_min.');
     }
-    if (json.type === VolumeType.Bump && wallet_cnt !== 1) throw new Error('Bump uses one temporary wallet.');
-    json.mint = new PublicKey(mint);
+    if (type === VolumeType.Bump && wallet_cnt !== 1) throw new Error('Bump uses one temporary wallet.');
     common.sol_to_lamports(min_sol_amount);
     common.sol_to_lamports(max_sol_amount);
     common.sol_to_lamports(bundle_tip);
 
-    return json as VolumeConfig;
+    return {
+        type,
+        mint: new PublicKey(mint),
+        wallet_cnt,
+        min_sol_amount,
+        max_sol_amount,
+        executions,
+        delay,
+        bundle_tip,
+        hold_min,
+        hold_max
+    };
 }
 
-function get_minimum_bundle_tip(): number {
-    return (global.TRANSACTION_RELAY ?? TransactionRelay.Sender) === TransactionRelay.Sender
-        ? SENDER_MAX_MIN_TIP
-        : JITO_MIN_TIP;
-}
-
-function get_volume_tip_account(): PublicKey {
-    const accounts =
-        (global.TRANSACTION_RELAY ?? TransactionRelay.Sender) === TransactionRelay.Sender
-            ? SENDER_TIP_ACCOUNTS
-            : JITO_TIP_ACCOUNTS;
-    return new PublicKey(accounts[Math.floor(Math.random() * accounts.length)]);
-}
+const get_minimum_bundle_tip = trade.get_minimum_bundle_tip;
 
 function get_trade_wallet_limit(trader: trade.IProgramTrader): number {
     const units = PROGRAM_COMPUTE_UNIT_LIMITS[trader.get_name() as common.Program];

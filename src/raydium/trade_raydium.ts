@@ -57,6 +57,19 @@ import {
 import base58 from 'bs58';
 import { define_decoder_struct, skip, u8, u64, discriminator, pubkey } from '../common/struct_decoder';
 
+type State = ReturnType<typeof StateStruct.decode>;
+
+type CPMMState = ReturnType<typeof CPMMStateStruct.decode> & {
+    token_0_reserves: bigint;
+    token_1_reserves: bigint;
+    supply: bigint;
+};
+
+type RaydiumClaimableAsset = trade.ClaimableAsset & {
+    state: ReturnType<typeof CPMMStateStruct.decode>;
+    pool: PublicKey;
+};
+
 const RAYDIUM_COMPUTE_UNIT_LIMIT = PROGRAM_COMPUTE_UNIT_LIMITS[common.Program.Raydium];
 
 const StateStruct = define_decoder_struct({
@@ -87,8 +100,6 @@ const StateStruct = define_decoder_struct({
     creator: pubkey(),
     padding: skip(8 * u64().size)
 });
-
-type State = ReturnType<typeof StateStruct.decode>;
 
 const CPMMStateStruct = define_decoder_struct({
     discriminator: discriminator(Buffer.from(RAYDIUM_CPMM_POOL_STATE_HEADER)),
@@ -121,17 +132,6 @@ const CPMMStateStruct = define_decoder_struct({
     creator_fees_token_1: u64(),
     padding: skip(28 * u64().size)
 });
-
-type CPMMState = ReturnType<typeof CPMMStateStruct.decode> & {
-    token_0_reserves: bigint;
-    token_1_reserves: bigint;
-    supply: bigint;
-};
-
-type RaydiumClaimableAsset = trade.ClaimableAsset & {
-    state: ReturnType<typeof CPMMStateStruct.decode>;
-    pool: PublicKey;
-};
 
 export class RaydiumMintMeta implements trade.IMintMeta {
     mint!: string;
@@ -546,14 +546,11 @@ export class RaydiumTrader implements trade.IProgramTrader {
     }
 
     public async get_random_mints(count: number): Promise<RaydiumMintMeta[]> {
-        if (!Number.isSafeInteger(count) || count <= 0) return [];
-        const graduated_count = Math.floor((count + 1) * Math.random());
-        return (
-            await Promise.all([
-                this.get_random_graduated_mints(graduated_count),
-                this.get_random_ungraduated_mints(count - graduated_count)
-            ])
-        ).flat();
+        return trade.sample_mint_sources(
+            count,
+            (size) => this.get_random_graduated_mints(size),
+            (size) => this.get_random_ungraduated_mints(size)
+        );
     }
 
     private async get_random_ungraduated_mints(count: number): Promise<RaydiumMintMeta[]> {
@@ -649,7 +646,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         );
         if (sol_amount > 0)
             create_instructions.push(...(await this.get_buy_instructions(sol_amount, creator, mint_meta, 0.05)));
-        const ltas = await trade.get_ltas(this.get_lta_addresses());
+        const ltas = global.TRANSACTION_VERSION === 1 ? [] : await trade.get_ltas(this.get_lta_addresses());
         if (!traders)
             return trade.retry_send_tx(
                 create_instructions,
@@ -660,32 +657,23 @@ export class RaydiumTrader implements trade.IProgramTrader {
                 ltas,
                 this.compute_unit_limit
             );
-        const generated_lta = await trade.generate_trade_lta(
-            creator,
-            traders.map(([buyer]) => buyer),
-            mint.publicKey
-        );
         if (sol_amount > 0) mint_meta = this.update_mint_meta_reserves(mint_meta, sol_amount);
-        const buy_instructions: TransactionInstruction[][] = [];
-        const bundle_signers: Keypair[][] = [];
-        const chunk_size = Math.ceil(traders.length / (trade.get_bundle_size() - 1));
-        for (const group of common.chunks(traders, chunk_size)) {
-            const instructions: TransactionInstruction[] = [];
-            for (const [buyer, amount] of group) {
-                instructions.push(...(await this.get_buy_instructions(amount, buyer, mint_meta, 0.05)));
-                mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
-            }
-            buy_instructions.push(instructions);
-            bundle_signers.push(group.map(([buyer]) => buyer));
+        const buyers: trade.InitialBuy[] = [];
+        for (const [buyer, amount] of traders) {
+            buyers.push({ buyer, instructions: await this.get_buy_instructions(amount, buyer, mint_meta, 0.05) });
+            mint_meta = this.update_mint_meta_reserves(mint_meta, amount);
         }
-        return trade.retry_send_bundle(
-            [create_instructions, ...buy_instructions],
-            [[creator, mint], ...bundle_signers],
-            bundle_tip!,
+        return trade.send_create_bundle({
+            instructions: create_instructions,
+            creator,
+            mint,
+            buyers,
+            tip: bundle_tip!,
             priority,
-            [generated_lta, ...ltas],
-            this.compute_unit_limit
-        );
+            alts: ltas,
+            token_program: mint_meta.token_program,
+            wallet_compute_units: this.compute_unit_limit!
+        });
     }
 
     protected get_create_platform(): PublicKey {
@@ -1076,16 +1064,6 @@ export class RaydiumTrader implements trade.IProgramTrader {
         return (amount * fee_rate + 999_999n) / 1_000_000n;
     }
 
-    protected calc_slippage_up(sol_amount: bigint, slippage: number): bigint {
-        trade.validate_slippage(slippage);
-        return sol_amount + (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
-    }
-
-    protected calc_slippage_down(sol_amount: bigint, slippage: number): bigint {
-        trade.validate_slippage(slippage);
-        return sol_amount - (sol_amount * BigInt(Math.floor(slippage * 10000))) / BigInt(10000);
-    }
-
     protected swap_data(amount_in: bigint, minimum_amount_out: bigint, op: 'buy' | 'sell'): Buffer {
         const discriminator = op === 'buy' ? RAYDIUM_LAUNCHPAD_BUY_DISCRIMINATOR : RAYDIUM_LAUNCHPAD_SELL_DISCRIMINATOR;
         const instruction_buf = Buffer.from(discriminator);
@@ -1116,7 +1094,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
     }
 
     private buy_exact_out_data(sol_amount: bigint, token_amount: bigint, slippage: number, cpmm: boolean): Buffer {
-        const max_sol_amount = this.calc_slippage_up(sol_amount, slippage);
+        const max_sol_amount = trade.slippage_up(sol_amount, slippage);
         const data = Buffer.alloc(cpmm ? 24 : 32);
         Buffer.from(
             cpmm ? RAYDIUM_CPMM_SWAP_EXACT_OUT_DISCRIMINATOR : RAYDIUM_LAUNCHPAD_BUY_EXACT_OUT_DISCRIMINATOR
@@ -1157,10 +1135,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const wsol_ata = await trade.calc_ata(buyer.publicKey, SOL_MINT);
 
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
-        const token_amount_raw = this.calc_slippage_down(
-            this.calc_token_amount_raw(sol_amount_raw, mint_meta),
-            slippage
-        );
+        const token_amount_raw = trade.slippage_down(this.calc_token_amount_raw(sol_amount_raw, mint_meta), slippage);
         const instruction_data =
             exact_out_amount === undefined
                 ? this.swap_data(sol_amount_raw, token_amount_raw, 'buy')
@@ -1172,7 +1147,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             SystemProgram.transfer({
                 fromPubkey: buyer.publicKey,
                 toPubkey: wsol_ata,
-                lamports: this.calc_slippage_up(sol_amount_raw, slippage)
+                lamports: trade.slippage_up(sol_amount_raw, slippage)
             }),
             createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({
@@ -1231,7 +1206,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const creator_volume_accumulator = await this.calc_volume_accumulator(creator);
 
         const token_amount_raw = BigInt(token_amount.amount);
-        const sol_amount_raw = this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage);
+        const sol_amount_raw = trade.slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage);
 
         const instruction_data = this.swap_data(token_amount_raw, sol_amount_raw, 'sell');
         const token_ata = await trade.calc_ata(seller.publicKey, mint);
@@ -1292,10 +1267,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const config = new PublicKey(mint_meta.config);
 
         const sol_amount_raw = common.sol_to_lamports(sol_amount);
-        const token_amount_raw = this.calc_slippage_down(
-            this.calc_token_amount_raw(sol_amount_raw, mint_meta),
-            slippage
-        );
+        const token_amount_raw = trade.slippage_down(this.calc_token_amount_raw(sol_amount_raw, mint_meta), slippage);
 
         const instruction_data =
             exact_out_amount === undefined
@@ -1316,7 +1288,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
             SystemProgram.transfer({
                 fromPubkey: buyer.publicKey,
                 toPubkey: wsol_ata,
-                lamports: this.calc_slippage_up(sol_amount_raw, slippage)
+                lamports: trade.slippage_up(sol_amount_raw, slippage)
             }),
             createSyncNativeInstruction(wsol_ata),
             new TransactionInstruction({
@@ -1369,7 +1341,7 @@ export class RaydiumTrader implements trade.IProgramTrader {
         const token_amount_raw = BigInt(token_amount.amount);
         const instruction_data = this.swap_cpmm_data(
             token_amount_raw,
-            this.calc_slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage)
+            trade.slippage_down(this.calc_sol_amount_raw(token_amount_raw, mint_meta), slippage)
         );
         const token_ata = await trade.calc_ata(
             seller.publicKey,

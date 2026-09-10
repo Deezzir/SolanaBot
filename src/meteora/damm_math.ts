@@ -1,16 +1,3 @@
-export const FEE_DENOMINATOR = 1_000_000_000n;
-export const BASIS_POINT_MAX = 10_000n;
-const SCALE_OFFSET = 64n;
-const MAX_FEE_NUMERATOR_V0 = 500_000_000n; // 50%
-const MAX_FEE_NUMERATOR_V1 = 990_000_000n; // 99%
-export const DYNAMIC_FEE_SCALING_FACTOR = 100_000_000_000n;
-export const DYNAMIC_FEE_ROUNDING_OFFSET = DYNAMIC_FEE_SCALING_FACTOR - 1n;
-
-export enum TradeDirection {
-    AtoB,
-    BtoA
-}
-
 type DAMMV2Quote = {
     claiming_fee: bigint;
     compounding_fee: bigint;
@@ -23,25 +10,11 @@ type DAMMV2Quote = {
     next_sqrt_price: bigint;
 };
 
-enum CollectFeeMode {
-    BothToken,
-    OnlyB,
-    Compounding
-}
-
 type FeeMode = {
     fees_on_input: boolean;
     fees_on_token_a: boolean;
     has_referral: boolean;
 };
-
-enum BaseFeeMode {
-    FeeTimeSchedulerLinear,
-    FeeTimeSchedulerExponential,
-    RateLimiter,
-    FeeMarketCapSchedulerLinear,
-    FeeMarketCapSchedulerExponential
-}
 
 interface SwapAmountFromInput {
     output_amount: bigint;
@@ -73,6 +46,77 @@ interface DAMMV2QuotePool {
 interface LiquidityHandler {
     calculate_a_to_b_from_amount_in(amount_in: bigint): SwapAmountFromInput;
     calculate_b_to_a_from_amount_in(amount_in: bigint): SwapAmountFromInput;
+}
+
+interface BaseFeeHandler {
+    get_base_fee_numerator_from_included_fee_amount(
+        current_point: bigint,
+        activation_point: bigint,
+        trade_direction: TradeDirection,
+        included_fee_amount: bigint,
+        init_sqrt_price: bigint,
+        current_sqrt_price: bigint
+    ): bigint;
+    get_base_fee_numerator_from_excluded_fee_amount(
+        currentPoint: bigint,
+        activationPoint: bigint,
+        tradeDirection: TradeDirection,
+        excludedFeeAmount: bigint,
+        initSqrtPrice: bigint,
+        currentSqrtPrice: bigint
+    ): bigint;
+}
+
+type PodAlignedFeeTimeScheduler = {
+    cliff_fee_numerator: bigint;
+    number_of_period: bigint;
+    period_frequency: bigint;
+    reduction_factor: bigint;
+    base_fee_mode: BaseFeeMode;
+};
+
+type PodAlignedFeeRateLimiter = {
+    cliff_fee_numerator: bigint;
+    fee_increment_bps: bigint;
+    max_limiter_duration: bigint;
+    max_fee_bps: bigint;
+    reference_amount: bigint;
+};
+
+type PodAlignedFeeMarketCapScheduler = {
+    cliff_fee_numerator: bigint;
+    number_of_period: number;
+    sqrt_price_step_bps: number;
+    scheduler_expiration_duration: number;
+    reduction_factor: bigint;
+    base_fee_mode: BaseFeeMode;
+};
+
+export const FEE_DENOMINATOR = 1_000_000_000n;
+export const BASIS_POINT_MAX = 10_000n;
+export const DYNAMIC_FEE_SCALING_FACTOR = 100_000_000_000n;
+const SCALE_OFFSET = 64n;
+const MAX_FEE_NUMERATOR_V0 = 500_000_000n; // 50%
+const MAX_FEE_NUMERATOR_V1 = 990_000_000n; // 99%
+const DYNAMIC_FEE_ROUNDING_OFFSET = DYNAMIC_FEE_SCALING_FACTOR - 1n;
+
+export enum TradeDirection {
+    AtoB,
+    BtoA
+}
+
+enum CollectFeeMode {
+    BothToken,
+    OnlyB,
+    Compounding
+}
+
+enum BaseFeeMode {
+    FeeTimeSchedulerLinear,
+    FeeTimeSchedulerExponential,
+    RateLimiter,
+    FeeMarketCapSchedulerLinear,
+    FeeMarketCapSchedulerExponential
 }
 
 class CompoundingLiquidityHandler implements LiquidityHandler {
@@ -204,25 +248,6 @@ class ConcentratedLiquidityHandler implements LiquidityHandler {
             amount_left: 0n
         };
     }
-}
-
-interface BaseFeeHandler {
-    get_base_fee_numerator_from_included_fee_amount(
-        current_point: bigint,
-        activation_point: bigint,
-        trade_direction: TradeDirection,
-        included_fee_amount: bigint,
-        init_sqrt_price: bigint,
-        current_sqrt_price: bigint
-    ): bigint;
-    get_base_fee_numerator_from_excluded_fee_amount(
-        currentPoint: bigint,
-        activationPoint: bigint,
-        tradeDirection: TradeDirection,
-        excludedFeeAmount: bigint,
-        initSqrtPrice: bigint,
-        currentSqrtPrice: bigint
-    ): bigint;
 }
 
 class FeeTimeScheduler implements BaseFeeHandler {
@@ -623,31 +648,6 @@ function split_fees(
     };
 }
 
-type PodAlignedFeeTimeScheduler = {
-    cliff_fee_numerator: bigint;
-    number_of_period: bigint;
-    period_frequency: bigint;
-    reduction_factor: bigint;
-    base_fee_mode: BaseFeeMode;
-};
-
-type PodAlignedFeeRateLimiter = {
-    cliff_fee_numerator: bigint;
-    fee_increment_bps: bigint;
-    max_limiter_duration: bigint;
-    max_fee_bps: bigint;
-    reference_amount: bigint;
-};
-
-type PodAlignedFeeMarketCapScheduler = {
-    cliff_fee_numerator: bigint;
-    number_of_period: number;
-    sqrt_price_step_bps: number;
-    scheduler_expiration_duration: number;
-    reduction_factor: bigint;
-    base_fee_mode: BaseFeeMode;
-};
-
 function decode_pod_aligned_fee_time_scheduler(data: Buffer): PodAlignedFeeTimeScheduler {
     if (data.byteLength < 32) throw new Error('Invalid DAMM v2 time fee data.');
     return {
@@ -902,18 +902,8 @@ export function quote_exact_in(
     let actual_referral_fee = 0n;
 
     const handler = get_liquidity_handler(pool);
-    const max_fee_numerator = get_max_fee_numerator(BigInt(pool.fee_version));
     const fee_mode = get_fee_mode(pool, dir, false);
-    const trade_fee_numerator = get_total_trading_fee_from_included_fee_amount(
-        pool,
-        current_point,
-        pool.activation_point,
-        amount_in,
-        dir,
-        max_fee_numerator,
-        pool.init_sqrt_price,
-        pool.sqrt_price
-    );
+    const trade_fee_numerator = damm_fee_numerator(pool, amount_in, dir, current_point);
 
     let actual_amount_in: bigint;
     if (fee_mode.fees_on_input) {
@@ -976,4 +966,22 @@ export function quote_exact_in(
     result.next_sqrt_price = apply_swap_result(pool, result, fee_mode, dir);
 
     return result;
+}
+
+export function damm_fee_numerator(
+    pool: DAMMV2QuotePool,
+    amount: bigint,
+    dir: TradeDirection,
+    current_point: bigint
+): bigint {
+    return get_total_trading_fee_from_included_fee_amount(
+        pool,
+        current_point,
+        pool.activation_point,
+        amount,
+        dir,
+        get_max_fee_numerator(BigInt(pool.fee_version)),
+        pool.init_sqrt_price,
+        pool.sqrt_price
+    );
 }

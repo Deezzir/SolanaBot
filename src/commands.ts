@@ -10,8 +10,7 @@ import {
     PriorityLevel,
     SENDER_ENDPOINTS,
     SOL_MINT,
-    TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
-    TRADE_MAX_WALLETS_PER_CREATE_TX,
+    TRADE_RETRIES,
     WALLETS_FILE_HEADERS
 } from './constants';
 import * as common from './common/common';
@@ -218,16 +217,6 @@ export async function create_token(
         [common.Program.Pump, common.Program.Bonk, common.Program.Raydium, common.Program.Meteora],
         'Token creation'
     );
-    const max_bundle_wallets = Math.min(
-        TRADE_MAX_WALLETS_PER_CREATE_BUNDLE,
-        (trade.get_bundle_size() - 1) * TRADE_MAX_WALLETS_PER_CREATE_TX
-    );
-    if (wallets && (wallets.length === 0 || wallets.length > max_bundle_wallets))
-        throw new Error(
-            `Invalid wallet count: ${wallets.length}. The number of wallets should be between 1 and ${max_bundle_wallets}`
-        );
-    if (bundle_tip && !wallets) throw new Error('Bundle tip is only available for bundle buy.');
-    if (wallets && !bundle_tip) throw new Error('Bundle tip is required for bundle buy.');
     if (wallets && (!min || !max)) throw new Error('Both min and max should be provided, when bundle buy is enabled.');
 
     common.log('Creating a token...\n');
@@ -641,14 +630,20 @@ export async function warmup(
     min?: number,
     max?: number
 ): Promise<void> {
-    require_program([common.Program.Pump, common.Program.Bonk], 'Warmup');
+    require_program(
+        [common.Program.Pump, common.Program.Bonk, common.Program.Raydium, common.Program.Meteora],
+        'Warmup'
+    );
     const get_random_mints = async (trader: trade.IProgramTrader, count: number) => {
-        let mints = [];
-        do {
-            mints = await trader.get_random_mints(count);
-            if (mints.length < count) await common.sleep(2000);
-        } while (mints.length < count);
-        return mints;
+        const mints = new Map<string, trade.IMintMeta>();
+        for (let attempt = 0; attempt < TRADE_RETRIES && mints.size < count; attempt++) {
+            for (const mint of await trader.get_random_mints(count)) mints.set(mint.token_mint, mint);
+            if (mints.size < count && attempt + 1 < TRADE_RETRIES) await common.sleep(2000);
+        }
+        if (!mints.size) throw new Error('No tradable mints found after repeated discovery attempts.');
+        if (mints.size < count)
+            common.warn(`Found ${mints.size} of ${count} requested mints; using the available mints.`);
+        return [...mints.values()].slice(0, count);
     };
 
     min = min || 1;
@@ -661,8 +656,8 @@ export async function warmup(
 
     common.log(common.yellow(`Warming up ${wallets.length} accounts...`));
 
-    const token_cnts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (max - min) + min));
-    if (token_cnts.length !== wallets.length) throw new Error();
+    const token_counts = Array.from({ length: wallets.length }, () => Math.floor(Math.random() * (max - min) + min));
+    if (token_counts.length !== wallets.length) throw new Error();
     const trader = get_trader();
 
     for (const [i, wallet] of wallets.entries()) {
@@ -678,10 +673,10 @@ export async function warmup(
             continue;
         }
 
-        const mints = await get_random_mints(trader, token_cnts[i]);
+        const mints = await get_random_mints(trader, token_counts[i]);
         common.log(
             common.yellow(
-                `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id}) with ${token_cnts[i]} tokens...`
+                `\nWarming up ${buyer.publicKey.toString().padEnd(44, ' ')} ${wallet.name} (${wallet.id}) with ${token_counts[i]} tokens...`
             )
         );
         for (const mint of mints) {

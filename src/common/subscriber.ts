@@ -3,11 +3,6 @@ import * as common from './common';
 import { WS_URL } from '../constants';
 import { deserialize_parsed_transaction, type RawParsedTransaction } from './trade_common';
 
-export enum SubscriberType {
-    Logs = 'logs',
-    Tx = 'tx'
-}
-
 export interface Subscriber {
     type: SubscriberType;
     subscribe(on_logs: (data: any) => void): Promise<void>;
@@ -41,6 +36,11 @@ interface TransactionSubscribeNotification {
 }
 
 export type TransactionSubscribeMessage = JsonRpcResponse | TransactionSubscribeNotification;
+
+export enum SubscriberType {
+    Logs = 'logs',
+    Tx = 'tx'
+}
 
 export function deserialize_transaction_notification(
     message: TransactionSubscribeMessage
